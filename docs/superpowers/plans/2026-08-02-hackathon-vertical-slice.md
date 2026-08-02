@@ -557,7 +557,7 @@ Expected: PASS, including Axe checks for marketplace routes.
 
 Commit: `git add web && git commit -m "feat: show live inference marketplace"`
 
-### Task 15: Implement billing and provider operations
+### Task 15: Implement billing and provider operations ✅
 
 **Files:**
 - Create: `web/src/features/billing/Billing.tsx`

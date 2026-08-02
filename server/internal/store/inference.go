@@ -93,6 +93,53 @@ func (s *Store) UpdateProviderCapacity(ctx context.Context, machineID string, ca
 	return tx.Commit()
 }
 
+func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string, capacity v1.Capacity, chainID uint64, contractAddress string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=0,updated_at=now() WHERE machine_id=$1`, machineID); err != nil {
+		return err
+	}
+	var wallet string
+	if err := tx.QueryRowContext(ctx, `SELECT a.wallet_address FROM machines m JOIN accounts a ON a.id=m.account_id WHERE m.id=$1 AND m.revoked_at IS NULL`, machineID).Scan(&wallet); err != nil {
+		return err
+	}
+	for _, offered := range capacity.Offers {
+		if offered.OfferHash == "" {
+			continue
+		}
+		var input, output, compute, bond string
+		var exit uint64
+		err := tx.QueryRowContext(ctx, `SELECT o.input_per_million::text,o.output_per_million::text,o.compute_per_second::text,a.provider_bond::text,a.bond_exit_available_at FROM chain_offers o JOIN chain_accounts a ON a.chain_id=o.chain_id AND a.contract_address=o.contract_address AND lower(a.address)=lower(o.provider) WHERE o.chain_id=$1 AND lower(o.contract_address)=lower($2) AND lower(o.provider)=lower($3) AND o.offer_id=$4 AND o.version=$5 AND o.model_hash=$6 AND o.capability_hash=$7`, chainID, contractAddress, wallet, offered.OfferHash, offered.PriceVersion, offered.ModelHash, offered.CapabilityHash).Scan(&input, &output, &compute, &bond, &exit)
+		if err != nil || bond == "0" || exit != 0 {
+			return ErrIneligibleRoute
+		}
+		inputValue, e1 := strconv.ParseUint(input, 10, 64)
+		outputValue, e2 := strconv.ParseUint(output, 10, 64)
+		computeValue, e3 := strconv.ParseUint(compute, 10, 64)
+		if e1 != nil || e2 != nil || e3 != nil || inputValue > ^uint64(0)-outputValue || inputValue+outputValue > ^uint64(0)-computeValue {
+			return ErrIneligibleRoute
+		}
+		var backendID string
+		if err := tx.QueryRowContext(ctx, `INSERT INTO backends(id,machine_id,kind,model,enabled) VALUES ($1,$2,$3,$4,true) ON CONFLICT (machine_id,kind,model) DO UPDATE SET enabled=true RETURNING id`, `backend:`+machineID+":"+offered.OfferID, machineID, offered.BackendKind, offered.Model).Scan(&backendID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO offers(id,backend_id,version,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id,version) DO NOTHING`, offered.OfferID, backendID, offered.PriceVersion, input, output, compute); err != nil {
+			return err
+		}
+		available := uint32(0)
+		if capacity.Available > 0 {
+			available = 1
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO provider_routing_state(machine_id,offer_id,model,capabilities,price_version,confirmed_bond,healthy,capacity,maximum_cost) VALUES ($1,$2,$3,$4,$5,true,true,$6,$7) ON CONFLICT(machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,capabilities=EXCLUDED.capabilities,price_version=EXCLUDED.price_version,confirmed_bond=true,healthy=true,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,updated_at=now()`, machineID, offered.OfferID, offered.Model, []string{"text", "stream"}, offered.PriceVersion, available, decimal(inputValue+outputValue+computeValue)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) OpenSession(ctx context.Context, accountID string) (string, uint64, error) {
 	var id, balance string
 	err := s.db.QueryRowContext(ctx, `SELECT id, confirmed_balance_wei::text FROM sessions WHERE account_id=$1 AND state='open' ORDER BY created_at LIMIT 1`, accountID).Scan(&id, &balance)

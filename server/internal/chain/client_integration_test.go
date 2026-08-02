@@ -68,6 +68,18 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if err := owner.OpenSession(ctx, sessionID, big.NewInt(500), header.Time+3600); err != nil {
 		t.Fatal(err)
 	}
+	if err := owner.RequestWithdrawal(ctx, big.NewInt(100)); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Claim(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.RequestBondExit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.RequestSessionClose(ctx, sessionID); err != nil {
+		t.Fatal(err)
+	}
 	header, _ = owner.Header(ctx)
 	receipt := Receipt{
 		RequestId: crypto.Keccak256Hash([]byte("request")), SessionId: sessionID,
@@ -102,7 +114,7 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql"} {
+	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql", "000007_provider_operations.sql"} {
 		if err := repository.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", migration)); err != nil {
 			t.Fatal(err)
 		}
@@ -193,5 +205,19 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 		if err := indexer.db.QueryRowContext(ctx, query, indexer.chainID.String(), address.Hex()).Scan(&count); err != nil || count < minimum {
 			t.Fatalf("%s count=%d err=%v", table, count, err)
 		}
+	}
+	var customerBalance, ownerClaimable, providerBond, providerClaimable, spent string
+	var bondExit, closeAvailable uint64
+	if err := indexer.db.QueryRowContext(ctx, `SELECT customer_balance::text,claimable::text FROM chain_accounts WHERE chain_id=$1 AND contract_address=$2 AND address=$3`, indexer.chainID.String(), address.Hex(), owner.Address().Hex()).Scan(&customerBalance, &ownerClaimable); err != nil {
+		t.Fatal(err)
+	}
+	if err := indexer.db.QueryRowContext(ctx, `SELECT provider_bond::text,claimable::text,bond_exit_available_at FROM chain_accounts WHERE chain_id=$1 AND contract_address=$2 AND address=$3`, indexer.chainID.String(), address.Hex(), provider.Address().Hex()).Scan(&providerBond, &providerClaimable, &bondExit); err != nil {
+		t.Fatal(err)
+	}
+	if err := indexer.db.QueryRowContext(ctx, `SELECT spent::text,close_available_at FROM chain_sessions WHERE chain_id=$1 AND contract_address=$2 AND session_id=$3`, indexer.chainID.String(), address.Hex(), sessionID.Hex()).Scan(&spent, &closeAvailable); err != nil {
+		t.Fatal(err)
+	}
+	if customerBalance != "400" || ownerClaimable != "3" || providerBond != "100" || providerClaimable != "57" || spent != "60" || bondExit == 0 || closeAvailable == 0 {
+		t.Fatalf("bad economic projection customer=%s ownerClaimable=%s bond=%s providerClaimable=%s spent=%s bondExit=%d close=%d", customerBalance, ownerClaimable, providerBond, providerClaimable, spent, bondExit, closeAvailable)
 	}
 }

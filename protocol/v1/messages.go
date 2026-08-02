@@ -126,13 +126,30 @@ func (m Hello) Validate() error {
 }
 
 type OfferCapacity struct {
-	OfferID      string `json:"offer_id"`
-	Model        string `json:"model"`
-	PriceVersion uint64 `json:"price_version"`
+	OfferID        string `json:"offer_id"`
+	Model          string `json:"model"`
+	PriceVersion   uint64 `json:"price_version"`
+	BackendKind    string `json:"backend_kind,omitempty"`
+	OfferHash      string `json:"offer_hash,omitempty"`
+	ModelHash      string `json:"model_hash,omitempty"`
+	CapabilityHash string `json:"capability_hash,omitempty"`
 }
 
 func (o OfferCapacity) Validate() error {
 	if strings.TrimSpace(o.OfferID) == "" || strings.TrimSpace(o.Model) == "" || o.PriceVersion == 0 {
+		return ErrInvalidMessage
+	}
+	hashes := []string{o.OfferHash, o.ModelHash, o.CapabilityHash}
+	provided := 0
+	for _, hash := range hashes {
+		if hash != "" {
+			provided++
+			if len(hash) != 66 || !strings.HasPrefix(hash, "0x") {
+				return ErrInvalidMessage
+			}
+		}
+	}
+	if provided != 0 && (provided != len(hashes) || strings.TrimSpace(o.BackendKind) == "") {
 		return ErrInvalidMessage
 	}
 	return nil

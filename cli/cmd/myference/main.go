@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/kunalshah017/myference/cli/internal/account"
 	"github.com/kunalshah017/myference/cli/internal/backend"
 	"github.com/kunalshah017/myference/cli/internal/backend/ollama"
@@ -195,7 +196,7 @@ func runServe(ctx context.Context, path string, output io.Writer) error {
 		if !slices.ContainsFunc(models, func(model backend.Model) bool { return model.Name == item.Model }) {
 			return fmt.Errorf("configured model %q is not installed", item.Model)
 		}
-		offers = append(offers, v1.OfferCapacity{OfferID: item.Name, Model: item.Model, PriceVersion: 1})
+		offers = append(offers, offerCapacity(item))
 		backends[item.Name] = client
 	}
 	if len(offers) == 0 {
@@ -238,6 +239,7 @@ func runBackend(args []string, output io.Writer) error {
 	name := flags.String("name", "", "backend name")
 	model := flags.String("model", "", "model name")
 	endpoint := flags.String("url", "http://127.0.0.1:11434", "Ollama URL")
+	priceVersion := flags.Uint64("price-version", 1, "published Monad offer version")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -256,7 +258,10 @@ func runBackend(args []string, output io.Writer) error {
 		if slices.ContainsFunc(cfg.Backends, func(item config.Backend) bool { return item.Name == *name }) {
 			return errors.New("backend name already exists")
 		}
-		cfg.Backends = append(cfg.Backends, config.Backend{Name: *name, Kind: "ollama", URL: *endpoint, Model: *model, Enabled: true})
+		if *priceVersion == 0 {
+			return errors.New("--price-version must be positive")
+		}
+		cfg.Backends = append(cfg.Backends, config.Backend{Name: *name, Kind: "ollama", URL: *endpoint, Model: *model, PriceVersion: *priceVersion, Enabled: true})
 	case "start", "stop":
 		found := false
 		for i := range cfg.Backends {
@@ -311,9 +316,17 @@ func printCapacity(ctx context.Context, path string, output io.Writer) error {
 			return fmt.Errorf("configured model %q is not installed", item.Model)
 		}
 		capacity.Available++
-		capacity.Offers = append(capacity.Offers, v1.OfferCapacity{OfferID: item.Name, Model: item.Model, PriceVersion: 1})
+		capacity.Offers = append(capacity.Offers, offerCapacity(item))
 	}
 	return json.NewEncoder(output).Encode(capacity)
+}
+
+func offerCapacity(item config.Backend) v1.OfferCapacity {
+	version := item.PriceVersion
+	if version == 0 {
+		version = 1
+	}
+	return v1.OfferCapacity{OfferID: item.Name, Model: item.Model, PriceVersion: version, BackendKind: item.Kind, OfferHash: crypto.Keccak256Hash([]byte(item.Name)).Hex(), ModelHash: crypto.Keccak256Hash([]byte(item.Model)).Hex(), CapabilityHash: crypto.Keccak256Hash([]byte("stream,text")).Hex()}
 }
 
 func parseConfigFlag(name string, args []string) (string, error) {

@@ -90,6 +90,36 @@ func (c *Client) DepositBond(ctx context.Context, value *big.Int) error {
 	return c.transact(ctx, value, func(opts *bind.TransactOpts) (*types.Transaction, error) { return c.contract.DepositBond(opts) })
 }
 
+func (c *Client) RequestWithdrawal(ctx context.Context, amount *big.Int) error {
+	return c.transact(ctx, nil, func(opts *bind.TransactOpts) (*types.Transaction, error) {
+		return c.contract.RequestWithdrawal(opts, amount)
+	})
+}
+
+func (c *Client) Claim(ctx context.Context) error {
+	return c.transact(ctx, nil, func(opts *bind.TransactOpts) (*types.Transaction, error) { return c.contract.Claim(opts) })
+}
+
+func (c *Client) RequestBondExit(ctx context.Context) error {
+	return c.transact(ctx, nil, func(opts *bind.TransactOpts) (*types.Transaction, error) { return c.contract.RequestBondExit(opts) })
+}
+
+func (c *Client) FinalizeBondExit(ctx context.Context) error {
+	return c.transact(ctx, nil, func(opts *bind.TransactOpts) (*types.Transaction, error) { return c.contract.FinalizeBondExit(opts) })
+}
+
+func (c *Client) RequestSessionClose(ctx context.Context, sessionID [32]byte) error {
+	return c.transact(ctx, nil, func(opts *bind.TransactOpts) (*types.Transaction, error) {
+		return c.contract.RequestSessionClose(opts, sessionID)
+	})
+}
+
+func (c *Client) FinalizeSessionClose(ctx context.Context, sessionID [32]byte) error {
+	return c.transact(ctx, nil, func(opts *bind.TransactOpts) (*types.Transaction, error) {
+		return c.contract.FinalizeSessionClose(opts, sessionID)
+	})
+}
+
 func (c *Client) PublishOffer(ctx context.Context, offerID, modelHash, capabilityHash [32]byte, inputPerMillion, outputPerMillion, computePerSecond *big.Int) error {
 	return c.transact(ctx, nil, func(opts *bind.TransactOpts) (*types.Transaction, error) {
 		return c.contract.PublishOffer(opts, offerID, modelHash, capabilityHash, inputPerMillion, outputPerMillion, computePerSecond)

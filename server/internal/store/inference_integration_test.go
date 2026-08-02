@@ -106,3 +106,48 @@ func TestInferenceReservationRoutingAndReceiptAreDurableAndAtomic(t *testing.T) 
 		t.Fatalf("offline capacity was not persisted: %+v err=%v", candidates, err)
 	}
 }
+
+func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
+	databaseURL := os.Getenv("MYFERENCE_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("MYFERENCE_TEST_DATABASE_URL is required")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	for _, name := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000007_provider_operations.sql"} {
+		if err := s.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, "TRUNCATE receipt_proposals,inference_reservations,provider_routing_state,outbox,requests,sessions,offers,backends,machines,accounts,chain_offers,chain_accounts CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateAccount(ctx, Account{ID: "reconcile-account", WalletAddress: "0x1111111111111111111111111111111111111111"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMachine(ctx, Machine{ID: "reconcile-machine", AccountID: "reconcile-account", Name: "unused-mac"}); err != nil {
+		t.Fatal(err)
+	}
+	contract := "0x4444444444444444444444444444444444444444"
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_accounts(chain_id,contract_address,address,provider_bond) VALUES (10143,$1,'0x1111111111111111111111111111111111111111',100)`, contract); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_offers(chain_id,contract_address,provider,offer_id,version,model_hash,capability_hash,input_per_million,output_per_million,compute_per_second) VALUES (10143,$1,'0x1111111111111111111111111111111111111111','0xoffer',1,'0xmodel','0xcap',10,20,30)`, contract); err != nil {
+		t.Fatal(err)
+	}
+	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "local-qwen", Model: "qwen", PriceVersion: 1, BackendKind: "ollama", OfferHash: "0xoffer", ModelHash: "0xmodel", CapabilityHash: "0xcap"}}}
+	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", capacity, 10143, contract); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := s.RoutingCandidates(ctx, "qwen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || !candidates[0].ConfirmedBond || candidates[0].MaximumCost != 60 || candidates[0].Capacity != 1 {
+		t.Fatalf("unexpected reconciled route: %+v", candidates)
+	}
+}

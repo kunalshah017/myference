@@ -4,7 +4,9 @@ import { RoutingRail } from '../features/activity/RoutingRail'
 import { ApiKeys } from '../features/auth/ApiKeys'
 import { ConnectWallet } from '../features/auth/ConnectWallet'
 import { DeviceApproval } from '../features/auth/DeviceApproval'
+import { Billing } from '../features/billing/Billing'
 import { ModelList } from '../features/marketplace/ModelList'
+import { ProviderConsole } from '../features/provider/ProviderConsole'
 import { AuthAPI, MarketplaceAPI, type Session } from '../lib/api'
 
 function App() {
@@ -27,7 +29,7 @@ function App() {
         <div className="network-actions">
           <span className="network-state">
             <span className="state-mark" aria-hidden="true" />
-            Network not connected
+            {session ? 'Monad testnet account connected' : 'Network not connected'}
           </span>
           <ConnectWallet api={api} onConnected={setSession} />
         </div>
@@ -71,7 +73,7 @@ function App() {
           </aside>
         </div>
 
-        {session && <div className="account-tools"><DeviceApproval api={api} /><ApiKeys api={api} /></div>}
+        {session && <><div className="account-tools"><DeviceApproval api={api} /><ApiKeys api={api} /></div><Billing /><ProviderConsole /></>}
 
         <section id="activity" className="activity" aria-labelledby="activity-title">
           <div className="section-heading">

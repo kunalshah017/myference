@@ -15,11 +15,12 @@ type Config struct {
 }
 
 type Backend struct {
-	Name    string `json:"name"`
-	Kind    string `json:"kind"`
-	URL     string `json:"url"`
-	Model   string `json:"model"`
-	Enabled bool   `json:"enabled"`
+	Name         string `json:"name"`
+	Kind         string `json:"kind"`
+	URL          string `json:"url"`
+	Model        string `json:"model"`
+	PriceVersion uint64 `json:"price_version,omitempty"`
+	Enabled      bool   `json:"enabled"`
 }
 
 func Load(path string) (Config, error) {

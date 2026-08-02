@@ -1,0 +1,1 @@
+export function Earnings({ earned, claimable }: { earned:string; claimable:string }) { return <div className="earnings-proof"><strong>{earned} wei earned</strong><span>{claimable} wei currently claimable</span></div> }

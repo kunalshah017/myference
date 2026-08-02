@@ -109,3 +109,10 @@ func TestRelayURLUsesOutboundWebSocketEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestOfferCapacityCarriesDeterministicMonadProofKeys(t *testing.T) {
+	offer := offerCapacity(config.Backend{Name: "local", Kind: "ollama", Model: "qwen", PriceVersion: 4, Enabled: true})
+	if offer.PriceVersion != 4 || len(offer.OfferHash) != 66 || len(offer.ModelHash) != 66 || len(offer.CapabilityHash) != 66 || offer.BackendKind != "ollama" {
+		t.Fatalf("unexpected offer proof keys: %+v", offer)
+	}
+}

@@ -49,6 +49,9 @@ func run() error {
 	}, relay.Options{CapacityHandler: func(machineID string, capacity v1.Capacity) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+		if contract := os.Getenv("MYFERENCE_CONTRACT_ADDRESS"); contract != "" {
+			return repository.ReconcileProviderCapacity(ctx, machineID, capacity, 10143, contract)
+		}
 		return repository.UpdateProviderCapacity(ctx, machineID, capacity)
 	}})
 	openAI := api.NewOpenAI(api.Dependencies{
@@ -86,6 +89,10 @@ func run() error {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
 	}, 30*time.Second)
+	operations := api.NewOperations(repository, func(request *http.Request) (string, error) {
+		session, err := authService.AuthenticateBrowserRequest(request)
+		return session.AccountID, err
+	}, api.OperationsConfig{ChainID: 10143, ContractAddress: os.Getenv("MYFERENCE_CONTRACT_ADDRESS"), ExplorerURL: envOr("MYFERENCE_EXPLORER_URL", "https://testnet.monadexplorer.com"), Confirmations: 2})
 	events, err := realtime.Open(ctx, databaseURL, func(ctx context.Context, ticket string) (string, error) {
 		return authService.ConsumeStreamTicket(ctx, ticket)
 	})
@@ -93,7 +100,7 @@ func run() error {
 		return err
 	}
 	defer events.Close()
-	handler := allowWebOrigin(newRootHandler(hub, openAI, authHTTP, marketplace, events), webOrigin)
+	handler := allowWebOrigin(newRootHandler(hub, openAI, authHTTP, marketplace, operations, events), webOrigin)
 	server := &http.Server{Addr: envOr("MYFERENCE_LISTEN_ADDR", "127.0.0.1:8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
@@ -123,11 +130,12 @@ func run() error {
 	}
 }
 
-func newRootHandler(relayHandler, openAIHandler, authHandler, marketplaceHandler, eventsHandler http.Handler) http.Handler {
+func newRootHandler(relayHandler, openAIHandler, authHandler, marketplaceHandler, operationsHandler, eventsHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/relay", relayHandler)
 	mux.Handle("/v1/chat/completions", openAIHandler)
 	mux.Handle("/auth/", authHandler)
+	mux.Handle("/api/account/", operationsHandler)
 	mux.Handle("/api/", marketplaceHandler)
 	mux.Handle("/events", eventsHandler)
 	return mux
