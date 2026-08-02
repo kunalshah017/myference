@@ -334,17 +334,19 @@ Commit: `git add server/internal/relay cli/internal/provider && git commit -m "f
 - Create: `cli/cmd/myference/main.go`
 - Preserve: `cli/platform/windows/legacy/*`
 
-- [ ] **Step 1: Write a failing Ollama integration test**
+- [x] **Step 1: Write a failing Ollama integration test**
 
 Require `MYFERENCE_TEST_OLLAMA_MODEL`. Connect to the real local Ollama endpoint, discover that exact installed model, stream a deterministic short prompt, observe at least one content chunk, cancel a second request, and capture real usage fields.
 
-- [ ] **Step 2: Verify RED with real Ollama**
+- [x] **Step 2: Verify RED with real Ollama**
 
 Run on Windows: `go test ./cli/internal/backend/ollama -tags=integration -v`
 
 Expected: FAIL because the adapter does not exist.
 
-- [ ] **Step 3: Implement the adapter and Windows lifecycle**
+Recorded RED on the available macOS development host before implementation. The adapter is platform-neutral; physical Windows execution remains part of Step 4's release gate.
+
+- [x] **Step 3: Implement the adapter and Windows lifecycle**
 
 Use Ollama's loopback HTTP streaming API. Port the existing process, firewall, power, keep-awake, startup, and restoration behavior behind `platform/windows` without changing reversible-state guarantees. The CLI commands must add/list/start/stop the Ollama backend, publish capacity, serve, show status, and stop cleanly.
 
@@ -354,7 +356,9 @@ Run on Windows: `go test -race ./cli/... -tags=integration -v && go build -o dis
 
 Expected: PASS and a runnable Windows executable.
 
-- [ ] **Step 5: Commit**
+Current evidence: the race-enabled CLI suite passes against real local Ollama `qwen2.5:0.5b`; the Windows amd64 cross-build is a valid PE32+ executable. Running that executable and integration suite on physical Windows remains an explicit release gate.
+
+- [x] **Step 5: Commit**
 
 Commit: `git add cli && git commit -m "feat: migrate Windows Ollama provider"`
 

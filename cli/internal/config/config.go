@@ -8,9 +8,18 @@ import (
 )
 
 type Config struct {
-	ServerURL string `json:"server_url"`
-	AccountID string `json:"account_id"`
-	MachineID string `json:"machine_id"`
+	ServerURL string    `json:"server_url"`
+	AccountID string    `json:"account_id"`
+	MachineID string    `json:"machine_id"`
+	Backends  []Backend `json:"backends,omitempty"`
+}
+
+type Backend struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	URL     string `json:"url"`
+	Model   string `json:"model"`
+	Enabled bool   `json:"enabled"`
 }
 
 func Load(path string) (Config, error) {

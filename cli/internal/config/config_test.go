@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestSaveAndLoadNonSecretConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v want %+v", got, want)
 	}
 	info, err := os.Stat(path)

@@ -156,13 +156,14 @@ type JobOffer struct {
 	RequestID      string    `json:"request_id"`
 	Model          string    `json:"model"`
 	OfferID        string    `json:"offer_id"`
+	Prompt         string    `json:"prompt"`
 	PriceVersion   uint64    `json:"price_version"`
 	MaximumSpend   uint64    `json:"maximum_spend"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 }
 
 func (m JobOffer) Validate() error {
-	if strings.TrimSpace(m.RequestID) == "" || strings.TrimSpace(m.Model) == "" || strings.TrimSpace(m.OfferID) == "" || m.PriceVersion == 0 || m.MaximumSpend == 0 || !m.LeaseExpiresAt.After(time.Now()) {
+	if strings.TrimSpace(m.RequestID) == "" || strings.TrimSpace(m.Model) == "" || strings.TrimSpace(m.OfferID) == "" || strings.TrimSpace(m.Prompt) == "" || m.PriceVersion == 0 || m.MaximumSpend == 0 || !m.LeaseExpiresAt.After(time.Now()) {
 		return ErrInvalidMessage
 	}
 	return nil

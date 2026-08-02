@@ -19,7 +19,7 @@ func TestMessageRoundTripAndValidation(t *testing.T) {
 	}{
 		{"hello", MessageHello, &Hello{MachineID: "machine-1"}, func() Validatable { return &Hello{} }},
 		{"capacity", MessageCapacity, &Capacity{Available: 1, Offers: []OfferCapacity{{OfferID: "offer-1", Model: "qwen", PriceVersion: 1}}}, func() Validatable { return &Capacity{} }},
-		{"job offer", MessageJobOffer, &JobOffer{RequestID: "request-1", Model: "qwen", OfferID: "offer-1", PriceVersion: 1, MaximumSpend: 10, LeaseExpiresAt: lease}, func() Validatable { return &JobOffer{} }},
+		{"job offer", MessageJobOffer, &JobOffer{RequestID: "request-1", Model: "qwen", OfferID: "offer-1", PriceVersion: 1, MaximumSpend: 10, LeaseExpiresAt: lease, Prompt: "hello"}, func() Validatable { return &JobOffer{} }},
 		{"job accept", MessageJobAccept, &JobAccept{RequestID: "request-1"}, func() Validatable { return &JobAccept{} }},
 		{"output chunk", MessageOutputChunk, &OutputChunk{RequestID: "request-1", Sequence: 1, Data: "hello"}, func() Validatable { return &OutputChunk{} }},
 		{"cancel", MessageCancel, &Cancel{RequestID: "request-1", Reason: "customer_cancelled"}, func() Validatable { return &Cancel{} }},

@@ -4,18 +4,37 @@ Myference is a Monad-native AI inference marketplace that turns unused computers
 
 ## Repository status
 
-The repository currently contains the existing Windows Ollama host implementation and the approved marketplace architecture. The Windows code is preserved without behavioral changes while it is migrated into the shared cross-platform provider daemon.
+The repository contains the shared Go provider CLI, broker services, Monad contracts, web client, and the preserved Windows Ollama host implementation. The provider CLI now discovers and streams real Ollama inference over an authenticated outbound TLS WebSocket; the preserved Windows lifecycle remains available for reversible power, firewall, startup, and desktop-state management.
 
 ```text
-cli/platform/windows/legacy/   Existing Windows PowerShell and Go CLI
+cli/cmd/myference/             Shared Windows/macOS provider CLI
+cli/internal/backend/ollama/   Real loopback Ollama adapter
+cli/internal/provider/         Authenticated outbound provider daemon
+cli/internal/platform/windows/ Windows lifecycle bridge
+cli/platform/windows/legacy/   Preserved Windows PowerShell and Go CLI
 docs/superpowers/specs/        Approved system design
 ```
 
 See the [marketplace design](docs/superpowers/specs/2026-08-02-myference-marketplace-design.md) for the broker, relay, pricing, collateral, receipt, settlement, security, and real end-to-end verification requirements.
 
-## Current Windows CLI
+## Provider CLI
 
-The existing CLI is documented in [`cli/platform/windows/legacy/README.md`](cli/platform/windows/legacy/README.md). It runs Ollama on loopback and exposes the current private-LAN streaming gateway. Marketplace authentication, outbound relay, and Monad settlement are the next implementation phase.
+Configure an Ollama model, inspect the capacity that will be published, and start the outbound provider:
+
+```text
+myference backend add --name local-qwen --model qwen2.5:0.5b
+myference backend list
+myference capacity
+myference serve
+```
+
+The machine token is loaded from Windows Credential Manager or macOS Keychain and is never stored in the JSON configuration. `serve` refuses missing models, non-loopback Ollama endpoints, unsupported backend types, and machines with no enabled backends.
+
+On Windows, `legacy-start`, `legacy-status`, and `legacy-stop` expose the preserved reversible host lifecycle while migration continues. The general `stop` command also restores that lifecycle state; a foreground `serve` process stops cleanly with Ctrl+C.
+
+## Preserved Windows CLI
+
+The existing CLI is documented in [`cli/platform/windows/legacy/README.md`](cli/platform/windows/legacy/README.md). It runs Ollama on loopback and exposes the original private-LAN streaming gateway. That gateway is preserved for migration and recovery; marketplace traffic uses the authenticated outbound provider daemon above.
 
 ## Hackathon proof
 
