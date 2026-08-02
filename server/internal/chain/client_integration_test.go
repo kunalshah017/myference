@@ -1,0 +1,164 @@
+//go:build integration
+
+package chain
+
+import (
+	"context"
+	"math/big"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/kunalshah017/myference/server/internal/store"
+)
+
+const (
+	anvilOwnerKey    = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	anvilProviderKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+)
+
+func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
+	rpcURL := os.Getenv("MYFERENCE_TEST_RPC_URL")
+	databaseURL := os.Getenv("MYFERENCE_TEST_DATABASE_URL")
+	if rpcURL == "" || databaseURL == "" {
+		t.Fatal("MYFERENCE_TEST_RPC_URL and MYFERENCE_TEST_DATABASE_URL are required")
+	}
+	ctx := context.Background()
+	owner, err := Dial(ctx, rpcURL, anvilOwnerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	provider, err := Dial(ctx, rpcURL, anvilProviderKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+	beforeDeployment, err := owner.Header(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, err := owner.Deploy(ctx, owner.Address(), owner.Address(), owner.Address(), big.NewInt(100), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.Bind(address); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Deposit(ctx, big.NewInt(1_000)); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.DepositBond(ctx, big.NewInt(100)); err != nil {
+		t.Fatal(err)
+	}
+	offerID := crypto.Keccak256Hash([]byte("offer"))
+	modelHash := crypto.Keccak256Hash([]byte("qwen"))
+	capabilityHash := crypto.Keccak256Hash([]byte("text-stream"))
+	if err := provider.PublishOffer(ctx, offerID, modelHash, capabilityHash, big.NewInt(1_000_000), big.NewInt(1_000_000), big.NewInt(0)); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := crypto.Keccak256Hash([]byte("session"))
+	header, err := owner.Header(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.OpenSession(ctx, sessionID, big.NewInt(500), header.Time+3600); err != nil {
+		t.Fatal(err)
+	}
+	header, _ = owner.Header(ctx)
+	receipt := Receipt{
+		RequestId: crypto.Keccak256Hash([]byte("request")), SessionId: sessionID,
+		Customer: owner.Address(), Provider: provider.Address(), SettlementSigner: owner.Address(),
+		OfferId: offerID, PriceVersion: 1, ModelHash: modelHash, CapabilityHash: capabilityHash,
+		InputTokens: 10, OutputTokens: 10, MaximumCharge: 100, TotalCharge: 20,
+		FeeBasisPoints: 500, FeeVersion: 1, Status: 1, CompletedAt: header.Time,
+		InputHash: crypto.Keccak256Hash([]byte("input")), OutputHash: crypto.Keccak256Hash([]byte("output")), Nonce: 1,
+	}
+	providerSignature, err := provider.SignReceipt(ctx, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlementSignature, err := owner.SignReceipt(ctx, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.SettleReceipt(ctx, receipt, providerSignature, settlementSignature); err != nil {
+		t.Fatal(err)
+	}
+	settled, claimable, err := owner.SettlementState(ctx, receipt.RequestId, provider.Address())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settled || claimable.Cmp(big.NewInt(19)) != 0 {
+		t.Fatalf("settled=%v claimable=%s contract=%s", settled, claimable, address)
+	}
+	if address == (common.Address{}) {
+		t.Fatal("zero deployment address")
+	}
+	repository, err := store.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", "000003_chain_index.sql")); err != nil {
+		t.Fatal(err)
+	}
+	repository.Close()
+	queue, err := OpenSettlementQueue(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if _, err := queue.db.ExecContext(ctx, "TRUNCATE settlement_queue"); err != nil {
+		t.Fatal(err)
+	}
+	receipt.RequestId = crypto.Keccak256Hash([]byte("request-batch"))
+	receipt.Nonce = 2
+	providerSignature, _ = provider.SignReceipt(ctx, receipt)
+	settlementSignature, _ = owner.SignReceipt(ctx, receipt)
+	if err := queue.Enqueue(ctx, SignedReceipt{Receipt: receipt, ProviderSignature: providerSignature, SettlementSignature: settlementSignature}); err != nil {
+		t.Fatal(err)
+	}
+	transactionHash, err := queue.SettleBatch(ctx, owner, 10)
+	if err != nil || transactionHash == "" {
+		t.Fatalf("transaction=%q err=%v", transactionHash, err)
+	}
+	var state string
+	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM settlement_queue WHERE request_id=$1`, hashHex(receipt.RequestId)).Scan(&state); err != nil || state != "settled" {
+		t.Fatalf("queue state=%q err=%v", state, err)
+	}
+	receipt.RequestId = crypto.Keccak256Hash([]byte("request-recovery"))
+	receipt.Nonce = 3
+	providerSignature, _ = provider.SignReceipt(ctx, receipt)
+	settlementSignature, _ = owner.SignReceipt(ctx, receipt)
+	if err := queue.Enqueue(ctx, SignedReceipt{Receipt: receipt, ProviderSignature: providerSignature, SettlementSignature: settlementSignature}); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := owner.PrepareSettlement(ctx, []Receipt{receipt}, [][]byte{providerSignature}, [][]byte{settlementSignature})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := prepared.MarshalBinary()
+	if _, err := queue.db.ExecContext(ctx, `UPDATE settlement_queue SET state='broadcasting',transaction_hash=$2,raw_transaction=$3 WHERE request_id=$1`, hashHex(receipt.RequestId), prepared.Hash().Hex(), raw); err != nil {
+		t.Fatal(err)
+	}
+	if recoveredHash, err := queue.SettleBatch(ctx, owner, 10); err != nil || recoveredHash != prepared.Hash().Hex() {
+		t.Fatalf("recovered=%q want=%q err=%v", recoveredHash, prepared.Hash().Hex(), err)
+	}
+	indexer, err := OpenIndexer(ctx, IndexerConfig{RPCURL: rpcURL, DatabaseURL: databaseURL, Contract: address, StartBlock: beforeDeployment.Number.Uint64() + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer indexer.Close()
+	if err := indexer.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for table, minimum := range map[string]int{"chain_accounts": 2, "chain_offers": 1, "chain_sessions": 1, "chain_settlements": 3} {
+		var count int
+		query := "SELECT count(*) FROM " + table + " WHERE chain_id=$1 AND contract_address=$2" // fixed internal table names
+		if err := indexer.db.QueryRowContext(ctx, query, indexer.chainID.String(), address.Hex()).Scan(&count); err != nil || count < minimum {
+			t.Fatalf("%s count=%d err=%v", table, count, err)
+		}
+	}
+}

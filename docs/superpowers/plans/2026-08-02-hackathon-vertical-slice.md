@@ -408,21 +408,21 @@ Commit: `git add server && git commit -m "feat: route OpenAI streaming inference
 - Create: `server/internal/chain/indexer_integration_test.go`
 - Create: `server/internal/realtime/events.go`
 
-- [ ] **Step 1: Write failing local-chain integration tests**
+- [x] **Step 1: Write failing local-chain integration tests**
 
 Start Anvil, deploy the actual contract, submit real deposit/bond/offer/session transactions, index their logs into real PostgreSQL, settle a provider/broker-signed receipt, restart the indexer, and prove no duplicate records or balance changes.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `MYFERENCE_TEST_DATABASE_URL=postgres://myference:myference@localhost:5432/myference_test?sslmode=disable go test ./server/internal/chain -tags=integration -v`
 
 Expected: FAIL because the chain client and indexer do not exist.
 
-- [ ] **Step 3: Implement chain client and reorg-safe indexer**
+- [x] **Step 3: Implement chain client and reorg-safe indexer**
 
 Generate Go contract bindings from the compiled ABI. Persist chain ID, contract address, block number/hash, transaction hash, and log index. Wait for configured finality, detect parent-hash disagreement, rewind unfinalized events, and replay idempotently. Batch only co-signed receipts and persist the settlement transaction before broadcasting realtime events.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run the integration command from Step 2 again.
 

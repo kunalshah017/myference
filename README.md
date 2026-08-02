@@ -42,6 +42,8 @@ go run ./server/cmd/myference-server
 
 The server binds to `127.0.0.1:8080` by default and exposes `/relay` plus the OpenAI-compatible `/v1/chat/completions` streaming endpoint. Set both `MYFERENCE_TLS_CERT` and `MYFERENCE_TLS_KEY` when terminating TLS in the process; deployments may instead keep the server on loopback behind a TLS reverse proxy. Reservations, capacity, request transitions, receipt proposals, and realtime outbox events are persisted in PostgreSQL.
 
+The chain package uses the generated `MyferenceMarket` binding for Monad-compatible EVM RPC. Its indexer persists block hashes and logs, waits for configured confirmations, rewinds projections on canonical-hash disagreement, and resumes idempotently after restart. Only co-signed receipts enter the settlement queue; the signed transaction hash is persisted before broadcast.
+
 ## Preserved Windows CLI
 
 The existing CLI is documented in [`cli/platform/windows/legacy/README.md`](cli/platform/windows/legacy/README.md). It runs Ollama on loopback and exposes the original private-LAN streaming gateway. That gateway is preserved for migration and recovery; marketplace traffic uses the authenticated outbound provider daemon above.

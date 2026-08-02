@@ -18,3 +18,8 @@ remappings = [
 line_length = 100
 tab_width = 4
 bracket_spacing = true
+
+[invariant]
+runs = 64
+depth = 64
+fail_on_revert = false
