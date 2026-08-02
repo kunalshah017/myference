@@ -102,6 +102,7 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     mapping(bytes32 => Session) public sessions;
     mapping(bytes32 => bool) public settledRequests;
     mapping(address => mapping(uint64 => bool)) public usedNonces;
+    mapping(address => mapping(address => bool)) public providerSigners;
     mapping(bytes32 => bool) public slashedRequests;
     mapping(uint64 => uint16) public feeBpsByVersion;
 
@@ -145,6 +146,7 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         uint256 feeAmount
     );
     event ProviderSlashed(address indexed provider, bytes32 indexed requestId, uint256 amount);
+    event ProviderSignerSet(address indexed provider, address indexed signer, bool allowed);
     event FeeProposed(uint16 feeBasisPoints, uint64 availableAt);
     event FeeChanged(uint16 feeBasisPoints, uint64 version);
 
@@ -196,6 +198,12 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         providerBonds[msg.sender] += msg.value;
         totalProviderBonds += msg.value;
         emit BondDeposited(msg.sender, msg.value, providerBonds[msg.sender]);
+    }
+
+    function setProviderSigner(address signer, bool allowed) external {
+        if (signer == address(0)) revert InvalidReceipt();
+        providerSigners[msg.sender][signer] = allowed;
+        emit ProviderSignerSet(msg.sender, signer, allowed);
     }
 
     function requestBondExit() external {
@@ -338,8 +346,8 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         ) revert InvalidEvidence();
         if (slashedRequests[first.requestId]) revert EvidenceAlreadyUsed();
         if (
-            firstDigest.recover(firstSignature) != first.provider
-                || secondDigest.recover(secondSignature) != first.provider
+            !_isProviderSigner(first.provider, firstDigest.recover(firstSignature))
+                || !_isProviderSigner(first.provider, secondDigest.recover(secondSignature))
         ) revert InvalidReceiptSignature();
 
         uint256 amount = Math.min(providerBonds[first.provider], minimumBond);
@@ -427,7 +435,7 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
 
         bytes32 digest = hashReceipt(receipt);
         if (
-            digest.recover(providerSignature) != receipt.provider
+            !_isProviderSigner(receipt.provider, digest.recover(providerSignature))
                 || digest.recover(settlementSignature) != settlementSigner
         ) revert InvalidReceiptSignature();
 
@@ -443,5 +451,9 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         emit ReceiptSettled(
             receipt.requestId, receipt.sessionId, receipt.provider, providerAmount, feeAmount
         );
+    }
+
+    function _isProviderSigner(address provider, address signer) internal view returns (bool) {
+        return signer == provider || providerSigners[provider][signer];
     }
 }

@@ -23,7 +23,7 @@ func TestMessageRoundTripAndValidation(t *testing.T) {
 		{"job accept", MessageJobAccept, &JobAccept{RequestID: "request-1"}, func() Validatable { return &JobAccept{} }},
 		{"output chunk", MessageOutputChunk, &OutputChunk{RequestID: "request-1", Sequence: 1, Data: "hello"}, func() Validatable { return &OutputChunk{} }},
 		{"cancel", MessageCancel, &Cancel{RequestID: "request-1", Reason: "customer_cancelled"}, func() Validatable { return &Cancel{} }},
-		{"receipt proposal", MessageReceiptProposal, &ReceiptProposal{RequestID: "request-1", Receipt: validReceipt()}, func() Validatable { return &ReceiptProposal{} }},
+		{"receipt proposal", MessageReceiptProposal, &ReceiptProposal{RequestID: "request-1", ChainID: 10143, Contract: addressWithLastByte(9), Receipt: validReceipt()}, func() Validatable { return &ReceiptProposal{} }},
 		{"receipt signature", MessageReceiptSignature, &ReceiptSignature{RequestID: "request-1", Signer: addressWithLastByte(1), Signature: bytes.Repeat([]byte{1}, 65)}, func() Validatable { return &ReceiptSignature{} }},
 	}
 
@@ -73,6 +73,9 @@ func TestMessageRejectsInvalidVersionAndEmptyRequestID(t *testing.T) {
 
 	if err := (&JobAccept{}).Validate(); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("expected ErrInvalidMessage, got %v", err)
+	}
+	if err := (&ReceiptProposal{RequestID: "request-1", Receipt: validReceipt()}).Validate(); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("expected receipt domain rejection, got %v", err)
 	}
 }
 

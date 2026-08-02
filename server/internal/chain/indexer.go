@@ -208,6 +208,13 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO chain_accounts (chain_id,contract_address,address,provider_bond) VALUES ($1,$2,$3,$4) ON CONFLICT (chain_id,contract_address,address) DO UPDATE SET provider_bond=EXCLUDED.provider_bond`, i.chainID.String(), i.contract.Hex(), decoded.Provider.Hex(), decoded.TotalBond.String())
 		return err
+	case "ProviderSignerSet":
+		decoded, err := i.binding.ParseProviderSignerSet(eventLog)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO chain_provider_signers(chain_id,contract_address,provider,signer,allowed) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(chain_id,contract_address,provider,signer) DO UPDATE SET allowed=EXCLUDED.allowed`, i.chainID.String(), i.contract.Hex(), decoded.Provider.Hex(), decoded.Signer.Hex(), decoded.Allowed)
+		return err
 	case "BondExitRequested":
 		decoded, err := i.binding.ParseBondExitRequested(eventLog)
 		if err != nil {
@@ -239,13 +246,23 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE chain_accounts SET customer_balance=customer_balance-$4 WHERE chain_id=$1 AND contract_address=$2 AND address=$3`, i.chainID.String(), i.contract.Hex(), decoded.Customer.Hex(), decoded.Allowance.String())
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO sessions(id,account_id,state,confirmed_balance_wei)
+			SELECT $1,a.id,'open',$3 FROM accounts a WHERE lower(a.wallet_address)=lower($2)
+			ON CONFLICT(id) DO UPDATE SET account_id=EXCLUDED.account_id,state='open',confirmed_balance_wei=EXCLUDED.confirmed_balance_wei`, common.Hash(decoded.SessionId).Hex(), decoded.Customer.Hex(), decoded.Allowance.String())
 		return err
 	case "SessionCloseRequested":
 		decoded, err := i.binding.ParseSessionCloseRequested(eventLog)
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE chain_sessions SET close_available_at=$4 WHERE chain_id=$1 AND contract_address=$2 AND session_id=$3`, i.chainID.String(), i.contract.Hex(), common.Hash(decoded.SessionId).Hex(), decoded.AvailableAt)
+		sessionID := common.Hash(decoded.SessionId).Hex()
+		if _, err = tx.ExecContext(ctx, `UPDATE chain_sessions SET close_available_at=$4 WHERE chain_id=$1 AND contract_address=$2 AND session_id=$3`, i.chainID.String(), i.contract.Hex(), sessionID, decoded.AvailableAt); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE sessions SET state='closing' WHERE id=$1 AND state='open'`, sessionID)
 		return err
 	case "SessionClosed":
 		decoded, err := i.binding.ParseSessionClosed(eventLog)
@@ -256,7 +273,10 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 		if err := tx.QueryRowContext(ctx, `UPDATE chain_sessions SET finalized=true WHERE chain_id=$1 AND contract_address=$2 AND session_id=$3 RETURNING customer`, i.chainID.String(), i.contract.Hex(), common.Hash(decoded.SessionId).Hex()).Scan(&customer); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE chain_accounts SET customer_balance=customer_balance+$4 WHERE chain_id=$1 AND contract_address=$2 AND address=$3`, i.chainID.String(), i.contract.Hex(), customer, decoded.ReturnedAmount.String())
+		if _, err = tx.ExecContext(ctx, `UPDATE chain_accounts SET customer_balance=customer_balance+$4 WHERE chain_id=$1 AND contract_address=$2 AND address=$3`, i.chainID.String(), i.contract.Hex(), customer, decoded.ReturnedAmount.String()); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE sessions SET state='closed',confirmed_balance_wei=0 WHERE id=$1`, common.Hash(decoded.SessionId).Hex())
 		return err
 	case "ReceiptSettled":
 		decoded, err := i.binding.ParseReceiptSettled(eventLog)
@@ -273,6 +293,9 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 			return nil
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE chain_sessions SET spent=spent+$4+$5 WHERE chain_id=$1 AND contract_address=$2 AND session_id=$3`, i.chainID.String(), i.contract.Hex(), common.Hash(decoded.SessionId).Hex(), decoded.ProviderAmount.String(), decoded.FeeAmount.String()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET confirmed_balance_wei=GREATEST(0,confirmed_balance_wei-$2-$3) WHERE id=$1`, common.Hash(decoded.SessionId).Hex(), decoded.ProviderAmount.String(), decoded.FeeAmount.String()); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO chain_accounts(chain_id,contract_address,address,claimable) VALUES ($1,$2,$3,$4) ON CONFLICT (chain_id,contract_address,address) DO UPDATE SET claimable=chain_accounts.claimable+EXCLUDED.claimable`, i.chainID.String(), i.contract.Hex(), decoded.Provider.Hex(), decoded.ProviderAmount.String()); err != nil {
@@ -330,7 +353,7 @@ func (i *Indexer) rewind(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, table := range []string{"chain_settlements", "chain_sessions", "chain_offers", "chain_accounts", "chain_blocks", "chain_cursors"} {
+	for _, table := range []string{"chain_settlements", "chain_sessions", "chain_offers", "chain_provider_signers", "chain_accounts", "chain_blocks", "chain_cursors"} {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE chain_id=$1 AND contract_address=$2", table), i.chainID.String(), i.contract.Hex()); err != nil {
 			return err
 		}

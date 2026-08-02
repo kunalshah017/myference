@@ -8,10 +8,12 @@ import (
 )
 
 type Config struct {
-	ServerURL string    `json:"server_url"`
-	AccountID string    `json:"account_id"`
-	MachineID string    `json:"machine_id"`
-	Backends  []Backend `json:"backends,omitempty"`
+	ServerURL       string    `json:"server_url"`
+	AccountID       string    `json:"account_id"`
+	MachineID       string    `json:"machine_id"`
+	ChainID         uint64    `json:"chain_id,omitempty"`
+	ContractAddress string    `json:"contract_address,omitempty"`
+	Backends        []Backend `json:"backends,omitempty"`
 }
 
 type Backend struct {

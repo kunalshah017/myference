@@ -7,6 +7,7 @@ export const marketABI = [
   { type: 'function', name: 'requestWithdrawal', stateMutability: 'nonpayable', inputs: [{ name: 'amount', type: 'uint256' }], outputs: [] },
   { type: 'function', name: 'claim', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'depositBond', stateMutability: 'payable', inputs: [], outputs: [] },
+  { type: 'function', name: 'setProviderSigner', stateMutability: 'nonpayable', inputs: [{ name: 'signer', type: 'address' }, { name: 'allowed', type: 'bool' }], outputs: [] },
   { type: 'function', name: 'requestBondExit', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'finalizeBondExit', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'publishOffer', stateMutability: 'nonpayable', inputs: [{ name: 'offerId', type: 'bytes32' }, { name: 'modelHash', type: 'bytes32' }, { name: 'capabilityHash', type: 'bytes32' }, { name: 'inputPerMillion', type: 'uint256' }, { name: 'outputPerMillion', type: 'uint256' }, { name: 'computePerSecond', type: 'uint256' }], outputs: [] },
@@ -22,6 +23,7 @@ export interface MarketWriter {
   requestWithdrawal(amount: bigint): Promise<SubmittedTransaction>
   claim(): Promise<SubmittedTransaction>
   depositBond(value: bigint): Promise<SubmittedTransaction>
+  setProviderSigner(signer: Address, allowed: boolean): Promise<SubmittedTransaction>
   requestBondExit(): Promise<SubmittedTransaction>
   finalizeBondExit(): Promise<SubmittedTransaction>
   publishOffer(offer: OfferInput): Promise<SubmittedTransaction>
@@ -52,6 +54,7 @@ export class ViemMarketWriter implements MarketWriter {
   async requestWithdrawal(amount: bigint) { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'requestWithdrawal',args:[amount],account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async claim() { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'claim',account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async depositBond(value: bigint) { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'depositBond',account:c.account,value}); return c.submitted(await c.wallet.writeContract(s.request)) }
+  async setProviderSigner(signer: Address, allowed: boolean) { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'setProviderSigner',args:[getAddress(signer),allowed],account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async requestBondExit() { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'requestBondExit',account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async finalizeBondExit() { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'finalizeBondExit',account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async publishOffer(offer: OfferInput) { const c=await this.clients(); const args=[hashLabel(offer.offerID),hashLabel(offer.model),hashLabel([...offer.capabilities].sort().join(',')),offer.inputPerMillion,offer.outputPerMillion,offer.computePerSecond] as const; const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'publishOffer',args,account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }

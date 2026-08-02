@@ -32,6 +32,7 @@ func TestWalletDeviceAndAPIKeyHTTPFlow(t *testing.T) {
 		SessionLifetime: time.Hour,
 		SecureCookies:   false,
 		VerificationURL: testWebOrigin + "/devices",
+		ContractAddress: "0x4444444444444444444444444444444444444444",
 	})
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -76,12 +77,13 @@ func TestWalletDeviceAndAPIKeyHTTPFlow(t *testing.T) {
 		t.Fatalf("expected one-time stream ticket, got %v", err)
 	}
 
-	device := postJSON[DeviceHTTPAuthorization](t, http.DefaultClient, server.URL+"/auth/device", map[string]string{"machine_name": "studio-mac"}, nil, http.StatusCreated)
-	if device.DeviceCode == "" || device.UserCode == "" || device.VerificationURI != testWebOrigin+"/devices" {
+	signerAddress := "0x0000000000000000000000000000000000001234"
+	device := postJSON[DeviceHTTPAuthorization](t, http.DefaultClient, server.URL+"/auth/device", map[string]string{"machine_name": "studio-mac", "signer_address": signerAddress}, nil, http.StatusCreated)
+	if device.DeviceCode == "" || device.UserCode == "" || device.VerificationURI != testWebOrigin+"/devices" || device.ChainID != 10143 || device.ContractAddress != "0x4444444444444444444444444444444444444444" {
 		t.Fatalf("unexpected device authorization: %+v", device)
 	}
 	pending := postJSON[PendingDevice](t, client, server.URL+"/auth/device/inspect", map[string]string{"user_code": device.UserCode}, nil, http.StatusOK)
-	if pending.MachineName != "studio-mac" || !pending.ExpiresAt.Equal(device.ExpiresAt) {
+	if pending.MachineName != "studio-mac" || pending.SignerAddress != signerAddress || !pending.ExpiresAt.Equal(device.ExpiresAt) {
 		t.Fatalf("unexpected pending machine: %+v", pending)
 	}
 	postJSON[map[string]any](t, client, server.URL+"/auth/device/approve", map[string]string{"user_code": device.UserCode}, nil, http.StatusNoContent)
@@ -114,7 +116,7 @@ func TestWalletHTTPRejectsWrongOriginChainAndExpiredDevice(t *testing.T) {
 	t.Cleanup(server.Close)
 	postJSON[map[string]any](t, http.DefaultClient, server.URL+"/auth/wallet/challenge", map[string]string{"address": "0x0000000000000000000000000000000000000001"}, map[string]string{"Origin": "https://evil.test"}, http.StatusForbidden)
 
-	device, err := service.CreateDeviceAuthorization(context.Background(), "expired-machine", time.Minute)
+	device, err := service.CreateDeviceAuthorization(context.Background(), "expired-machine", "0x000000000000000000000000000000000000bEEF", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +136,7 @@ func newHTTPIntegrationService(t *testing.T) (context.Context, *Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { control.Close() })
-	for _, name := range []string{"000001_control_plane.sql", "000004_browser_auth.sql", "000005_marketplace_realtime.sql"} {
+	for _, name := range []string{"000001_control_plane.sql", "000004_browser_auth.sql", "000005_marketplace_realtime.sql", "000008_machine_signers.sql"} {
 		if err := control.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", name)); err != nil {
 			t.Fatal(err)
 		}

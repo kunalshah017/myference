@@ -14,6 +14,7 @@ let server: Server
 let baseURL = ''
 let verifyBody: Record<string, string> = {}
 let approvedCode = ''
+let authorizedSigner = ''
 let revokedKey = ''
 
 afterEach(cleanup)
@@ -35,7 +36,7 @@ beforeAll(async () => {
         verifyBody = body
         send(200, { account_id: 'acct-1', wallet_address: address, expires_at: '2026-08-02T20:00:00Z' })
       } else if (request.url === '/auth/device/inspect') {
-        send(200, { machine_name: 'studio-mac', expires_at: '2026-08-02T18:00:00Z' })
+        send(200, { machine_name: 'studio-mac', signer_address: '0x0000000000000000000000000000000000001234', expires_at: '2026-08-02T18:00:00Z' })
       } else if (request.url === '/auth/device/approve') {
         approvedCode = body.user_code
         send(204)
@@ -87,13 +88,14 @@ describe('account authentication', () => {
   })
 
   it('shows the exact pending machine before approval', async () => {
-    render(<DeviceApproval api={new AuthAPI(baseURL)} />)
+    render(<DeviceApproval api={new AuthAPI(baseURL)} authorizeSigner={async (signer) => { authorizedSigner = signer }} />)
     await userEvent.type(screen.getByLabelText(/device code/i), 'ABCD1234')
     await userEvent.click(screen.getByRole('button', { name: /review machine/i }))
     expect(await screen.findByText('studio-mac')).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: /approve studio-mac/i }))
     expect(await screen.findByText(/machine approved/i)).toBeVisible()
     expect(approvedCode).toBe('ABCD1234')
+    expect(authorizedSigner).toBe('0x0000000000000000000000000000000000001234')
   })
 
   it('reveals a new API key once, displays scopes, and revokes it', async () => {

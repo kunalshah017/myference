@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -254,9 +254,9 @@ func writeSSE(writer http.ResponseWriter, value any) error {
 }
 
 func randomID() (string, error) {
-	value := make([]byte, 18)
+	value := make([]byte, 32)
 	_, err := rand.Read(value)
-	return "req_" + base64.RawURLEncoding.EncodeToString(value), err
+	return "0x" + hex.EncodeToString(value), err
 }
 
 func saltedHash(value string) [32]byte {

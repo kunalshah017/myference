@@ -31,6 +31,10 @@ func run() error {
 	if databaseURL == "" {
 		return errors.New("MYFERENCE_DATABASE_URL is required")
 	}
+	chainConfiguration, err := loadChainConfig(os.Getenv)
+	if err != nil {
+		return err
+	}
 	ctx := context.Background()
 	authService, err := auth.Open(ctx, databaseURL)
 	if err != nil {
@@ -49,11 +53,16 @@ func run() error {
 	}, relay.Options{CapacityHandler: func(machineID string, capacity v1.Capacity) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if contract := os.Getenv("MYFERENCE_CONTRACT_ADDRESS"); contract != "" {
-			return repository.ReconcileProviderCapacity(ctx, machineID, capacity, 10143, contract)
-		}
-		return repository.UpdateProviderCapacity(ctx, machineID, capacity)
+		return repository.ReconcileProviderCapacity(ctx, machineID, capacity, 10143, chainConfiguration.ContractAddress)
 	}})
+	chainState, err := openChainRuntime(ctx, chainConfiguration, databaseURL, repository, hub)
+	if err != nil {
+		return err
+	}
+	defer chainState.Close()
+	runtimeContext, stopRuntime := context.WithCancel(ctx)
+	defer stopRuntime()
+	chainState.Run(runtimeContext)
 	openAI := api.NewOpenAI(api.Dependencies{
 		Hub: hub,
 		Authorize: func(ctx context.Context, token, model, endpoint string, maximum uint64) (api.Principal, error) {
@@ -73,7 +82,7 @@ func run() error {
 		Transition: repository.TransitionRequest,
 		Abort:      repository.AbortInference,
 		Persist: func(ctx context.Context, proposal api.Proposal) error {
-			return repository.CompleteInference(ctx, store.ReceiptProposal{RequestID: proposal.RequestID, SessionID: proposal.SessionID, MachineID: proposal.MachineID, OfferID: proposal.OfferID, Model: proposal.Model, PriceVersion: proposal.PriceVersion, InputTokens: proposal.InputTokens, OutputTokens: proposal.OutputTokens, ComputeMilliseconds: proposal.ComputeMilliseconds, InputHash: proposal.InputHash, OutputHash: proposal.OutputHash, CompletedAt: proposal.CompletedAt})
+			return chainState.coordinator.Complete(ctx, store.ReceiptProposal{RequestID: proposal.RequestID, SessionID: proposal.SessionID, MachineID: proposal.MachineID, OfferID: proposal.OfferID, Model: proposal.Model, PriceVersion: proposal.PriceVersion, InputTokens: proposal.InputTokens, OutputTokens: proposal.OutputTokens, ComputeMilliseconds: proposal.ComputeMilliseconds, InputHash: proposal.InputHash, OutputHash: proposal.OutputHash, CompletedAt: proposal.CompletedAt})
 		},
 	})
 	webOrigin := envOr("MYFERENCE_WEB_ORIGIN", "http://127.0.0.1:5173")
@@ -84,6 +93,7 @@ func run() error {
 		SessionLifetime: 12 * time.Hour,
 		SecureCookies:   strings.HasPrefix(webOrigin, "https://"),
 		VerificationURL: strings.TrimSuffix(webOrigin, "/") + "/devices",
+		ContractAddress: chainConfiguration.ContractAddress,
 	})
 	marketplace := api.NewMarketplace(repository, func(request *http.Request) (string, error) {
 		session, err := authService.AuthenticateBrowserRequest(request)
@@ -92,7 +102,7 @@ func run() error {
 	operations := api.NewOperations(repository, func(request *http.Request) (string, error) {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
-	}, api.OperationsConfig{ChainID: 10143, ContractAddress: os.Getenv("MYFERENCE_CONTRACT_ADDRESS"), ExplorerURL: envOr("MYFERENCE_EXPLORER_URL", "https://testnet.monadexplorer.com"), Confirmations: 2})
+	}, api.OperationsConfig{ChainID: 10143, ContractAddress: chainConfiguration.ContractAddress, ExplorerURL: envOr("MYFERENCE_EXPLORER_URL", "https://testnet.monadexplorer.com"), Confirmations: 2})
 	events, err := realtime.Open(ctx, databaseURL, func(ctx context.Context, ticket string) (string, error) {
 		return authService.ConsumeStreamTicket(ctx, ticket)
 	})

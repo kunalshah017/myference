@@ -29,12 +29,15 @@ type DeviceAuthorization struct {
 	UserCode        string    `json:"user_code"`
 	VerificationURI string    `json:"verification_uri"`
 	ExpiresAt       time.Time `json:"expires_at"`
+	ChainID         uint64    `json:"chain_id"`
+	ContractAddress string    `json:"contract_address"`
 }
 
 type Machine struct {
-	ID        string `json:"id"`
-	AccountID string `json:"account_id"`
-	Name      string `json:"name"`
+	ID            string `json:"id"`
+	AccountID     string `json:"account_id"`
+	Name          string `json:"name"`
+	SignerAddress string `json:"signer_address"`
 }
 
 type DeviceToken struct {
@@ -53,9 +56,9 @@ func NewClient(baseURL string, client *http.Client) (*Client, error) {
 	return &Client{baseURL: strings.TrimSuffix(baseURL, "/"), http: client}, nil
 }
 
-func (c *Client) CreateDeviceAuthorization(ctx context.Context, machineName string) (DeviceAuthorization, error) {
+func (c *Client) CreateDeviceAuthorization(ctx context.Context, machineName, signerAddress string) (DeviceAuthorization, error) {
 	var result DeviceAuthorization
-	err := c.post(ctx, "/auth/device", map[string]string{"machine_name": machineName}, &result)
+	err := c.post(ctx, "/auth/device", map[string]string{"machine_name": machineName, "signer_address": signerAddress}, &result)
 	return result, err
 }
 

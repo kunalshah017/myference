@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/kunalshah017/myference/cli/internal/backend"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
@@ -130,6 +132,9 @@ type Config struct {
 	Offers            []v1.OfferCapacity
 	HTTPClient        *http.Client
 	HeartbeatInterval time.Duration
+	SignerKey         *ecdsa.PrivateKey
+	ChainID           uint64
+	Contract          v1.Address
 }
 
 type Daemon struct {
@@ -208,10 +213,36 @@ func (d *Daemon) Serve(ctx context.Context) error {
 				return err
 			}
 			d.cancel(cancel.RequestID)
+		case v1.MessageReceiptProposal:
+			var proposal v1.ReceiptProposal
+			if err := envelope.DecodeBody(&proposal); err != nil {
+				return err
+			}
+			signature, err := d.signProposal(proposal)
+			if err != nil {
+				return err
+			}
+			if err := d.send(ctx, connection, v1.MessageReceiptSignature, &signature); err != nil {
+				return err
+			}
 		default:
 			return v1.ErrInvalidMessage
 		}
 	}
+}
+
+func (d *Daemon) signProposal(proposal v1.ReceiptProposal) (v1.ReceiptSignature, error) {
+	if d.config.SignerKey == nil || proposal.ChainID != d.config.ChainID || proposal.Contract != d.config.Contract {
+		return v1.ReceiptSignature{}, errors.New("receipt proposal domain does not match this machine")
+	}
+	signerAddress := crypto.PubkeyToAddress(d.config.SignerKey.PublicKey)
+	var signer v1.Address
+	copy(signer[:], signerAddress.Bytes())
+	signature, err := v1.SignReceipt(proposal.Receipt, proposal.ChainID, proposal.Contract, d.config.SignerKey)
+	if err != nil {
+		return v1.ReceiptSignature{}, err
+	}
+	return v1.ReceiptSignature{RequestID: proposal.RequestID, Signer: signer, Signature: signature}, nil
 }
 
 func (d *Daemon) heartbeat(ctx context.Context, connection *websocket.Conn, capacity *v1.Capacity, done chan<- struct{}) {

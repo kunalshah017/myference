@@ -11,11 +11,11 @@ import (
 const browserSessionCookie = "myference_session"
 
 type HTTPConfig struct {
-	Domain, VerificationURL string
-	AllowedOrigins          []string
-	ChainID                 uint64
-	SessionLifetime         time.Duration
-	SecureCookies           bool
+	Domain, VerificationURL, ContractAddress string
+	AllowedOrigins                           []string
+	ChainID                                  uint64
+	SessionLifetime                          time.Duration
+	SecureCookies                            bool
 }
 
 type SessionView struct {
@@ -29,6 +29,9 @@ type DeviceHTTPAuthorization struct {
 	UserCode        string    `json:"user_code"`
 	VerificationURI string    `json:"verification_uri"`
 	ExpiresAt       time.Time `json:"expires_at"`
+	SignerAddress   string    `json:"signer_address"`
+	ChainID         uint64    `json:"chain_id"`
+	ContractAddress string    `json:"contract_address"`
 }
 
 type DeviceToken struct {
@@ -121,13 +124,14 @@ func (h *httpHandler) session(w http.ResponseWriter, r *http.Request) {
 
 func (h *httpHandler) deviceCreate(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		MachineName string `json:"machine_name"`
+		MachineName   string `json:"machine_name"`
+		SignerAddress string `json:"signer_address"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	authz, err := h.service.CreateDeviceAuthorization(r.Context(), input.MachineName, 10*time.Minute)
-	h.write(w, DeviceHTTPAuthorization{DeviceCode: authz.DeviceCode, UserCode: authz.UserCode, VerificationURI: h.config.VerificationURL, ExpiresAt: authz.ExpiresAt}, err, http.StatusCreated)
+	authz, err := h.service.CreateDeviceAuthorization(r.Context(), input.MachineName, input.SignerAddress, 10*time.Minute)
+	h.write(w, DeviceHTTPAuthorization{DeviceCode: authz.DeviceCode, UserCode: authz.UserCode, VerificationURI: h.config.VerificationURL, ExpiresAt: authz.ExpiresAt, SignerAddress: authz.SignerAddress, ChainID: h.config.ChainID, ContractAddress: h.config.ContractAddress}, err, http.StatusCreated)
 }
 
 func (h *httpHandler) deviceToken(w http.ResponseWriter, r *http.Request) {

@@ -228,11 +228,13 @@ func (m Cancel) Validate() error {
 
 type ReceiptProposal struct {
 	RequestID string  `json:"request_id"`
+	ChainID   uint64  `json:"chain_id"`
+	Contract  Address `json:"contract"`
 	Receipt   Receipt `json:"receipt"`
 }
 
 func (m ReceiptProposal) Validate() error {
-	if strings.TrimSpace(m.RequestID) == "" {
+	if strings.TrimSpace(m.RequestID) == "" || m.ChainID == 0 || m.Contract.IsZero() {
 		return ErrInvalidMessage
 	}
 	return m.Receipt.Validate()

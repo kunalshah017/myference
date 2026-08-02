@@ -148,6 +148,32 @@ contract MyferenceMarketTest is Test {
         assertTrue(market.settledRequests(receipt.requestId));
     }
 
+    function testProviderCanAuthorizeAndRevokeHeadlessMachineSigner() public {
+        uint256 machineKey = 0xCAFE;
+        address machineSigner = vm.addr(machineKey);
+        _bondPublish(1 ether, 0, 0);
+        _openSession(2 ether, uint64(block.timestamp + 2 days));
+        MyferenceMarket.Receipt memory receipt = _receipt(keccak256("delegated-1"), 1, 1 ether);
+
+        bytes memory machineSignature = _sign(machineKey, receipt);
+        bytes memory settlementSignature = _sign(settlementKey, receipt);
+        vm.expectRevert(MyferenceMarket.InvalidReceiptSignature.selector);
+        market.settleReceipt(receipt, machineSignature, settlementSignature);
+
+        vm.prank(provider);
+        market.setProviderSigner(machineSigner, true);
+        market.settleReceipt(receipt, machineSignature, settlementSignature);
+        assertTrue(market.settledRequests(receipt.requestId));
+
+        vm.prank(provider);
+        market.setProviderSigner(machineSigner, false);
+        MyferenceMarket.Receipt memory revoked = _receipt(keccak256("delegated-2"), 2, 1 ether);
+        machineSignature = _sign(machineKey, revoked);
+        settlementSignature = _sign(settlementKey, revoked);
+        vm.expectRevert(MyferenceMarket.InvalidReceiptSignature.selector);
+        market.settleReceipt(revoked, machineSignature, settlementSignature);
+    }
+
     function testSettleRejectsReplayBadSignatureStalePriceAndMaximumExceeded() public {
         _bondPublish(1 ether, 0, 0);
         _openSession(3 ether, uint64(block.timestamp + 2 days));

@@ -50,6 +50,7 @@ type Hub struct {
 	outputStarted map[string]bool
 	chunks        *v1.ChunkTracker
 	events        chan Event
+	subscribers   map[string]map[chan Event]struct{}
 }
 
 func NewHub(auth Authenticator, options Options) *Hub {
@@ -62,7 +63,7 @@ func NewHub(auth Authenticator, options Options) *Hub {
 	if options.MaximumMessage <= 0 {
 		options.MaximumMessage = 1 << 20
 	}
-	return &Hub{auth: auth, options: options, sessions: make(map[string]*session), outputStarted: make(map[string]bool), chunks: v1.NewChunkTracker(), events: make(chan Event, 64)}
+	return &Hub{auth: auth, options: options, sessions: make(map[string]*session), outputStarted: make(map[string]bool), chunks: v1.NewChunkTracker(), events: make(chan Event, 64), subscribers: make(map[string]map[chan Event]struct{})}
 }
 
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -151,8 +152,10 @@ func (h *Hub) AcceptInbound(machineID string, envelope v1.Envelope) error {
 	default:
 		return v1.ErrInvalidMessage
 	}
+	event := Event{MachineID: machineID, Type: envelope.Type, Envelope: envelope}
+	h.publish(requestID(envelope), event)
 	select {
-	case h.events <- Event{MachineID: machineID, Type: envelope.Type, Envelope: envelope}:
+	case h.events <- event:
 		return nil
 	default:
 		return ErrBackpressure
@@ -175,6 +178,59 @@ func (h *Hub) Send(machineID string, envelope v1.Envelope) error {
 }
 
 func (h *Hub) Events() <-chan Event { return h.events }
+
+func (h *Hub) Subscribe(requestID string) (<-chan Event, func()) {
+	events := make(chan Event, 8)
+	h.mu.Lock()
+	if h.subscribers[requestID] == nil {
+		h.subscribers[requestID] = make(map[chan Event]struct{})
+	}
+	h.subscribers[requestID][events] = struct{}{}
+	h.mu.Unlock()
+	return events, func() {
+		h.mu.Lock()
+		delete(h.subscribers[requestID], events)
+		if len(h.subscribers[requestID]) == 0 {
+			delete(h.subscribers, requestID)
+		}
+		h.mu.Unlock()
+	}
+}
+
+func (h *Hub) publish(requestID string, event Event) {
+	if requestID == "" {
+		return
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for subscriber := range h.subscribers[requestID] {
+		select {
+		case subscriber <- event:
+		default:
+		}
+	}
+}
+
+func requestID(envelope v1.Envelope) string {
+	switch envelope.Type {
+	case v1.MessageJobAccept:
+		var value v1.JobAccept
+		if envelope.DecodeBody(&value) == nil {
+			return value.RequestID
+		}
+	case v1.MessageOutputChunk:
+		var value v1.OutputChunk
+		if envelope.DecodeBody(&value) == nil {
+			return value.RequestID
+		}
+	case v1.MessageReceiptSignature:
+		var value v1.ReceiptSignature
+		if envelope.DecodeBody(&value) == nil {
+			return value.RequestID
+		}
+	}
+	return ""
+}
 
 func (h *Hub) CanRetry(requestID string) bool {
 	h.mu.RLock()

@@ -20,6 +20,14 @@ var ErrTransactionReverted = errors.New("EVM transaction reverted")
 
 type Receipt = bindings.MyferenceMarketReceipt
 
+type ReceiptTerms struct {
+	ChainID          uint64
+	Contract         common.Address
+	SettlementSigner common.Address
+	FeeBasisPoints   uint16
+	FeeVersion       uint64
+}
+
 type Client struct {
 	eth             *ethclient.Client
 	chainID         *big.Int
@@ -55,6 +63,20 @@ func (c *Client) Address() common.Address { return c.address }
 
 func (c *Client) ContractAddress() common.Address { return c.contractAddress }
 
+func (c *Client) ReceiptTerms(ctx context.Context) (ReceiptTerms, error) {
+	if c.contract == nil || !c.chainID.IsUint64() {
+		return ReceiptTerms{}, errors.New("contract is not bound to a supported chain")
+	}
+	call := &bind.CallOpts{Context: ctx}
+	settlementSigner, err := c.contract.SettlementSigner(call)
+	if err != nil { return ReceiptTerms{}, err }
+	feeBasisPoints, err := c.contract.FeeBasisPoints(call)
+	if err != nil { return ReceiptTerms{}, err }
+	feeVersion, err := c.contract.FeeVersion(call)
+	if err != nil { return ReceiptTerms{}, err }
+	return ReceiptTerms{ChainID: c.chainID.Uint64(), Contract: c.contractAddress, SettlementSigner: settlementSigner, FeeBasisPoints: feeBasisPoints, FeeVersion: feeVersion}, nil
+}
+
 func (c *Client) Bind(address common.Address) error {
 	contract, err := bindings.NewMyferenceMarket(address, c.eth)
 	if err != nil {
@@ -88,6 +110,12 @@ func (c *Client) Deposit(ctx context.Context, value *big.Int) error {
 
 func (c *Client) DepositBond(ctx context.Context, value *big.Int) error {
 	return c.transact(ctx, value, func(opts *bind.TransactOpts) (*types.Transaction, error) { return c.contract.DepositBond(opts) })
+}
+
+func (c *Client) SetProviderSigner(ctx context.Context, signer common.Address, allowed bool) error {
+	return c.transact(ctx, nil, func(opts *bind.TransactOpts) (*types.Transaction, error) {
+		return c.contract.SetProviderSigner(opts, signer, allowed)
+	})
 }
 
 func (c *Client) RequestWithdrawal(ctx context.Context, amount *big.Int) error {
@@ -146,6 +174,13 @@ func (c *Client) SignReceipt(ctx context.Context, receipt Receipt) ([]byte, erro
 	}
 	signature[64] += 27
 	return signature, nil
+}
+
+func (c *Client) HashReceipt(ctx context.Context, receipt Receipt) ([32]byte, error) {
+	if c.contract == nil {
+		return [32]byte{}, errors.New("contract is not bound")
+	}
+	return c.contract.HashReceipt(&bind.CallOpts{Context: ctx}, receipt)
 }
 
 func (c *Client) SettleReceipt(ctx context.Context, receipt Receipt, providerSignature, settlementSignature []byte) error {

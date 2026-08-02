@@ -18,6 +18,13 @@ import (
 	"github.com/kunalshah017/myference/server/internal/router"
 )
 
+func TestRandomRequestIDIsDirectBytes32(t *testing.T) {
+	id, err := randomID()
+	if err != nil || len(id) != 66 || !strings.HasPrefix(id, "0x") {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+}
+
 func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	hub := relay.NewHub(func(context.Context, string) (string, error) { return "machine-1", nil }, relay.Options{HeartbeatTimeout: time.Second})
 	relayServer := httptest.NewTLSServer(hub)

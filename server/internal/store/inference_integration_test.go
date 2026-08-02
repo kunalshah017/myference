@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
 
@@ -118,12 +120,12 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	for _, name := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000007_provider_operations.sql"} {
+	for _, name := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000007_provider_operations.sql", "000008_machine_signers.sql", "000009_receipt_coordination.sql"} {
 		if err := s.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", name)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, "TRUNCATE receipt_proposals,inference_reservations,provider_routing_state,outbox,requests,sessions,offers,backends,machines,accounts,chain_offers,chain_accounts CASCADE"); err != nil {
+	if _, err := s.db.ExecContext(ctx, "TRUNCATE receipt_proposals,inference_reservations,provider_routing_state,outbox,requests,sessions,offers,backends,machines,accounts,chain_offers,chain_provider_signers,chain_accounts CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateAccount(ctx, Account{ID: "reconcile-account", WalletAddress: "0x1111111111111111111111111111111111111111"}); err != nil {
@@ -132,14 +134,26 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	if err := s.CreateMachine(ctx, Machine{ID: "reconcile-machine", AccountID: "reconcile-account", Name: "unused-mac"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE machines SET signer_address='0x3333333333333333333333333333333333333333' WHERE id='reconcile-machine'`); err != nil {
+		t.Fatal(err)
+	}
 	contract := "0x4444444444444444444444444444444444444444"
+	offerHash := crypto.Keccak256Hash([]byte("local-qwen")).Hex()
+	modelHash := crypto.Keccak256Hash([]byte("qwen")).Hex()
+	capabilityHash := crypto.Keccak256Hash([]byte("stream,text")).Hex()
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_accounts(chain_id,contract_address,address,provider_bond) VALUES (10143,$1,'0x1111111111111111111111111111111111111111',100)`, contract); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_offers(chain_id,contract_address,provider,offer_id,version,model_hash,capability_hash,input_per_million,output_per_million,compute_per_second) VALUES (10143,$1,'0x1111111111111111111111111111111111111111','0xoffer',1,'0xmodel','0xcap',10,20,30)`, contract); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_offers(chain_id,contract_address,provider,offer_id,version,model_hash,capability_hash,input_per_million,output_per_million,compute_per_second) VALUES (10143,$1,'0x1111111111111111111111111111111111111111',$2,1,$3,$4,10,20,30)`, contract, offerHash, modelHash, capabilityHash); err != nil {
 		t.Fatal(err)
 	}
-	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "local-qwen", Model: "qwen", PriceVersion: 1, BackendKind: "ollama", OfferHash: "0xoffer", ModelHash: "0xmodel", CapabilityHash: "0xcap"}}}
+	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "local-qwen", Model: "qwen", PriceVersion: 1, BackendKind: "ollama", OfferHash: offerHash, ModelHash: modelHash, CapabilityHash: capabilityHash}}}
+	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", capacity, 10143, contract); !errors.Is(err, ErrIneligibleRoute) {
+		t.Fatalf("expected unauthorized signer rejection, got %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_provider_signers(chain_id,contract_address,provider,signer,allowed) VALUES (10143,$1,'0x1111111111111111111111111111111111111111','0x3333333333333333333333333333333333333333',true)`, contract); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", capacity, 10143, contract); err != nil {
 		t.Fatal(err)
 	}
@@ -149,5 +163,26 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	}
 	if len(candidates) != 1 || !candidates[0].ConfirmedBond || candidates[0].MaximumCost != 60 || candidates[0].Capacity != 1 {
 		t.Fatalf("unexpected reconciled route: %+v", candidates)
+	}
+	requestID := "0x" + strings.Repeat("12", 32)
+	sessionID := "0x" + strings.Repeat("34", 32)
+	if err := s.CreateAccount(ctx, Account{ID: "receipt-customer", WalletAddress: "0x5555555555555555555555555555555555555555"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO sessions(id,account_id,state,confirmed_balance_wei) VALUES ($1,'receipt-customer','open',60)`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO requests(id,session_id,state,machine_id,offer_id,price_version,maximum_spend) VALUES ($1,$2,'streaming','reconcile-machine','local-qwen',1,60)`, requestID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteInference(ctx, ReceiptProposal{RequestID: requestID, SessionID: sessionID, MachineID: "reconcile-machine", OfferID: "local-qwen", Model: "qwen", PriceVersion: 1, InputTokens: 1, OutputTokens: 1, ComputeMilliseconds: 1, InputHash: [32]byte{1}, OutputHash: [32]byte{2}, CompletedAt: time.Unix(100, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	receipt, machineID, signer, err := s.PrepareReceipt(ctx, requestID, ReceiptDomain{ChainID: 10143, ContractAddress: contract, SettlementSigner: "0x6666666666666666666666666666666666666666", FeeBasisPoints: 500, FeeVersion: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if machineID != "reconcile-machine" || signer != "0x3333333333333333333333333333333333333333" || receipt.TotalCharge != 3 || receipt.MaximumCharge != 60 || receipt.Nonce != 1 || receipt.OfferID != v1.Hash(crypto.Keccak256Hash([]byte("local-qwen"))) {
+		t.Fatalf("prepared receipt=%+v machine=%q signer=%q", receipt, machineID, signer)
 	}
 }

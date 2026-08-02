@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -31,14 +32,15 @@ type Service struct {
 }
 
 type DeviceAuthorization struct {
-	DeviceCode, UserCode, AccountID string
-	ExpiresAt                       time.Time
+	DeviceCode, UserCode, AccountID, SignerAddress string
+	ExpiresAt                                      time.Time
 }
 
 type Machine struct {
-	ID        string `json:"id"`
-	AccountID string `json:"account_id"`
-	Name      string `json:"name"`
+	ID            string `json:"id"`
+	AccountID     string `json:"account_id"`
+	Name          string `json:"name"`
+	SignerAddress string `json:"signer_address"`
 }
 type MachinePrincipal struct{ MachineID, AccountID string }
 
@@ -68,10 +70,11 @@ func Open(ctx context.Context, databaseURL string) (*Service, error) {
 
 func (s *Service) Close() error { return s.db.Close() }
 
-func (s *Service) CreateDeviceAuthorization(ctx context.Context, machineName string, lifetime time.Duration) (DeviceAuthorization, error) {
-	if strings.TrimSpace(machineName) == "" || lifetime <= 0 {
-		return DeviceAuthorization{}, errors.New("machine name and positive lifetime are required")
+func (s *Service) CreateDeviceAuthorization(ctx context.Context, machineName, signerAddress string, lifetime time.Duration) (DeviceAuthorization, error) {
+	if strings.TrimSpace(machineName) == "" || !common.IsHexAddress(signerAddress) || common.HexToAddress(signerAddress) == (common.Address{}) || lifetime <= 0 {
+		return DeviceAuthorization{}, errors.New("machine name, signer address, and positive lifetime are required")
 	}
+	signerAddress = common.HexToAddress(signerAddress).Hex()
 	deviceCode, err := randomToken(32)
 	if err != nil {
 		return DeviceAuthorization{}, err
@@ -82,8 +85,8 @@ func (s *Service) CreateDeviceAuthorization(ctx context.Context, machineName str
 	}
 	userCode := strings.ToUpper(hex.EncodeToString(userBytes))
 	expiresAt := s.now().UTC().Truncate(time.Microsecond).Add(lifetime)
-	_, err = s.db.ExecContext(ctx, `INSERT INTO device_authorizations (device_code_hash, user_code_hash, machine_name, expires_at) VALUES ($1, $2, $3, $4)`, digest(deviceCode), digest(userCode), machineName, expiresAt)
-	return DeviceAuthorization{DeviceCode: deviceCode, UserCode: userCode, ExpiresAt: expiresAt}, err
+	_, err = s.db.ExecContext(ctx, `INSERT INTO device_authorizations (device_code_hash, user_code_hash, machine_name, signer_address, expires_at) VALUES ($1, $2, $3, $4, $5)`, digest(deviceCode), digest(userCode), machineName, signerAddress, expiresAt)
+	return DeviceAuthorization{DeviceCode: deviceCode, UserCode: userCode, SignerAddress: signerAddress, ExpiresAt: expiresAt}, err
 }
 
 func (s *Service) PollDeviceAuthorization(ctx context.Context, deviceCode string) (DeviceAuthorization, error) {
@@ -132,7 +135,7 @@ func (s *Service) ExchangeDeviceAuthorization(ctx context.Context, deviceCode st
 	var accountID sql.NullString
 	var expiresAt time.Time
 	var exchangedAt sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT account_id, machine_name, expires_at, exchanged_at FROM device_authorizations WHERE device_code_hash = $1 FOR UPDATE`, digest(deviceCode)).Scan(&accountID, &machine.Name, &expiresAt, &exchangedAt)
+	err = tx.QueryRowContext(ctx, `SELECT account_id, machine_name, signer_address, expires_at, exchanged_at FROM device_authorizations WHERE device_code_hash = $1 FOR UPDATE`, digest(deviceCode)).Scan(&accountID, &machine.Name, &machine.SignerAddress, &expiresAt, &exchangedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Machine{}, "", ErrInvalidCredential
 	}
@@ -157,7 +160,7 @@ func (s *Service) ExchangeDeviceAuthorization(ctx context.Context, deviceCode st
 	if err != nil {
 		return Machine{}, "", err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO machines (id, account_id, name) VALUES ($1, $2, $3)`, machine.ID, machine.AccountID, machine.Name); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO machines (id, account_id, name, signer_address) VALUES ($1, $2, $3, $4)`, machine.ID, machine.AccountID, machine.Name, machine.SignerAddress); err != nil {
 		return Machine{}, "", err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO machine_tokens (machine_id, token_hash) VALUES ($1, $2)`, machine.ID, digest(secret)); err != nil {

@@ -15,11 +15,11 @@ func TestClientCreatesAndExchangesDeviceAuthorization(t *testing.T) {
 		switch r.URL.Path {
 		case "/auth/device":
 			var input map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input["machine_name"] != "render-node" {
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input["machine_name"] != "render-node" || input["signer_address"] != "0x0000000000000000000000000000000000001234" {
 				t.Fatalf("unexpected device request: %+v err=%v", input, err)
 			}
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"device_code":"device-secret","user_code":"ABCD1234","verification_uri":"https://app.myference.test/devices","expires_at":"2026-08-02T18:00:00Z"}`))
+			_, _ = w.Write([]byte(`{"device_code":"device-secret","user_code":"ABCD1234","verification_uri":"https://app.myference.test/devices","expires_at":"2026-08-02T18:00:00Z","chain_id":10143,"contract_address":"0x4444444444444444444444444444444444444444"}`))
 		case "/auth/device/token":
 			polls++
 			if polls == 1 {
@@ -37,8 +37,8 @@ func TestClientCreatesAndExchangesDeviceAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authz, err := client.CreateDeviceAuthorization(t.Context(), "render-node")
-	if err != nil || authz.UserCode != "ABCD1234" {
+	authz, err := client.CreateDeviceAuthorization(t.Context(), "render-node", "0x0000000000000000000000000000000000001234")
+	if err != nil || authz.UserCode != "ABCD1234" || authz.ChainID != 10143 || authz.ContractAddress != "0x4444444444444444444444444444444444444444" {
 		t.Fatalf("authz=%+v err=%v", authz, err)
 	}
 	if _, err := client.ExchangeDeviceAuthorization(t.Context(), authz.DeviceCode); err != ErrPending {

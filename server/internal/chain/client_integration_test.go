@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	v1 "github.com/kunalshah017/myference/protocol/v1"
 	"github.com/kunalshah017/myference/server/internal/store"
 )
 
@@ -48,10 +49,17 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if err := provider.Bind(address); err != nil {
 		t.Fatal(err)
 	}
+	terms, err := owner.ReceiptTerms(ctx)
+	if err != nil || terms.ChainID != 31337 || terms.Contract != address || terms.SettlementSigner != owner.Address() || terms.FeeBasisPoints != 500 || terms.FeeVersion != 1 {
+		t.Fatalf("receipt terms=%+v err=%v", terms, err)
+	}
 	if err := owner.Deposit(ctx, big.NewInt(1_000)); err != nil {
 		t.Fatal(err)
 	}
 	if err := provider.DepositBond(ctx, big.NewInt(100)); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.SetProviderSigner(ctx, owner.Address(), true); err != nil {
 		t.Fatal(err)
 	}
 	offerID := crypto.Keccak256Hash([]byte("offer"))
@@ -89,6 +97,17 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 		FeeBasisPoints: 500, FeeVersion: 1, Status: 1, CompletedAt: header.Time,
 		InputHash: crypto.Keccak256Hash([]byte("input")), OutputHash: crypto.Keccak256Hash([]byte("output")), Nonce: 1,
 	}
+	protocolReceipt := v1.Receipt{
+		RequestID: v1.Hash(receipt.RequestId), SessionID: v1.Hash(receipt.SessionId), Customer: v1.Address(receipt.Customer), Provider: v1.Address(receipt.Provider), SettlementSigner: v1.Address(receipt.SettlementSigner), OfferID: v1.Hash(receipt.OfferId), PriceVersion: receipt.PriceVersion, ModelHash: v1.Hash(receipt.ModelHash), CapabilityHash: v1.Hash(receipt.CapabilityHash), InputTokens: receipt.InputTokens, OutputTokens: receipt.OutputTokens, ComputeMilliseconds: receipt.ComputeMilliseconds, MaximumCharge: receipt.MaximumCharge, TotalCharge: receipt.TotalCharge, FeeBasisPoints: receipt.FeeBasisPoints, FeeVersion: receipt.FeeVersion, Status: v1.ReceiptStatus(receipt.Status), CompletedAt: receipt.CompletedAt, InputHash: v1.Hash(receipt.InputHash), OutputHash: v1.Hash(receipt.OutputHash), Nonce: receipt.Nonce,
+	}
+	offlineDigest, err := v1.ReceiptDigest(protocolReceipt, 31337, v1.Address(address))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contractDigest, err := owner.HashReceipt(ctx, receipt)
+	if err != nil || [32]byte(offlineDigest) != contractDigest {
+		t.Fatalf("offline digest=%x contract=%x err=%v", offlineDigest, contractDigest, err)
+	}
 	providerSignature, err := provider.SignReceipt(ctx, receipt)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +133,7 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql", "000007_provider_operations.sql"} {
+	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql", "000007_provider_operations.sql", "000008_machine_signers.sql"} {
 		if err := repository.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", migration)); err != nil {
 			t.Fatal(err)
 		}
@@ -132,6 +151,10 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	receipt.RequestId = crypto.Keccak256Hash([]byte("request-batch-" + suffix))
 	receipt.Nonce = 2
 	if _, err := queue.db.ExecContext(ctx, `INSERT INTO accounts(id,wallet_address) VALUES ($1,$2)`, "settle-account-"+suffix, "settle-wallet-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	chainAccountID := "chain-customer-" + suffix
+	if err := queue.db.QueryRowContext(ctx, `INSERT INTO accounts(id,wallet_address) VALUES ($1,$2) ON CONFLICT(wallet_address) DO UPDATE SET wallet_address=EXCLUDED.wallet_address RETURNING id`, chainAccountID, owner.Address().Hex()).Scan(&chainAccountID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := queue.db.ExecContext(ctx, `INSERT INTO sessions(id,account_id,state) VALUES ($1,$2,'open')`, "settle-session-"+suffix, "settle-account-"+suffix); err != nil {
@@ -168,6 +191,17 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	defer indexer.Close()
 	if err := indexer.Sync(ctx); err != nil {
 		t.Fatal(err)
+	}
+	var operationalAccount, operationalState, operationalBalance string
+	if err := queue.db.QueryRowContext(ctx, `SELECT account_id,state,confirmed_balance_wei::text FROM sessions WHERE id=$1`, sessionID.Hex()).Scan(&operationalAccount, &operationalState, &operationalBalance); err != nil {
+		t.Fatal(err)
+	}
+	if operationalAccount != chainAccountID || operationalState != "closing" || operationalBalance != "460" {
+		t.Fatalf("operational session account=%q state=%q balance=%q", operationalAccount, operationalState, operationalBalance)
+	}
+	var signerAllowed bool
+	if err := queue.db.QueryRowContext(ctx, `SELECT allowed FROM chain_provider_signers WHERE chain_id=$1 AND contract_address=$2 AND lower(provider)=lower($3) AND lower(signer)=lower($4)`, indexer.chainID.String(), address.Hex(), provider.Address().Hex(), owner.Address().Hex()).Scan(&signerAllowed); err != nil || !signerAllowed {
+		t.Fatalf("indexed signer allowed=%v err=%v", signerAllowed, err)
 	}
 	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM settlement_queue WHERE request_id=$1`, hashHex(batchRequestID)).Scan(&state); err != nil || state != "settled" {
 		t.Fatalf("queue after confirmation=%q err=%v", state, err)

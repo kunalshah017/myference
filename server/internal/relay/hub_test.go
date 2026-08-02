@@ -102,6 +102,26 @@ func TestHubRejectsDuplicateChunksAndExpiresSilentConnections(t *testing.T) {
 	}
 }
 
+func TestHubPublishesReceiptSignatureToRequestSubscriber(t *testing.T) {
+	hub := NewHub(func(context.Context, string) (string, error) { return "machine-1", nil }, Options{})
+	events, cancel := hub.Subscribe("request-2")
+	defer cancel()
+	signer := v1.Address{}
+	signer[19] = 1
+	signature := &v1.ReceiptSignature{RequestID: "request-2", Signer: signer, Signature: make([]byte, 65)}
+	if err := hub.AcceptInbound("machine-1", envelope(t, "signature-1", v1.MessageReceiptSignature, signature)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event.Type != v1.MessageReceiptSignature || event.MachineID != "machine-1" {
+			t.Fatalf("unexpected event: %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("receipt subscriber timed out")
+	}
+}
+
 func writeEnvelope(t *testing.T, connection *websocket.Conn, id, messageType string, body v1.Validatable) {
 	t.Helper()
 	encoded, err := json.Marshal(envelope(t, id, messageType, body))

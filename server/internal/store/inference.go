@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	v1 "github.com/kunalshah017/myference/protocol/v1"
@@ -102,9 +103,15 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 	if _, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=0,updated_at=now() WHERE machine_id=$1`, machineID); err != nil {
 		return err
 	}
-	var wallet string
-	if err := tx.QueryRowContext(ctx, `SELECT a.wallet_address FROM machines m JOIN accounts a ON a.id=m.account_id WHERE m.id=$1 AND m.revoked_at IS NULL`, machineID).Scan(&wallet); err != nil {
+	var wallet, signer string
+	if err := tx.QueryRowContext(ctx, `SELECT a.wallet_address,m.signer_address FROM machines m JOIN accounts a ON a.id=m.account_id WHERE m.id=$1 AND m.revoked_at IS NULL AND m.signer_address IS NOT NULL`, machineID).Scan(&wallet, &signer); err != nil {
 		return err
+	}
+	if !strings.EqualFold(wallet, signer) {
+		var authorized bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chain_provider_signers WHERE chain_id=$1 AND lower(contract_address)=lower($2) AND lower(provider)=lower($3) AND lower(signer)=lower($4) AND allowed)`, chainID, contractAddress, wallet, signer).Scan(&authorized); err != nil || !authorized {
+			return ErrIneligibleRoute
+		}
 	}
 	for _, offered := range capacity.Offers {
 		if offered.OfferHash == "" {

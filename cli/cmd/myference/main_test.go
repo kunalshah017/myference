@@ -48,12 +48,18 @@ func TestBackendCommandsAddListStartStopAndStatus(t *testing.T) {
 }
 
 func TestLoginUsesBrowserDeviceFlowAndKeepsTokenOutOfConfig(t *testing.T) {
+	var requestedSigner string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/auth/device":
+			var input map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				t.Fatal(err)
+			}
+			requestedSigner = input["signer_address"]
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]any{"device_code": "device-secret", "user_code": "ABCD1234", "verification_uri": "https://app.myference.test/devices", "expires_at": time.Now().Add(time.Minute)})
+			_ = json.NewEncoder(w).Encode(map[string]any{"device_code": "device-secret", "user_code": "ABCD1234", "verification_uri": "https://app.myference.test/devices", "expires_at": time.Now().Add(time.Minute), "chain_id": 10143, "contract_address": "0x4444444444444444444444444444444444444444"})
 		case "/auth/device/token":
 			_ = json.NewEncoder(w).Encode(map[string]any{"machine": map[string]string{"id": "mach-1", "account_id": "acct-1", "name": "spare-mac"}, "token": "mach-1.machine-secret"})
 		default:
@@ -62,25 +68,27 @@ func TestLoginUsesBrowserDeviceFlowAndKeepsTokenOutOfConfig(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	path := filepath.Join(t.TempDir(), "config.json")
-	var opened, savedAccount, savedSecret string
+	var opened string
+	saved := map[string]string{}
 	var output bytes.Buffer
 	err := runLogin(context.Background(), []string{"--server", server.URL, "--name", "spare-mac", "--config", path}, &output, loginDependencies{
-		HTTPClient:     server.Client(),
-		OpenBrowser:    func(uri string) error { opened = uri; return nil },
-		SaveCredential: func(_, account, secret string) error { savedAccount, savedSecret = account, secret; return nil },
-		Wait:           func(context.Context, time.Duration) error { return nil },
+		HTTPClient:       server.Client(),
+		OpenBrowser:      func(uri string) error { opened = uri; return nil },
+		SaveCredential:   func(service, account, secret string) error { saved[service+":"+account] = secret; return nil },
+		DeleteCredential: func(_, _ string) error { return nil },
+		Wait:             func(context.Context, time.Duration) error { return nil },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opened != "https://app.myference.test/devices" || savedAccount != "mach-1" || savedSecret != "mach-1.machine-secret" {
-		t.Fatalf("opened=%q account=%q secret=%q", opened, savedAccount, savedSecret)
+	if opened != "https://app.myference.test/devices" || saved["myference.machine:mach-1"] != "mach-1.machine-secret" || saved["myference.signer:mach-1"] == "" || !strings.HasPrefix(requestedSigner, "0x") || len(requestedSigner) != 42 {
+		t.Fatalf("opened=%q signer=%q saved=%v", opened, requestedSigner, saved)
 	}
 	loaded, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.ServerURL != server.URL || loaded.AccountID != "acct-1" || loaded.MachineID != "mach-1" {
+	if loaded.ServerURL != server.URL || loaded.AccountID != "acct-1" || loaded.MachineID != "mach-1" || loaded.ChainID != 10143 || loaded.ContractAddress != "0x4444444444444444444444444444444444444444" {
 		t.Fatalf("unexpected config: %+v", loaded)
 	}
 	raw, err := os.ReadFile(path)

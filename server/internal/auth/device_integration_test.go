@@ -13,7 +13,8 @@ import (
 
 func TestDeviceAuthorizationIsExpiringOneTimeAndRevocable(t *testing.T) {
 	ctx, service, accountID := newIntegrationService(t)
-	authz, err := service.CreateDeviceAuthorization(ctx, "windows-worker", 5*time.Minute)
+	signer := "0x0000000000000000000000000000000000001234"
+	authz, err := service.CreateDeviceAuthorization(ctx, "windows-worker", signer, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestDeviceAuthorizationIsExpiringOneTimeAndRevocable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token == "" || machine.AccountID != accountID || machine.Name != "windows-worker" {
+	if token == "" || machine.AccountID != accountID || machine.Name != "windows-worker" || machine.SignerAddress != signer {
 		t.Fatalf("machine=%+v tokenEmpty=%v", machine, token == "")
 	}
 	if _, _, err := service.ExchangeDeviceAuthorization(ctx, authz.DeviceCode); !errors.Is(err, ErrAuthorizationConsumed) {
@@ -49,7 +50,7 @@ func TestDeviceAuthorizationIsExpiringOneTimeAndRevocable(t *testing.T) {
 		t.Fatalf("expected revoked token rejection, got %v", err)
 	}
 
-	expired, err := service.CreateDeviceAuthorization(ctx, "expired-worker", time.Minute)
+	expired, err := service.CreateDeviceAuthorization(ctx, "expired-worker", "0x000000000000000000000000000000000000bEEF", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +107,9 @@ func newIntegrationService(t *testing.T) (context.Context, *Service, string) {
 	}
 	t.Cleanup(func() { control.Close() })
 	if err := control.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", "000001_control_plane.sql")); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", "000008_machine_signers.sql")); err != nil {
 		t.Fatal(err)
 	}
 	accountID := "acct-" + time.Now().Format("150405.000000000")

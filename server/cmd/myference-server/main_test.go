@@ -3,8 +3,20 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+func TestChainRuntimeConfigurationRejectsMissingAndLocalMainnetMixups(t *testing.T) {
+	if _, err := loadChainConfig(func(string) string { return "" }); err == nil {
+		t.Fatal("accepted missing chain runtime")
+	}
+	values := map[string]string{"MYFERENCE_RPC_URL": "http://127.0.0.1:8546", "MYFERENCE_CONTRACT_ADDRESS": "0x4444444444444444444444444444444444444444", "MYFERENCE_SETTLEMENT_PRIVATE_KEY": strings.Repeat("1", 64), "MYFERENCE_CHAIN_START_BLOCK": "10"}
+	config, err := loadChainConfig(func(name string) string { return values[name] })
+	if err != nil || config.StartBlock != 10 {
+		t.Fatalf("config=%+v err=%v", config, err)
+	}
+}
 
 func TestRootHandlerMountsRelayInferenceAndAccountAPIs(t *testing.T) {
 	marker := func(name string) http.Handler {

@@ -35,8 +35,9 @@ type BrowserSession struct {
 }
 
 type PendingDevice struct {
-	MachineName string    `json:"machine_name"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	MachineName   string    `json:"machine_name"`
+	SignerAddress string    `json:"signer_address"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 type APIKeyRecord struct {
@@ -142,7 +143,7 @@ func (s *Service) AuthenticateBrowserSession(ctx context.Context, token string) 
 func (s *Service) PendingDevice(ctx context.Context, userCode string) (PendingDevice, error) {
 	var pending PendingDevice
 	var approved, exchanged sql.NullTime
-	err := s.db.QueryRowContext(ctx, `SELECT machine_name, expires_at, approved_at, exchanged_at FROM device_authorizations WHERE user_code_hash=$1`, digest(strings.ToUpper(userCode))).Scan(&pending.MachineName, &pending.ExpiresAt, &approved, &exchanged)
+	err := s.db.QueryRowContext(ctx, `SELECT machine_name, signer_address, expires_at, approved_at, exchanged_at FROM device_authorizations WHERE user_code_hash=$1`, digest(strings.ToUpper(userCode))).Scan(&pending.MachineName, &pending.SignerAddress, &pending.ExpiresAt, &approved, &exchanged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PendingDevice{}, ErrInvalidCredential
 	}

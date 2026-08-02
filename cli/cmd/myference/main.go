@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/kunalshah017/myference/cli/internal/account"
 	"github.com/kunalshah017/myference/cli/internal/backend"
@@ -26,7 +27,10 @@ import (
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
 
-const machineCredentialService = "myference.machine"
+const (
+	machineCredentialService = "myference.machine"
+	signerCredentialService  = "myference.signer"
+)
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
@@ -77,17 +81,19 @@ func run(args []string, output io.Writer) error {
 }
 
 type loginDependencies struct {
-	HTTPClient     *http.Client
-	OpenBrowser    func(string) error
-	SaveCredential func(string, string, string) error
-	Wait           func(context.Context, time.Duration) error
+	HTTPClient       *http.Client
+	OpenBrowser      func(string) error
+	SaveCredential   func(string, string, string) error
+	DeleteCredential func(string, string) error
+	Wait             func(context.Context, time.Duration) error
 }
 
 func defaultLoginDependencies() loginDependencies {
 	return loginDependencies{
-		HTTPClient:     &http.Client{Timeout: 15 * time.Second},
-		OpenBrowser:    openBrowser,
-		SaveCredential: credential.Save,
+		HTTPClient:       &http.Client{Timeout: 15 * time.Second},
+		OpenBrowser:      openBrowser,
+		SaveCredential:   credential.Save,
+		DeleteCredential: credential.Delete,
 		Wait: func(ctx context.Context, duration time.Duration) error {
 			timer := time.NewTimer(duration)
 			defer timer.Stop()
@@ -122,7 +128,13 @@ func runLogin(ctx context.Context, args []string, output io.Writer, dependencies
 	if err != nil {
 		return err
 	}
-	authorization, err := client.CreateDeviceAuthorization(ctx, *machineName)
+	signerKey, err := crypto.GenerateKey()
+	if err != nil {
+		return fmt.Errorf("generate machine signer: %w", err)
+	}
+	signerAddress := crypto.PubkeyToAddress(signerKey.PublicKey).Hex()
+	signerSecret := fmt.Sprintf("%x", crypto.FromECDSA(signerKey))
+	authorization, err := client.CreateDeviceAuthorization(ctx, *machineName, signerAddress)
 	if err != nil {
 		return err
 	}
@@ -147,10 +159,22 @@ func runLogin(ctx context.Context, args []string, output io.Writer, dependencies
 	if err != nil {
 		return err
 	}
+	if exchanged.Machine.SignerAddress != "" && !strings.EqualFold(exchanged.Machine.SignerAddress, signerAddress) {
+		return errors.New("server returned a different machine signer")
+	}
+	if err := dependencies.SaveCredential(signerCredentialService, exchanged.Machine.ID, signerSecret); err != nil {
+		return fmt.Errorf("store signer credential: %w", err)
+	}
 	if err := dependencies.SaveCredential(machineCredentialService, exchanged.Machine.ID, exchanged.Token); err != nil {
+		if dependencies.DeleteCredential != nil {
+			_ = dependencies.DeleteCredential(signerCredentialService, exchanged.Machine.ID)
+		}
 		return fmt.Errorf("store machine credential: %w", err)
 	}
-	cfg := config.Config{ServerURL: *serverURL, AccountID: exchanged.Machine.AccountID, MachineID: exchanged.Machine.ID}
+	if authorization.ChainID == 0 || !common.IsHexAddress(authorization.ContractAddress) || common.HexToAddress(authorization.ContractAddress) == (common.Address{}) {
+		return errors.New("server did not provide a valid settlement contract")
+	}
+	cfg := config.Config{ServerURL: *serverURL, AccountID: exchanged.Machine.AccountID, MachineID: exchanged.Machine.ID, ChainID: authorization.ChainID, ContractAddress: common.HexToAddress(authorization.ContractAddress).Hex()}
 	if existing, loadErr := config.Load(*path); loadErr == nil {
 		cfg.Backends = existing.Backends
 	}
@@ -170,6 +194,16 @@ func runServe(ctx context.Context, path string, output io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("load machine credential: %w", err)
 	}
+	signerSecret, err := credential.Load(signerCredentialService, cfg.MachineID)
+	if err != nil {
+		return fmt.Errorf("load signer credential: %w", err)
+	}
+	signerKey, err := crypto.HexToECDSA(strings.TrimPrefix(signerSecret, "0x"))
+	if err != nil || cfg.ChainID == 0 || !common.IsHexAddress(cfg.ContractAddress) {
+		return errors.New("invalid machine signer or settlement domain")
+	}
+	var contract v1.Address
+	copy(contract[:], common.HexToAddress(cfg.ContractAddress).Bytes())
 	relay, err := relayURL(cfg.ServerURL)
 	if err != nil {
 		return err
@@ -205,7 +239,7 @@ func runServe(ctx context.Context, path string, output io.Writer) error {
 	if _, err := fmt.Fprintf(output, "serving %d offer(s) from machine %s\n", len(offers), cfg.MachineID); err != nil {
 		return err
 	}
-	daemon := provider.NewDaemon(provider.Config{RelayURL: relay, Token: token, MachineID: cfg.MachineID, Offers: offers}, backends)
+	daemon := provider.NewDaemon(provider.Config{RelayURL: relay, Token: token, MachineID: cfg.MachineID, Offers: offers, SignerKey: signerKey, ChainID: cfg.ChainID, Contract: contract}, backends)
 	return daemon.Serve(ctx)
 }
 

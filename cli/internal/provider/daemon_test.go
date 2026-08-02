@@ -13,9 +13,40 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/kunalshah017/myference/cli/internal/backend"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
+
+func TestDaemonSignsOnlyPinnedReceiptDomain(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract v1.Address
+	contract[19] = 9
+	receipt := validDaemonReceipt(v1.Address(crypto.PubkeyToAddress(key.PublicKey)))
+	daemon := NewDaemon(Config{SignerKey: key, ChainID: 10143, Contract: contract}, nil)
+	signed, err := daemon.signProposal(v1.ReceiptProposal{RequestID: "request-1", ChainID: 10143, Contract: contract, Receipt: receipt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := v1.RecoverReceiptSigner(receipt, 10143, contract, signed.Signature)
+	if err != nil || recovered != signed.Signer {
+		t.Fatalf("recovered=%x signed=%x err=%v", recovered, signed.Signer, err)
+	}
+	other := contract
+	other[19]++
+	if _, err := daemon.signProposal(v1.ReceiptProposal{RequestID: "request-1", ChainID: 10143, Contract: other, Receipt: receipt}); err == nil {
+		t.Fatal("accepted unpinned receipt domain")
+	}
+}
+
+func validDaemonReceipt(provider v1.Address) v1.Receipt {
+	hash := func(seed byte) v1.Hash { var value v1.Hash; value[0] = seed; return value }
+	address := func(seed byte) v1.Address { var value v1.Address; value[19] = seed; return value }
+	return v1.Receipt{RequestID: hash(1), SessionID: hash(2), Customer: address(1), Provider: provider, SettlementSigner: address(2), OfferID: hash(3), PriceVersion: 1, ModelHash: hash(4), CapabilityHash: hash(5), InputTokens: 1, OutputTokens: 1, MaximumCharge: 10, TotalCharge: 2, FeeBasisPoints: 500, FeeVersion: 1, Status: v1.ReceiptStatusCompleted, CompletedAt: 1, InputHash: hash(6), OutputHash: hash(7), Nonce: 1}
+}
 
 func TestRequestStateAcceptsOneLeaseOrdersChunksAndReconnectsFromCursor(t *testing.T) {
 	state := NewRequestState()

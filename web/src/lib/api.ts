@@ -1,6 +1,6 @@
 export type Session = { account_id: string; wallet_address: `0x${string}`; expires_at: string }
 export type WalletChallenge = { id: string; nonce: string; message: string; expires_at: string }
-export type PendingDevice = { machine_name: string; expires_at: string }
+export type PendingDevice = { machine_name: string; signer_address: `0x${string}`; expires_at: string }
 export type APIKeyScope = { models: string[]; endpoints: string[]; max_spend_wei: string }
 export type APIKey = { id: string; token?: string; scope: APIKeyScope; created_at?: string }
 export type StreamTicket = { ticket: string; expires_at: string }
