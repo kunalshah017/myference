@@ -103,25 +103,25 @@ Commit: `git add go.mod Makefile docker-compose.yml protocol/v1/price.go protoco
 - Create: `protocol/v1/receipt.go`
 - Create: `protocol/v1/receipt_test.go`
 
-- [ ] **Step 1: Write failing round-trip and validation tests**
+- [x] **Step 1: Write failing round-trip and validation tests**
 
 Test `Hello`, `Capacity`, `JobOffer`, `JobAccept`, `OutputChunk`, `Cancel`, `ReceiptProposal`, and `ReceiptSignature`. Assert protocol version `1`, non-empty request IDs, positive lease deadlines, monotonically increasing chunk sequence, 32-byte hashes, and 20-byte EVM addresses.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./protocol/v1 -run 'TestMessage|TestReceipt' -v`
 
 Expected: FAIL because the message and receipt types do not exist.
 
-- [ ] **Step 3: Implement strict JSON envelopes**
+- [x] **Step 3: Implement strict JSON envelopes**
 
 Define `Envelope{Version uint16, Type string, ID string, Body json.RawMessage}` and a decoder that uses `json.Decoder.DisallowUnknownFields()`, rejects bodies larger than the configured protocol limit, and calls each message's `Validate()` method. Use UUID strings for transport IDs and `[32]byte` for on-chain request IDs and hashes.
 
-- [ ] **Step 4: Implement the EIP-712 receipt fields**
+- [x] **Step 4: Implement the EIP-712 receipt fields**
 
 The Go `Receipt` must exactly match the Solidity struct order: request ID, session ID, customer, provider, settlement signer, offer ID, price version, model hash, capability hash, input tokens, output tokens, compute milliseconds, maximum charge, total charge, fee basis points, fee version, status, completed timestamp, input hash, output hash, and nonce.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `go test ./protocol/v1 -v`
 
