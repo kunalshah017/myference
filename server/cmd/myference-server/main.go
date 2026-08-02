@@ -14,6 +14,7 @@ import (
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 	"github.com/kunalshah017/myference/server/internal/api"
 	"github.com/kunalshah017/myference/server/internal/auth"
+	"github.com/kunalshah017/myference/server/internal/realtime"
 	"github.com/kunalshah017/myference/server/internal/relay"
 	"github.com/kunalshah017/myference/server/internal/router"
 	"github.com/kunalshah017/myference/server/internal/store"
@@ -81,7 +82,19 @@ func run() error {
 		SecureCookies:   strings.HasPrefix(webOrigin, "https://"),
 		VerificationURL: strings.TrimSuffix(webOrigin, "/") + "/devices",
 	})
-	server := &http.Server{Addr: envOr("MYFERENCE_LISTEN_ADDR", "127.0.0.1:8080"), Handler: newRootHandler(hub, openAI, authHTTP), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	marketplace := api.NewMarketplace(repository, func(request *http.Request) (string, error) {
+		session, err := authService.AuthenticateBrowserRequest(request)
+		return session.AccountID, err
+	}, 30*time.Second)
+	events, err := realtime.Open(ctx, databaseURL, func(ctx context.Context, ticket string) (string, error) {
+		return authService.ConsumeStreamTicket(ctx, ticket)
+	})
+	if err != nil {
+		return err
+	}
+	defer events.Close()
+	handler := allowWebOrigin(newRootHandler(hub, openAI, authHTTP, marketplace, events), webOrigin)
+	server := &http.Server{Addr: envOr("MYFERENCE_LISTEN_ADDR", "127.0.0.1:8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
 	if (certificate == "") != (key == "") {
@@ -110,12 +123,25 @@ func run() error {
 	}
 }
 
-func newRootHandler(relayHandler, openAIHandler, authHandler http.Handler) http.Handler {
+func newRootHandler(relayHandler, openAIHandler, authHandler, marketplaceHandler, eventsHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/relay", relayHandler)
 	mux.Handle("/v1/chat/completions", openAIHandler)
 	mux.Handle("/auth/", authHandler)
+	mux.Handle("/api/", marketplaceHandler)
+	mux.Handle("/events", eventsHandler)
 	return mux
+}
+
+func allowWebOrigin(next http.Handler, origin string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") == origin {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Vary", "Origin")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func envOr(name, fallback string) string {

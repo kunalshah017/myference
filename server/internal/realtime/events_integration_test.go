@@ -30,20 +30,20 @@ func TestEventsAuthenticatesAndStreamsDurableOutboxCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	repository.Close()
-	events, err := Open(ctx, databaseURL, func(_ context.Context, token string) error {
+	events, err := Open(ctx, databaseURL, func(_ context.Context, token string) (string, error) {
 		if token != "stream-ticket" {
-			return errors.New("invalid ticket")
+			return "", errors.New("invalid ticket")
 		}
-		return nil
+		return "acct-stream-1", nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer events.Close()
-	if _, err := events.db.ExecContext(ctx, `TRUNCATE outbox RESTART IDENTITY`); err != nil {
+	if _, err := events.db.ExecContext(ctx, `TRUNCATE outbox,requests,sessions,accounts CASCADE`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := events.db.ExecContext(ctx, `INSERT INTO outbox (aggregate_type,aggregate_id,event_type,payload) VALUES ('request','request-1','request.completed','{"state":"completed"}')`); err != nil {
+	if _, err := events.db.ExecContext(ctx, `INSERT INTO accounts(id,wallet_address) VALUES ('acct-stream-1','0x1111111111111111111111111111111111111111'),('acct-stream-2','0x2222222222222222222222222222222222222222'); INSERT INTO sessions(id,account_id,state) VALUES ('session-stream-1','acct-stream-1','open'),('session-stream-2','acct-stream-2','open'); INSERT INTO requests(id,session_id,state) VALUES ('request-other','session-stream-2','completed'),('request-own','session-stream-1','completed'); INSERT INTO outbox (aggregate_type,aggregate_id,event_type,payload) VALUES ('request','request-other','request.completed','{"request":"other"}'),('request','request-own','request.completed','{"request":"own"}')`); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(events)
@@ -54,8 +54,7 @@ func TestEventsAuthenticatesAndStreamsDurableOutboxCursor(t *testing.T) {
 	}
 	unauthorized.Body.Close()
 	streamCtx, cancel := context.WithCancel(context.Background())
-	request, _ := http.NewRequestWithContext(streamCtx, http.MethodGet, server.URL, nil)
-	request.Header.Set("Authorization", "Bearer stream-ticket")
+	request, _ := http.NewRequestWithContext(streamCtx, http.MethodGet, server.URL+"?ticket=stream-ticket", nil)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +73,7 @@ func TestEventsAuthenticatesAndStreamsDurableOutboxCursor(t *testing.T) {
 	}
 	cancel()
 	response.Body.Close()
-	if text := frame.String(); !strings.Contains(text, "id: 1") || !strings.Contains(text, "event: request.completed") || !strings.Contains(text, `data: {"state": "completed"}`) && !strings.Contains(text, `data: {"state":"completed"}`) {
+	if text := frame.String(); !strings.Contains(text, "id: ") || !strings.Contains(text, "event: request.completed") || strings.Contains(text, "other") || !strings.Contains(text, "own") {
 		t.Fatalf("frame=%q", text)
 	}
 }

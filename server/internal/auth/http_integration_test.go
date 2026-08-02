@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -63,6 +64,16 @@ func TestWalletDeviceAndAPIKeyHTTPFlow(t *testing.T) {
 	session := getJSON[SessionView](t, client, server.URL+"/auth/session", nil, http.StatusOK)
 	if !strings.EqualFold(session.WalletAddress, address) || session.AccountID == "" {
 		t.Fatalf("unexpected session: %+v", session)
+	}
+	ticket := postJSON[StreamTicket](t, client, server.URL+"/auth/stream-ticket", map[string]any{}, nil, http.StatusCreated)
+	if ticket.Token == "" || ticket.ExpiresAt.IsZero() {
+		t.Fatalf("unexpected stream ticket: %+v", ticket)
+	}
+	if accountID, err := service.ConsumeStreamTicket(ctx, ticket.Token); err != nil || accountID != session.AccountID {
+		t.Fatalf("consume stream ticket account=%q err=%v", accountID, err)
+	}
+	if _, err := service.ConsumeStreamTicket(ctx, ticket.Token); !errors.Is(err, ErrAuthorizationConsumed) {
+		t.Fatalf("expected one-time stream ticket, got %v", err)
 	}
 
 	device := postJSON[DeviceHTTPAuthorization](t, http.DefaultClient, server.URL+"/auth/device", map[string]string{"machine_name": "studio-mac"}, nil, http.StatusCreated)
@@ -123,7 +134,7 @@ func newHTTPIntegrationService(t *testing.T) (context.Context, *Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { control.Close() })
-	for _, name := range []string{"000001_control_plane.sql", "000004_browser_auth.sql"} {
+	for _, name := range []string{"000001_control_plane.sql", "000004_browser_auth.sql", "000005_marketplace_realtime.sql"} {
 		if err := control.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", name)); err != nil {
 			t.Fatal(err)
 		}

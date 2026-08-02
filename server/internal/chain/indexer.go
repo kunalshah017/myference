@@ -205,8 +205,19 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO chain_settlements (chain_id,contract_address,request_id,session_id,provider,provider_amount,fee_amount,transaction_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, i.chainID.String(), i.contract.Hex(), common.Hash(decoded.RequestId).Hex(), common.Hash(decoded.SessionId).Hex(), decoded.Provider.Hex(), decoded.ProviderAmount.String(), decoded.FeeAmount.String(), eventLog.TxHash.Hex())
-		return err
+		requestID := common.Hash(decoded.RequestId).Hex()
+		result, err := tx.ExecContext(ctx, `INSERT INTO chain_settlements (chain_id,contract_address,request_id,session_id,provider,provider_amount,fee_amount,transaction_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, i.chainID.String(), i.contract.Hex(), requestID, common.Hash(decoded.SessionId).Hex(), decoded.Provider.Hex(), decoded.ProviderAmount.String(), decoded.FeeAmount.String(), eventLog.TxHash.Hex())
+		if err != nil {
+			return err
+		}
+		inserted, _ := result.RowsAffected()
+		if inserted == 0 {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE settlement_queue SET state='settled',updated_at=now() WHERE request_id=$1 AND state='broadcasting'`, requestID); err != nil {
+			return err
+		}
+		return transitionSettlementRequest(ctx, tx, requestID, "submitted", "settled")
 	default:
 		return nil
 	}
@@ -218,6 +229,30 @@ func (i *Indexer) rewind(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT request_id FROM chain_settlements WHERE chain_id=$1 AND contract_address=$2`, i.chainID.String(), i.contract.Hex())
+	if err != nil {
+		return err
+	}
+	var reverted []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		reverted = append(reverted, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range reverted {
+		if _, err := tx.ExecContext(ctx, `UPDATE settlement_queue SET state='broadcasting',updated_at=now() WHERE request_id=$1 AND state='settled'`, id); err != nil {
+			return err
+		}
+		if err := transitionSettlementRequest(ctx, tx, id, "settled", "submitted"); err != nil {
+			return err
+		}
+	}
 	for _, table := range []string{"chain_settlements", "chain_sessions", "chain_offers", "chain_accounts", "chain_blocks", "chain_cursors"} {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE chain_id=$1 AND contract_address=$2", table), i.chainID.String(), i.contract.Hex()); err != nil {
 			return err

@@ -520,6 +520,14 @@ Commit: `git add web && git commit -m "feat: connect wallets devices and API key
 ### Task 14: Implement live marketplace and request activity
 
 **Files:**
+- Create: `migrations/000005_marketplace_realtime.sql`
+- Create: `migrations/000006_request_submission.sql`
+- Create: `server/internal/store/marketplace.go`
+- Create: `server/internal/api/marketplace.go`
+- Modify: `server/internal/realtime/events.go`
+- Modify: `server/internal/chain/settlement.go`
+- Modify: `server/internal/chain/indexer.go`
+- Modify: `server/cmd/myference-server/main.go`
 - Create: `web/src/features/marketplace/ModelList.tsx`
 - Create: `web/src/features/marketplace/ModelDetail.tsx`
 - Create: `web/src/features/activity/RoutingRail.tsx`
@@ -527,21 +535,21 @@ Commit: `git add web && git commit -m "feat: connect wallets devices and API key
 - Create: `web/src/lib/realtime.ts`
 - Create: `web/src/features/marketplace/marketplace.test.tsx`
 
-- [ ] **Step 1: Write failing real-data state tests**
+- [x] **Step 1: Write failing real-data state tests**
 
 Test loading, empty, available, stale, disconnected, reconnect-gap, and provider-pinned states. Assert all visible prices are all-inclusive MON values and model/provider rows originate from API responses. Test request transitions through reserved, routed, streaming, signed, submitted, and confirmed without skipping or reopening terminal states.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `npm --prefix web test -- --run src/features/marketplace/marketplace.test.tsx`
 
 Expected: FAIL because marketplace and realtime features do not exist.
 
-- [ ] **Step 3: Implement query and realtime reconciliation**
+- [x] **Step 3: Implement query and realtime reconciliation**
 
 Fetch models/offers through TanStack Query. Obtain a short-lived stream ticket, connect native `EventSource`, apply monotonically increasing event IDs, and refetch authoritative queries after a gap or reconnect. Render no inventory until the API responds.
 
-- [ ] **Step 4: Verify accessibility and commit**
+- [x] **Step 4: Verify accessibility and commit**
 
 Run: `npm --prefix web test -- --run && npm --prefix web run lint && npm --prefix web run build`
 

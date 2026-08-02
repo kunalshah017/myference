@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -101,8 +102,10 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", "000003_chain_index.sql")); err != nil {
-		t.Fatal(err)
+	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql"} {
+		if err := repository.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	repository.Close()
 	queue, err := OpenSettlementQueue(ctx, databaseURL)
@@ -113,20 +116,52 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if _, err := queue.db.ExecContext(ctx, "TRUNCATE settlement_queue"); err != nil {
 		t.Fatal(err)
 	}
-	receipt.RequestId = crypto.Keccak256Hash([]byte("request-batch"))
+	suffix := time.Now().Format("150405.000000000")
+	receipt.RequestId = crypto.Keccak256Hash([]byte("request-batch-" + suffix))
 	receipt.Nonce = 2
+	if _, err := queue.db.ExecContext(ctx, `INSERT INTO accounts(id,wallet_address) VALUES ($1,$2)`, "settle-account-"+suffix, "settle-wallet-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.db.ExecContext(ctx, `INSERT INTO sessions(id,account_id,state) VALUES ($1,$2,'open')`, "settle-session-"+suffix, "settle-account-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.db.ExecContext(ctx, `INSERT INTO requests(id,session_id,state) VALUES ($1,$2,'completed')`, hashHex(receipt.RequestId), "settle-session-"+suffix); err != nil {
+		t.Fatal(err)
+	}
 	providerSignature, _ = provider.SignReceipt(ctx, receipt)
 	settlementSignature, _ = owner.SignReceipt(ctx, receipt)
 	if err := queue.Enqueue(ctx, SignedReceipt{Receipt: receipt, ProviderSignature: providerSignature, SettlementSignature: settlementSignature}); err != nil {
 		t.Fatal(err)
+	}
+	var requestState string
+	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM requests WHERE id=$1`, hashHex(receipt.RequestId)).Scan(&requestState); err != nil || requestState != "signed" {
+		t.Fatalf("request after co-sign=%q err=%v", requestState, err)
 	}
 	transactionHash, err := queue.SettleBatch(ctx, owner, 10)
 	if err != nil || transactionHash == "" {
 		t.Fatalf("transaction=%q err=%v", transactionHash, err)
 	}
 	var state string
-	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM settlement_queue WHERE request_id=$1`, hashHex(receipt.RequestId)).Scan(&state); err != nil || state != "settled" {
+	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM settlement_queue WHERE request_id=$1`, hashHex(receipt.RequestId)).Scan(&state); err != nil || state != "broadcasting" {
 		t.Fatalf("queue state=%q err=%v", state, err)
+	}
+	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM requests WHERE id=$1`, hashHex(receipt.RequestId)).Scan(&requestState); err != nil || requestState != "submitted" {
+		t.Fatalf("request after broadcast=%q err=%v", requestState, err)
+	}
+	batchRequestID := receipt.RequestId
+	indexer, err := OpenIndexer(ctx, IndexerConfig{RPCURL: rpcURL, DatabaseURL: databaseURL, Contract: address, StartBlock: beforeDeployment.Number.Uint64() + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer indexer.Close()
+	if err := indexer.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM settlement_queue WHERE request_id=$1`, hashHex(batchRequestID)).Scan(&state); err != nil || state != "settled" {
+		t.Fatalf("queue after confirmation=%q err=%v", state, err)
+	}
+	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM requests WHERE id=$1`, hashHex(batchRequestID)).Scan(&requestState); err != nil || requestState != "settled" {
+		t.Fatalf("request after confirmation=%q err=%v", requestState, err)
 	}
 	receipt.RequestId = crypto.Keccak256Hash([]byte("request-recovery"))
 	receipt.Nonce = 3
@@ -146,13 +181,11 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if recoveredHash, err := queue.SettleBatch(ctx, owner, 10); err != nil || recoveredHash != prepared.Hash().Hex() {
 		t.Fatalf("recovered=%q want=%q err=%v", recoveredHash, prepared.Hash().Hex(), err)
 	}
-	indexer, err := OpenIndexer(ctx, IndexerConfig{RPCURL: rpcURL, DatabaseURL: databaseURL, Contract: address, StartBlock: beforeDeployment.Number.Uint64() + 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer indexer.Close()
 	if err := indexer.Sync(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM settlement_queue WHERE request_id=$1`, hashHex(receipt.RequestId)).Scan(&state); err != nil || state != "settled" {
+		t.Fatalf("queue after confirmation=%q err=%v", state, err)
 	}
 	for table, minimum := range map[string]int{"chain_accounts": 2, "chain_offers": 1, "chain_sessions": 1, "chain_settlements": 3} {
 		var count int

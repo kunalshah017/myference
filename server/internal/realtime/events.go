@@ -8,13 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-type Authorize func(context.Context, string) error
+type Authorize func(context.Context, string) (string, error)
 
 type Events struct {
 	db        *sql.DB
@@ -40,8 +39,9 @@ func Open(ctx context.Context, databaseURL string, authorize Authorize) (*Events
 func (e *Events) Close() error { return e.db.Close() }
 
 func (e *Events) ServeHTTP(response http.ResponseWriter, request *http.Request) {
-	token := strings.TrimSpace(strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "))
-	if token == "" || e.authorize(request.Context(), token) != nil {
+	token := request.URL.Query().Get("ticket")
+	accountID, err := e.authorize(request.Context(), token)
+	if token == "" || err != nil || accountID == "" {
 		http.Error(response, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -53,12 +53,13 @@ func (e *Events) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	cursor, _ := strconv.ParseInt(request.Header.Get("Last-Event-ID"), 10, 64)
 	response.Header().Set("Content-Type", "text/event-stream")
 	response.Header().Set("Cache-Control", "no-cache")
+	response.Header().Set("Referrer-Policy", "no-referrer")
 	response.WriteHeader(http.StatusOK)
 	flusher.Flush()
 	ticker := time.NewTicker(e.poll)
 	defer ticker.Stop()
 	for {
-		next, err := e.writeAvailable(request.Context(), response, cursor)
+		next, err := e.writeAvailable(request.Context(), response, cursor, accountID)
 		if err != nil {
 			return
 		}
@@ -75,8 +76,8 @@ func (e *Events) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 }
 
-func (e *Events) writeAvailable(ctx context.Context, writer http.ResponseWriter, cursor int64) (int64, error) {
-	rows, err := e.db.QueryContext(ctx, `SELECT id,event_type,payload FROM outbox WHERE id>$1 ORDER BY id LIMIT 100`, cursor)
+func (e *Events) writeAvailable(ctx context.Context, writer http.ResponseWriter, cursor int64, accountID string) (int64, error) {
+	rows, err := e.db.QueryContext(ctx, `SELECT o.id,o.event_type,o.payload FROM outbox o JOIN requests r ON o.aggregate_type='request' AND r.id=o.aggregate_id JOIN sessions s ON s.id=r.session_id WHERE o.id>$1 AND s.account_id=$2 ORDER BY o.id LIMIT 100`, cursor, accountID)
 	if err != nil {
 		return cursor, err
 	}

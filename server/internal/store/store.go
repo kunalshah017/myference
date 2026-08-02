@@ -94,7 +94,8 @@ var transitions = map[string]map[string]bool{
 	"accepted":  {"streaming": true, "cancelled": true, "failed": true},
 	"streaming": {"completed": true, "cancelled": true, "failed": true},
 	"completed": {"signed": true, "failed": true},
-	"signed":    {"settled": true},
+	"signed":    {"submitted": true},
+	"submitted": {"settled": true},
 }
 
 func (s *Store) TransitionRequest(ctx context.Context, requestID, next string) error {

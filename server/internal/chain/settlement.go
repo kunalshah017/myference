@@ -39,8 +39,22 @@ func (q *SettlementQueue) Enqueue(ctx context.Context, signed SignedReceipt) err
 	if err != nil {
 		return err
 	}
-	_, err = q.db.ExecContext(ctx, `INSERT INTO settlement_queue (request_id,receipt_json,provider_signature,settlement_signature,state) VALUES ($1,$2,$3,$4,'cosigned') ON CONFLICT (request_id) DO NOTHING`, hashHex(signed.Receipt.RequestId), payload, signed.ProviderSignature, signed.SettlementSignature)
-	return err
+	tx, err := q.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	requestID := hashHex(signed.Receipt.RequestId)
+	result, err := tx.ExecContext(ctx, `INSERT INTO settlement_queue (request_id,receipt_json,provider_signature,settlement_signature,state) VALUES ($1,$2,$3,$4,'cosigned') ON CONFLICT (request_id) DO NOTHING`, requestID, payload, signed.ProviderSignature, signed.SettlementSignature)
+	if err != nil {
+		return err
+	}
+	if inserted, _ := result.RowsAffected(); inserted == 1 {
+		if err := transitionSettlementRequest(ctx, tx, requestID, "completed", "signed"); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (q *SettlementQueue) SettleBatch(ctx context.Context, client *Client, limit int) (string, error) {
@@ -53,8 +67,7 @@ func (q *SettlementQueue) SettleBatch(ctx context.Context, client *Client, limit
 		if err := client.Broadcast(ctx, transaction); err != nil {
 			return hash, err
 		}
-		_, err = q.db.ExecContext(ctx, `UPDATE settlement_queue SET state='settled',updated_at=now() WHERE transaction_hash=$1`, hash)
-		return hash, err
+		return hash, nil
 	}
 	tx, err := q.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -106,6 +119,9 @@ func (q *SettlementQueue) SettleBatch(ctx context.Context, client *Client, limit
 		if _, err := tx.ExecContext(ctx, `UPDATE settlement_queue SET state='broadcasting',transaction_hash=$2,raw_transaction=$3,updated_at=now() WHERE request_id=$1`, id, hash, rawTransaction); err != nil {
 			return "", err
 		}
+		if err := transitionSettlementRequest(ctx, tx, id, "signed", "submitted"); err != nil {
+			return "", err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return "", err
@@ -113,8 +129,18 @@ func (q *SettlementQueue) SettleBatch(ctx context.Context, client *Client, limit
 	if err := client.Broadcast(ctx, transaction); err != nil {
 		return hash, err
 	}
-	_, err = q.db.ExecContext(ctx, `UPDATE settlement_queue SET state='settled',updated_at=now() WHERE transaction_hash=$1`, hash)
-	return hash, err
+	return hash, nil
+}
+
+func transitionSettlementRequest(ctx context.Context, tx *sql.Tx, requestID, from, to string) error {
+	result, err := tx.ExecContext(ctx, `UPDATE requests SET state=$3,updated_at=now() WHERE id=$1 AND state=$2`, requestID, from, to)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 1 {
+		_, err = tx.ExecContext(ctx, `INSERT INTO outbox (aggregate_type,aggregate_id,event_type,payload) VALUES ('request',$1,$2,jsonb_build_object('from',$3::text,'to',$4::text))`, requestID, "request."+to, from, to)
+	}
+	return err
 }
 
 func (q *SettlementQueue) pendingBroadcast(ctx context.Context) (string, *types.Transaction, error) {

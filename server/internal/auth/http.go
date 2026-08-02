@@ -67,7 +67,13 @@ func NewHandler(service *Service, config HTTPConfig) http.Handler {
 	mux.HandleFunc("GET /auth/api-keys", h.withSession(h.apiKeysList))
 	mux.HandleFunc("POST /auth/api-keys", h.withSession(h.apiKeysCreate))
 	mux.HandleFunc("DELETE /auth/api-keys/{id}", h.withSession(h.apiKeysDelete))
+	mux.HandleFunc("POST /auth/stream-ticket", h.withSession(h.streamTicket))
 	return h.cors(mux)
+}
+
+func (h *httpHandler) streamTicket(w http.ResponseWriter, r *http.Request, session BrowserSession) {
+	ticket, err := h.service.CreateStreamTicket(r.Context(), session.AccountID, time.Minute)
+	h.write(w, ticket, err, http.StatusCreated)
 }
 
 func (h *httpHandler) walletChallenge(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +227,14 @@ func (h *httpHandler) authenticate(w http.ResponseWriter, r *http.Request) (Brow
 		return BrowserSession{}, false
 	}
 	return session, true
+}
+
+func (s *Service) AuthenticateBrowserRequest(r *http.Request) (BrowserSession, error) {
+	cookie, err := r.Cookie(browserSessionCookie)
+	if err != nil {
+		return BrowserSession{}, ErrInvalidCredential
+	}
+	return s.AuthenticateBrowserSession(r.Context(), cookie.Value)
 }
 
 func (h *httpHandler) browserOrigin(w http.ResponseWriter, r *http.Request) (string, bool) {

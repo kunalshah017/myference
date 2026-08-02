@@ -1,13 +1,17 @@
-const routeStages = [
-  { label: 'Escrow', detail: 'Awaiting balance' },
-  { label: 'Router', detail: 'Awaiting request' },
-  { label: 'Provider', detail: 'Awaiting capacity' },
-  { label: 'Settlement', detail: 'Awaiting receipt' },
-]
+import { useEffect, useMemo, useState } from 'react'
+import { Activity } from '../features/activity/Activity'
+import { RoutingRail } from '../features/activity/RoutingRail'
+import { ApiKeys } from '../features/auth/ApiKeys'
+import { ConnectWallet } from '../features/auth/ConnectWallet'
+import { DeviceApproval } from '../features/auth/DeviceApproval'
+import { ModelList } from '../features/marketplace/ModelList'
+import { AuthAPI, MarketplaceAPI, type Session } from '../lib/api'
 
 function App() {
   const api = useMemo(() => new AuthAPI(), [])
+  const marketplace = useMemo(() => new MarketplaceAPI(), [])
   const [session, setSession] = useState<Session>()
+  const [routeState, setRouteState] = useState('')
   useEffect(() => { void api.session().then(setSession).catch(() => undefined) }, [api])
   return (
     <div className="app-shell">
@@ -39,23 +43,7 @@ function App() {
           </p>
         </section>
 
-        <section className="routing-rail" aria-labelledby="routing-title">
-          <div className="rail-heading">
-            <p className="eyebrow" id="routing-title">Live routing rail</p>
-            <p>Awaiting a live request</p>
-          </div>
-          <ol>
-            {routeStages.map((stage, index) => (
-              <li key={stage.label} data-state="idle">
-                <span className="stage-index" aria-hidden="true">
-                  {String(index + 1).padStart(2, '0')}
-                </span>
-                <strong>{stage.label}</strong>
-                <span>{stage.detail}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
+        <RoutingRail state={routeState} />
 
         <div className="operational-grid">
           <section id="marketplace" className="marketplace" aria-labelledby="marketplace-title">
@@ -66,16 +54,7 @@ function App() {
               </div>
               <span className="data-label">Live data only</span>
             </div>
-            <div className="empty-state" role="status">
-              <span className="empty-glyph" aria-hidden="true">///</span>
-              <div>
-                <h3>Live marketplace data is not connected.</h3>
-                <p>
-                  Models and prices will appear after the Myference broker returns
-                  verified provider capacity.
-                </p>
-              </div>
-            </div>
+            <ModelList api={marketplace} />
           </section>
 
           <aside className="account-context" aria-labelledby="account-title">
@@ -101,9 +80,7 @@ function App() {
               <h2 id="activity-title">Recent activity</h2>
             </div>
           </div>
-          <p className="activity-empty">
-            Request and settlement events will appear after a live connection is established.
-          </p>
+          <Activity api={marketplace} authApi={api} connected={Boolean(session)} onState={setRouteState} />
         </section>
       </main>
 
@@ -116,8 +93,3 @@ function App() {
 }
 
 export default App
-import { useEffect, useMemo, useState } from 'react'
-import { ApiKeys } from '../features/auth/ApiKeys'
-import { ConnectWallet } from '../features/auth/ConnectWallet'
-import { DeviceApproval } from '../features/auth/DeviceApproval'
-import { AuthAPI, type Session } from '../lib/api'
