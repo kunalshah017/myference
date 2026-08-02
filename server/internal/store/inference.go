@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -107,7 +108,7 @@ func (s *Store) UpdateProviderCapacity(ctx context.Context, machineID string, ca
 		if capacity.Available == 0 {
 			available = 0
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=GREATEST(0, $4 - (SELECT count(*) FROM inference_reservations r JOIN requests q ON q.id=r.request_id WHERE q.machine_id=$1 AND q.offer_id=$2 AND r.released_at IS NULL)), healthy=true, updated_at=now() WHERE machine_id=$1 AND offer_id=$2 AND price_version=$3`, machineID, offer.OfferID, offer.PriceVersion, available); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=GREATEST(0, $4 - (SELECT count(*) FROM inference_reservations r JOIN requests q ON q.id=r.request_id WHERE q.machine_id=$1 AND q.offer_id=$2 AND r.released_at IS NULL AND q.state IN ('reserved','offered','accepted','streaming'))), healthy=true, updated_at=now() WHERE machine_id=$1 AND offer_id=$2 AND price_version=$3`, machineID, offer.OfferID, offer.PriceVersion, available); err != nil {
 			return err
 		}
 	}
@@ -164,6 +165,13 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 		available := uint32(0)
 		if capacity.Available > 0 {
 			available = 1
+			var executing uint32
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM inference_reservations r JOIN requests q ON q.id=r.request_id WHERE q.machine_id=$1 AND q.offer_id=$2 AND r.released_at IS NULL AND q.state IN ('reserved','offered','accepted','streaming')`, machineID, offered.OfferID).Scan(&executing); err != nil {
+				return err
+			}
+			if executing > 0 {
+				available = 0
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO provider_routing_state(machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,true,$10,$11,$12,$13,$14) ON CONFLICT(machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,price_version=EXCLUDED.price_version,confirmed_bond=true,healthy=true,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,updated_at=now()`, machineID, offered.OfferID, offered.Model, offered.BackendKind, capabilities, offered.OfferHash, offered.ModelHash, offered.CapabilityHash, offered.PriceVersion, available, decimal(inputValue+outputValue+computeValue), input, output, compute); err != nil {
 			return err
@@ -178,8 +186,14 @@ func (s *Store) OpenSession(ctx context.Context, accountID string) (string, uint
 	if err != nil {
 		return "", 0, err
 	}
-	value, err := strconv.ParseUint(balance, 10, 64)
-	return id, value, err
+	value, ok := new(big.Int).SetString(balance, 10)
+	if !ok || value.Sign() < 0 {
+		return "", 0, fmt.Errorf("invalid confirmed session balance")
+	}
+	if !value.IsUint64() {
+		return id, ^uint64(0), nil
+	}
+	return id, value.Uint64(), nil
 }
 
 func (s *Store) ReserveInference(ctx context.Context, reservation InferenceReservation) error {
@@ -205,12 +219,9 @@ func (s *Store) ReserveInference(ctx context.Context, reservation InferenceReser
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(sum(amount),0)::text FROM inference_reservations WHERE session_id=$1 AND released_at IS NULL`, reservation.SessionID).Scan(&reserved); err != nil {
 		return err
 	}
-	confirmed, err := strconv.ParseUint(balance, 10, 64)
-	if err != nil {
-		return err
-	}
-	locked, err := strconv.ParseUint(reserved, 10, 64)
-	if err != nil || locked > confirmed || reservation.MaximumSpend > confirmed-locked {
+	confirmed, confirmedOK := new(big.Int).SetString(balance, 10)
+	locked, lockedOK := new(big.Int).SetString(reserved, 10)
+	if !confirmedOK || !lockedOK || confirmed.Sign() < 0 || locked.Sign() < 0 || locked.Cmp(confirmed) > 0 {
 		return ErrInsufficientBalance
 	}
 	var offerHash, modelHash, capabilityHash, inputRate, outputRate, computeRate string
@@ -229,8 +240,12 @@ func (s *Store) ReserveInference(ctx context.Context, reservation InferenceReser
 		candidate.ComputePerSecond, err = strconv.ParseUint(computeRate, 10, 64)
 	}
 	worstCase, costErr := router.WorstCaseCost(candidate, reservation.MaximumInputTokens, reservation.MaximumOutputTokens, reservation.MaximumComputeMilliseconds)
-	if err != nil || costErr != nil || worstCase > reservation.MaximumSpend {
+	if err != nil || costErr != nil || worstCase == 0 || worstCase > reservation.MaximumSpend {
 		return ErrIneligibleRoute
+	}
+	available := new(big.Int).Sub(new(big.Int).Set(confirmed), locked)
+	if new(big.Int).SetUint64(worstCase).Cmp(available) > 0 {
+		return ErrInsufficientBalance
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=capacity-1,updated_at=now() WHERE machine_id=$1 AND offer_id=$2`, reservation.MachineID, reservation.OfferID); err != nil {
 		return err
@@ -238,10 +253,10 @@ func (s *Store) ReserveInference(ctx context.Context, reservation InferenceReser
 	if offerHash == "" || modelHash == "" || capabilityHash == "" {
 		return ErrIneligibleRoute
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO requests (id,session_id,state,machine_id,offer_id,price_version,maximum_spend,maximum_input_tokens,maximum_output_tokens,maximum_compute_milliseconds,offer_hash,model_hash,capability_hash) VALUES ($1,$2,'created',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, reservation.RequestID, reservation.SessionID, reservation.MachineID, reservation.OfferID, reservation.PriceVersion, decimal(reservation.MaximumSpend), reservation.MaximumInputTokens, reservation.MaximumOutputTokens, reservation.MaximumComputeMilliseconds, offerHash, modelHash, capabilityHash); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO requests (id,session_id,state,machine_id,offer_id,price_version,maximum_spend,maximum_input_tokens,maximum_output_tokens,maximum_compute_milliseconds,offer_hash,model_hash,capability_hash) VALUES ($1,$2,'created',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, reservation.RequestID, reservation.SessionID, reservation.MachineID, reservation.OfferID, reservation.PriceVersion, decimal(worstCase), reservation.MaximumInputTokens, reservation.MaximumOutputTokens, reservation.MaximumComputeMilliseconds, offerHash, modelHash, capabilityHash); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO inference_reservations (request_id, session_id, amount) VALUES ($1,$2,$3)`, reservation.RequestID, reservation.SessionID, decimal(reservation.MaximumSpend)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO inference_reservations (request_id, session_id, amount) VALUES ($1,$2,$3)`, reservation.RequestID, reservation.SessionID, decimal(worstCase)); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE requests SET state='reserved', updated_at=now() WHERE id=$1`, reservation.RequestID); err != nil {
@@ -283,9 +298,6 @@ func (s *Store) CompleteInference(ctx context.Context, proposal ReceiptProposal)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO receipt_proposals (request_id,session_id,machine_id,offer_id,model,price_version,input_tokens,output_tokens,compute_milliseconds,input_hash,output_hash,completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, proposal.RequestID, proposal.SessionID, proposal.MachineID, proposal.OfferID, proposal.Model, proposal.PriceVersion, proposal.InputTokens, proposal.OutputTokens, proposal.ComputeMilliseconds, proposal.InputHash[:], proposal.OutputHash[:], proposal.CompletedAt); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE inference_reservations SET released_at=now() WHERE request_id=$1 AND released_at IS NULL`, proposal.RequestID); err != nil {
-		return err
-	}
 	if _, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=capacity+1, updated_at=now() WHERE machine_id=$1 AND offer_id=$2`, proposal.MachineID, proposal.OfferID); err != nil {
 		return err
 	}
@@ -322,12 +334,12 @@ func (s *Store) AbortInference(ctx context.Context, requestID, terminalState str
 	if err != nil {
 		return err
 	}
-	if rows, _ := result.RowsAffected(); rows == 1 {
+	if rows, _ := result.RowsAffected(); rows == 1 && (state == "reserved" || state == "offered" || state == "accepted" || state == "streaming") {
 		if _, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=capacity+1, updated_at=now() WHERE machine_id=$1 AND offer_id=$2`, machineID, offerID); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (aggregate_type,aggregate_id,event_type,payload) VALUES ('request',$1,$2,jsonb_build_object('from',$3,'to',$4))`, requestID, "request."+terminalState, state, terminalState); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (aggregate_type,aggregate_id,event_type,payload) VALUES ('request',$1,$2,jsonb_build_object('from',$3::text,'to',$4::text))`, requestID, "request."+terminalState, state, terminalState); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -66,7 +66,7 @@ func openChainRuntime(ctx context.Context, config chainConfig, databaseURL strin
 	if err != nil {
 		return nil, err
 	}
-	indexer, err := chain.OpenIndexer(ctx, chain.IndexerConfig{RPCURL: config.RPCURL, DatabaseURL: databaseURL, Contract: common.HexToAddress(config.ContractAddress), StartBlock: config.StartBlock})
+	indexer, err := chain.OpenIndexer(ctx, chain.IndexerConfig{RPCURL: config.RPCURL, DatabaseURL: databaseURL, Contract: common.HexToAddress(config.ContractAddress), StartBlock: config.StartBlock, Confirmations: 2})
 	if err != nil {
 		queue.Close()
 		return nil, err
@@ -100,7 +100,9 @@ func (r *chainRuntime) Run(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_, err := r.queue.SettleBatch(ctx, r.client, 25)
+				// Isolate receipts so one invalid provider signature/session cannot revert
+				// unrelated providers' payouts in the same EVM transaction.
+				_, err := r.queue.SettleBatch(ctx, r.client, 1)
 				if err != nil && !errors.Is(err, chain.ErrNoSignedReceipts) && ctx.Err() == nil {
 					log.Printf("settlement batch retry: %v", err)
 				}

@@ -68,6 +68,19 @@ func TestWorstCaseCostUsesRequestedTokensAndComputeDeadline(t *testing.T) {
 	}
 }
 
+func TestSelectRejectsZeroCostRoutes(t *testing.T) {
+	candidate := Candidate{MachineID: "free", OfferID: "offer", Model: "qwen", Capabilities: []string{"text"}, ConfirmedBond: true, Healthy: true, Capacity: 1}
+	if _, err := Select(Request{Model: "qwen", Capabilities: []string{"text"}, MaximumSpend: 100, SessionBalance: 100}, []Candidate{candidate}); !errors.Is(err, ErrNoEligibleProvider) {
+		t.Fatalf("expected zero-cost route rejection, got %v", err)
+	}
+}
+
+func TestWorstCaseCostRejectsUint64Overflow(t *testing.T) {
+	if _, err := WorstCaseCost(Candidate{InputPerMillion: ^uint64(0)}, ^uint64(0), 1, 1); !errors.Is(err, ErrNoEligibleProvider) {
+		t.Fatalf("expected overflow rejection, got %v", err)
+	}
+}
+
 func with(candidate Candidate, change func(*Candidate)) Candidate {
 	change(&candidate)
 	return candidate

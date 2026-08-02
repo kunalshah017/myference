@@ -59,7 +59,7 @@ func Select(request Request, candidates []Candidate) (Candidate, error) {
 		if request.PinMachineID != "" && candidate.MachineID != request.PinMachineID {
 			continue
 		}
-		if candidate.MachineID == "" || candidate.OfferID == "" || candidate.Model != request.Model || !candidate.ConfirmedBond || !candidate.Healthy || candidate.Capacity == 0 || candidate.MaximumCost > request.MaximumSpend || candidate.MaximumCost > request.SessionBalance || !containsAll(candidate.Capabilities, request.Capabilities) {
+		if candidate.MachineID == "" || candidate.OfferID == "" || candidate.Model != request.Model || !candidate.ConfirmedBond || !candidate.Healthy || candidate.Capacity == 0 || candidate.MaximumCost == 0 || candidate.MaximumCost > request.MaximumSpend || candidate.MaximumCost > request.SessionBalance || !containsAll(candidate.Capabilities, request.Capabilities) {
 			continue
 		}
 		eligible = append(eligible, candidate)

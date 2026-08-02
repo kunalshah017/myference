@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,7 +35,8 @@ func TestAccountAnalyticsAggregatesConfirmedUsageRevenueAndSlashes(t *testing.T)
 	defer db.Close()
 	suffix := time.Now().Format("150405000000000")
 	customerID, providerID := "analytics-customer-"+suffix, "analytics-provider-"+suffix
-	customerWallet, providerWallet := "0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"
+	walletSeed := time.Now().UnixNano()
+	customerWallet, providerWallet := fmt.Sprintf("0x%040x", walletSeed), fmt.Sprintf("0x%040x", walletSeed+1)
 	contract, sessionID, requestID := "0x3333333333333333333333333333333333333333", "session-"+suffix, "request-"+suffix
 	machineID, backendID, offerID := "machine-"+suffix, "backend-"+suffix, "offer-"+suffix
 	for _, id := range []string{customerID, providerID} {

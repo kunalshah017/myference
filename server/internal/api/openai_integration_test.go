@@ -52,10 +52,10 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 			return Principal{AccountID: "account-1", SessionID: "session-1", SessionBalance: 100}, nil
 		},
 		Candidates: func(context.Context, string) ([]router.Candidate, error) {
-			return []router.Candidate{{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", Capabilities: []string{"text", "stream", "workspace"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 80, PriceVersion: 3}}, nil
+			return []router.Candidate{{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", Capabilities: []string{"text", "stream", "workspace"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 80, PriceVersion: 3, InputPerMillion: 1, OutputPerMillion: 1}}, nil
 		},
 		Reserve: func(_ context.Context, reservation Reservation) error {
-			if reservation.SessionID != "session-1" || reservation.OfferID != "offer-1" || reservation.MaximumSpend != 100 {
+			if reservation.SessionID != "session-1" || reservation.OfferID != "offer-1" || reservation.MaximumSpend != 2 {
 				t.Fatalf("reservation=%+v", reservation)
 			}
 			return nil

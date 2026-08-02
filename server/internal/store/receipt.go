@@ -34,7 +34,7 @@ func (s *Store) PrepareReceipt(ctx context.Context, requestID string, domain Rec
 	var inputHash, outputHash []byte
 	err = tx.QueryRowContext(ctx, `SELECT rp.request_id,rp.session_id,rp.machine_id,rp.offer_id,rp.model,rp.price_version,rp.input_tokens,rp.output_tokens,rp.compute_milliseconds,rp.input_hash,rp.output_hash,rp.completed_at,c.wallet_address,p.wallet_address,m.signer_address,r.maximum_spend::text
 		FROM receipt_proposals rp JOIN requests r ON r.id=rp.request_id JOIN sessions se ON se.id=rp.session_id JOIN accounts c ON c.id=se.account_id JOIN machines m ON m.id=rp.machine_id JOIN accounts p ON p.id=m.account_id
-		WHERE rp.request_id=$1 AND r.state='completed' AND m.revoked_at IS NULL`, requestID).Scan(&proposal.RequestID, &proposal.SessionID, &proposal.MachineID, &proposal.OfferID, &proposal.Model, &proposal.PriceVersion, &proposal.InputTokens, &proposal.OutputTokens, &proposal.ComputeMilliseconds, &inputHash, &outputHash, &proposal.CompletedAt, &customer, &provider, &signer, &maximum)
+		WHERE rp.request_id=$1 AND r.state='completed' AND m.revoked_at IS NULL FOR UPDATE OF r`, requestID).Scan(&proposal.RequestID, &proposal.SessionID, &proposal.MachineID, &proposal.OfferID, &proposal.Model, &proposal.PriceVersion, &proposal.InputTokens, &proposal.OutputTokens, &proposal.ComputeMilliseconds, &inputHash, &outputHash, &proposal.CompletedAt, &customer, &provider, &signer, &maximum)
 	if err != nil {
 		return v1.Receipt{}, "", "", err
 	}
@@ -66,6 +66,16 @@ func (s *Store) PrepareReceipt(ctx context.Context, requestID string, domain Rec
 	}
 	maximumValue, ok := new(big.Int).SetString(maximum, 10)
 	if !ok || !maximumValue.IsUint64() || total > maximumValue.Uint64() {
+		return v1.Receipt{}, "", "", v1.ErrMaximumExceeded
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, proposal.SessionID); err != nil {
+		return v1.Receipt{}, "", "", err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE inference_reservations SET amount=$2,released_at=CASE WHEN $2::numeric=0 THEN COALESCE(released_at,now()) ELSE NULL END WHERE request_id=$1 AND amount>=$2`, requestID, decimal(total))
+	if err != nil {
+		return v1.Receipt{}, "", "", err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
 		return v1.Receipt{}, "", "", v1.ErrMaximumExceeded
 	}
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, strings.ToLower(provider)); err != nil {

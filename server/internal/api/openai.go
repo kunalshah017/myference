@@ -151,18 +151,19 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	events := h.broker.register(requestID)
 	defer h.broker.unregister(requestID)
-	reservation := Reservation{RequestID: requestID, SessionID: principal.SessionID, AccountID: principal.AccountID, MachineID: selected.MachineID, OfferID: selected.OfferID, PriceVersion: selected.PriceVersion, MaximumSpend: maximumSpend, MaximumInputTokens: maximumInputTokens, MaximumOutputTokens: maximumOutputTokens, MaximumComputeMilliseconds: maximumComputeMilliseconds}
+	reservation := Reservation{RequestID: requestID, SessionID: principal.SessionID, AccountID: principal.AccountID, MachineID: selected.MachineID, OfferID: selected.OfferID, PriceVersion: selected.PriceVersion, MaximumSpend: selected.MaximumCost, MaximumInputTokens: maximumInputTokens, MaximumOutputTokens: maximumOutputTokens, MaximumComputeMilliseconds: maximumComputeMilliseconds}
 	if err := h.dependencies.Reserve(request.Context(), reservation); err != nil {
 		http.Error(response, "reservation unavailable", http.StatusPaymentRequired)
 		return
 	}
-	envelope, err := v1.NewEnvelope("offer-"+requestID, v1.MessageJobOffer, &v1.JobOffer{RequestID: requestID, Model: input.Model, OfferID: selected.OfferID, Prompt: prompt, PriceVersion: selected.PriceVersion, MaximumSpend: maximumSpend, MaximumOutputTokens: maximumOutputTokens, LeaseExpiresAt: h.dependencies.Now().Add(time.Duration(maximumComputeMilliseconds) * time.Millisecond), Workspace: input.Workspace})
+	envelope, err := v1.NewEnvelope("offer-"+requestID, v1.MessageJobOffer, &v1.JobOffer{RequestID: requestID, Model: input.Model, OfferID: selected.OfferID, Prompt: prompt, PriceVersion: selected.PriceVersion, MaximumSpend: selected.MaximumCost, MaximumOutputTokens: maximumOutputTokens, LeaseExpiresAt: h.dependencies.Now().Add(time.Duration(maximumComputeMilliseconds) * time.Millisecond), Workspace: input.Workspace})
 	if err != nil || h.dependencies.Hub.Send(selected.MachineID, envelope) != nil {
 		_ = h.dependencies.Abort(request.Context(), requestID, "failed")
 		http.Error(response, "provider unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if err := waitAccepted(request.Context(), events); err != nil {
+		h.cancel(selected.MachineID, requestID)
 		_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 		http.Error(response, "provider did not accept", http.StatusGatewayTimeout)
 		return
@@ -175,6 +176,8 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	flusher, ok := response.(http.Flusher)
 	if !ok {
+		h.cancel(selected.MachineID, requestID)
+		_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 		http.Error(response, "streaming unavailable", http.StatusInternalServerError)
 		return
 	}
@@ -207,6 +210,8 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 			}
 			var chunk v1.OutputChunk
 			if event.Envelope.DecodeBody(&chunk) != nil {
+				h.cancel(selected.MachineID, requestID)
+				_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 				return
 			}
 			if chunk.Data != "" {

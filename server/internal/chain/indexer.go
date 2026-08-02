@@ -284,6 +284,17 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 			return err
 		}
 		requestID := common.Hash(decoded.RequestId).Hex()
+		settledCharge := new(big.Int).Add(new(big.Int).Set(decoded.ProviderAmount), decoded.FeeAmount)
+		var held string
+		holdErr := tx.QueryRowContext(ctx, `SELECT amount::text FROM inference_reservations WHERE request_id=$1`, requestID).Scan(&held)
+		if holdErr == nil {
+			heldAmount, ok := new(big.Int).SetString(held, 10)
+			if !ok || heldAmount.Cmp(settledCharge) != 0 {
+				return fmt.Errorf("settled charge does not match local reservation for %s", requestID)
+			}
+		} else if !errors.Is(holdErr, sql.ErrNoRows) {
+			return holdErr
+		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO chain_settlements (chain_id,contract_address,request_id,session_id,provider,provider_amount,fee_amount,transaction_hash,block_number) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, i.chainID.String(), i.contract.Hex(), requestID, common.Hash(decoded.SessionId).Hex(), decoded.Provider.Hex(), decoded.ProviderAmount.String(), decoded.FeeAmount.String(), eventLog.TxHash.Hex(), eventLog.BlockNumber)
 		if err != nil {
 			return err
@@ -305,6 +316,9 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE settlement_queue SET state='settled',updated_at=now() WHERE request_id=$1 AND state='broadcasting'`, requestID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE inference_reservations SET released_at=COALESCE(released_at,now()) WHERE request_id=$1`, requestID); err != nil {
 			return err
 		}
 		return transitionSettlementRequest(ctx, tx, requestID, "submitted", "settled")
@@ -349,6 +363,9 @@ func (i *Indexer) rewind(ctx context.Context) error {
 		return err
 	}
 	for _, id := range reverted {
+		if _, err := tx.ExecContext(ctx, `UPDATE inference_reservations SET released_at=NULL WHERE request_id=$1 AND amount>0`, id); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE settlement_queue SET state='broadcasting',updated_at=now() WHERE request_id=$1 AND state='settled'`, id); err != nil {
 			return err
 		}

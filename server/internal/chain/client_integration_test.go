@@ -133,7 +133,7 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql", "000007_provider_operations.sql", "000008_machine_signers.sql", "000013_account_analytics.sql"} {
+	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql", "000007_provider_operations.sql", "000008_machine_signers.sql", "000013_account_analytics.sql", "000014_reservation_finality.sql"} {
 		if err := repository.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", migration)); err != nil {
 			t.Fatal(err)
 		}
@@ -161,6 +161,9 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := queue.db.ExecContext(ctx, `INSERT INTO requests(id,session_id,state) VALUES ($1,$2,'completed')`, hashHex(receipt.RequestId), "settle-session-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.db.ExecContext(ctx, `INSERT INTO inference_reservations(request_id,session_id,amount) VALUES($1,$2,20)`, hashHex(receipt.RequestId), "settle-session-"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	providerSignature, _ = provider.SignReceipt(ctx, receipt)
@@ -208,6 +211,22 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	}
 	if err := queue.db.QueryRowContext(ctx, `SELECT state FROM requests WHERE id=$1`, hashHex(batchRequestID)).Scan(&requestState); err != nil || requestState != "settled" {
 		t.Fatalf("request after confirmation=%q err=%v", requestState, err)
+	}
+	var holdReleased bool
+	if err := queue.db.QueryRowContext(ctx, `SELECT released_at IS NOT NULL FROM inference_reservations WHERE request_id=$1`, hashHex(batchRequestID)).Scan(&holdReleased); err != nil || !holdReleased {
+		t.Fatalf("hold after confirmation released=%v err=%v", holdReleased, err)
+	}
+	if err := indexer.rewind(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.db.QueryRowContext(ctx, `SELECT released_at IS NOT NULL FROM inference_reservations WHERE request_id=$1`, hashHex(batchRequestID)).Scan(&holdReleased); err != nil || holdReleased {
+		t.Fatalf("hold after rewind released=%v err=%v", holdReleased, err)
+	}
+	if err := indexer.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.db.QueryRowContext(ctx, `SELECT released_at IS NOT NULL FROM inference_reservations WHERE request_id=$1`, hashHex(batchRequestID)).Scan(&holdReleased); err != nil || !holdReleased {
+		t.Fatalf("hold after replay released=%v err=%v", holdReleased, err)
 	}
 	receipt.RequestId = crypto.Keccak256Hash([]byte("request-recovery"))
 	receipt.Nonce = 3
