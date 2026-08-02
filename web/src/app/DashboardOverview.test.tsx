@@ -10,5 +10,4 @@ it('shows real customer and provider account values from operations', async () =
   render(<QueryClientProvider client={new QueryClient()}><DashboardOverview api={api} /></QueryClientProvider>)
   expect(await screen.findByText('120 wei')).toBeVisible()
   expect(screen.getByText('33 wei')).toBeVisible()
-  expect(screen.getByText(/historical slashing data is not exposed/i)).toBeVisible()
 })

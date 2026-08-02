@@ -133,7 +133,7 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql", "000007_provider_operations.sql", "000008_machine_signers.sql"} {
+	for _, migration := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000006_request_submission.sql", "000007_provider_operations.sql", "000008_machine_signers.sql", "000013_account_analytics.sql"} {
 		if err := repository.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", migration)); err != nil {
 			t.Fatal(err)
 		}

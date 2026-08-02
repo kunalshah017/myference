@@ -105,6 +105,10 @@ func run() error {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
 	}, api.OperationsConfig{ChainID: 10143, ContractAddress: chainConfiguration.ContractAddress, ExplorerURL: envOr("MYFERENCE_EXPLORER_URL", "https://testnet.monadexplorer.com"), Confirmations: 2})
+	analytics := api.NewAnalytics(repository, func(request *http.Request) (string, error) {
+		session, err := authService.AuthenticateBrowserRequest(request)
+		return session.AccountID, err
+	}, api.AnalyticsConfig{ChainID: 10143, ContractAddress: chainConfiguration.ContractAddress})
 	events, err := realtime.Open(ctx, databaseURL, func(ctx context.Context, ticket string) (string, error) {
 		return authService.ConsumeStreamTicket(ctx, ticket)
 	})
@@ -112,7 +116,7 @@ func run() error {
 		return err
 	}
 	defer events.Close()
-	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, events), webOrigin)
+	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, events), webOrigin)
 	server := &http.Server{Addr: envOr("MYFERENCE_LISTEN_ADDR", "127.0.0.1:8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
@@ -142,14 +146,15 @@ func run() error {
 	}
 }
 
-func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, eventsHandler http.Handler) http.Handler {
+func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, analyticsHandler, eventsHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	mux.Handle("/relay", relayHandler)
 	mux.Handle("/v1/chat/completions", openAIHandler)
 	mux.Handle("/v1/messages", anthropicHandler)
 	mux.Handle("/auth/", authHandler)
-	mux.Handle("/api/account/", operationsHandler)
+	mux.Handle("/api/account/operations", operationsHandler)
+	mux.Handle("/api/account/analytics", analyticsHandler)
 	mux.Handle("/api/", marketplaceHandler)
 	mux.Handle("/events", eventsHandler)
 	return mux

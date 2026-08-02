@@ -14,6 +14,12 @@ export type OperationMachine = { id: string; name: string; revoked: boolean; bac
 export type OperationOffer = { offer_id: `0x${string}`; version: number; model_hash: `0x${string}`; capability_hash: `0x${string}`; input_per_million_wei: string; output_per_million_wei: string; compute_per_second_wei: string }
 export type AccountOperations = { chain_id: number; contract_address: `0x${string}`; explorer_url: string; confirmations: number; wallet_address: `0x${string}`; customer_balance_wei: string; provider_bond_wei: string; claimable_wei: string; provider_earnings_wei: string; bond_exit_available_at: number; sessions: OperationSession[]; machines: OperationMachine[]; offers: OperationOffer[] }
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
+export type AnalyticsTotals = { settled_requests: number; input_tokens: number; output_tokens: number; compute_milliseconds: number; provider_charges_wei: string; protocol_fees_wei: string; total_spent_wei: string; gross_revenue_wei: string; total_slashed_wei: string }
+export type AnalyticsDay = { date: string; customer_requests: number; customer_spent_wei: string; provider_requests: number; provider_revenue_wei: string }
+export type UsageRecord = { request_id: string; model: string; input_tokens: number; output_tokens: number; compute_milliseconds: number; provider_amount_wei: string; fee_amount_wei: string; total_charge_wei: string; transaction_hash: string; completed_at: string }
+export type ProviderSettlement = { request_id: string; model: string; input_tokens: number; output_tokens: number; compute_milliseconds: number; revenue_wei: string; transaction_hash: string; completed_at: string }
+export type SlashRecord = { request_id: string; amount_wei: string; block_number: number; transaction_hash: string; indexed_at: string }
+export type AccountAnalytics = { customer: AnalyticsTotals; provider: AnalyticsTotals; daily: AnalyticsDay[]; usage: UsageRecord[]; settlements: ProviderSettlement[]; slashes: SlashRecord[] }
 
 export class AuthAPI {
   private readonly baseURL: string
@@ -97,6 +103,12 @@ export class InferenceAPI {
     if (!content) throw new Error('The provider returned no assistant message.')
     return content
   }
+}
+
+export class AnalyticsAPI {
+  private readonly baseURL: string
+  constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
+  analytics() { return requestJSON<AccountAnalytics>(`${this.baseURL}/api/account/analytics`) }
 }
 
 export function publicAPIBaseURL() {

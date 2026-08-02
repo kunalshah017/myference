@@ -41,7 +41,7 @@ it('renders only live API inventory with all-inclusive integer prices and provid
   renderModels()
   await userEvent.click(await screen.findByRole('button', { name: /qwen2.5:0.5b/i }))
   expect((await screen.findAllByText(/10 wei.*1m input/i)).length).toBeGreaterThan(0)
-  expect(screen.getByText(/price version 3/i)).toBeVisible()
+  expect(await screen.findByText(/price version 3/i)).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: /use provider machine-live/i }))
   expect(screen.getByText(/pinned to machine-live/i)).toBeVisible()
   expect(screen.queryByText(/mock|sample provider/i)).not.toBeInTheDocument()

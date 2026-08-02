@@ -284,7 +284,7 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 			return err
 		}
 		requestID := common.Hash(decoded.RequestId).Hex()
-		result, err := tx.ExecContext(ctx, `INSERT INTO chain_settlements (chain_id,contract_address,request_id,session_id,provider,provider_amount,fee_amount,transaction_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, i.chainID.String(), i.contract.Hex(), requestID, common.Hash(decoded.SessionId).Hex(), decoded.Provider.Hex(), decoded.ProviderAmount.String(), decoded.FeeAmount.String(), eventLog.TxHash.Hex())
+		result, err := tx.ExecContext(ctx, `INSERT INTO chain_settlements (chain_id,contract_address,request_id,session_id,provider,provider_amount,fee_amount,transaction_hash,block_number) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, i.chainID.String(), i.contract.Hex(), requestID, common.Hash(decoded.SessionId).Hex(), decoded.Provider.Hex(), decoded.ProviderAmount.String(), decoded.FeeAmount.String(), eventLog.TxHash.Hex(), eventLog.BlockNumber)
 		if err != nil {
 			return err
 		}
@@ -311,6 +311,9 @@ func (i *Indexer) applyLog(ctx context.Context, tx *sql.Tx, eventLog types.Log) 
 	case "ProviderSlashed":
 		decoded, err := i.binding.ParseProviderSlashed(eventLog)
 		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO chain_slashes(chain_id,contract_address,request_id,provider,amount,block_number,transaction_hash) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, i.chainID.String(), i.contract.Hex(), common.Hash(decoded.RequestId).Hex(), decoded.Provider.Hex(), decoded.Amount.String(), eventLog.BlockNumber, eventLog.TxHash.Hex()); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE chain_accounts SET provider_bond=provider_bond-$4,bond_exit_available_at=CASE WHEN provider_bond-$4=0 THEN 0 ELSE bond_exit_available_at END WHERE chain_id=$1 AND contract_address=$2 AND address=$3`, i.chainID.String(), i.contract.Hex(), decoded.Provider.Hex(), decoded.Amount.String()); err != nil {
@@ -353,7 +356,7 @@ func (i *Indexer) rewind(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, table := range []string{"chain_settlements", "chain_sessions", "chain_offers", "chain_provider_signers", "chain_accounts", "chain_blocks", "chain_cursors"} {
+	for _, table := range []string{"chain_slashes", "chain_settlements", "chain_sessions", "chain_offers", "chain_provider_signers", "chain_accounts", "chain_blocks", "chain_cursors"} {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE chain_id=$1 AND contract_address=$2", table), i.chainID.String(), i.contract.Hex()); err != nil {
 			return err
 		}

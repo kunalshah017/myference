@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity as ActivityIcon, Banknote, Bot, CircleDollarSign, Code2, Cpu, Home, KeyRound, PanelLeft, Server } from 'lucide-react'
 import { Activity } from '../features/activity/Activity'
+import { ProviderAnalytics } from '../features/analytics/ProviderAnalytics'
+import { UsageAnalytics } from '../features/analytics/UsageAnalytics'
 import { ApiKeys } from '../features/auth/ApiKeys'
 import { ApiAccessGuide } from '../features/auth/ApiAccessGuide'
 import { ConnectWallet } from '../features/auth/ConnectWallet'
@@ -51,9 +53,9 @@ export function DashboardShell() {
         {view === 'playground' && <section><p className="eyebrow">Browser test client</p><h1>Model playground</h1><p className="dashboard-intro">Send a real request through the OpenAI-compatible endpoint.</p><ChatPlayground /></section>}
         {view === 'funds' && (session ? <Billing /> : disconnected('Connect a wallet to deposit MON and open bounded spending sessions.'))}
         {view === 'api' && <><ApiAccessGuide />{session ? <><ApiKeys api={api} /><DeviceApproval api={api} /></> : disconnected('Connect a wallet to create scoped API keys and approve provider devices.')}</>}
-        {view === 'usage' && <section><p className="eyebrow">Requests and settlement</p><h1>Usage</h1><Activity api={marketplace} authApi={api} connected={Boolean(session)} onState={setRouteState} />{routeState && <p className="route-state">Latest route state: {routeState}</p>}</section>}
+        {view === 'usage' && <section><p className="eyebrow">Requests and settlement</p><h1>Usage</h1>{session ? <><UsageAnalytics /><section className="embedded-activity"><p className="eyebrow">Realtime request state</p><h2>In-flight activity</h2><Activity api={marketplace} authApi={api} connected onState={setRouteState} /></section></> : disconnected('Connect a wallet to inspect confirmed tokens, cost, and request activity.')}{routeState && <p className="route-state">Latest route state: {routeState}</p>}</section>}
         {view === 'hosting' && <section><p className="eyebrow">Provider workspace</p><h1>Host inference</h1><p className="dashboard-intro">Manage local models, cloud APIs, and CLI agents; follow accepted requests through settlement in realtime.</p>{session ? <><ProviderConsole /><section className="embedded-activity"><p className="eyebrow">Realtime provider traffic</p><h2>Inference requests</h2><Activity api={marketplace} authApi={api} connected onState={setRouteState} /></section></> : disconnected('Connect a wallet to manage provider machines, backends, and offers.')}</section>}
-        {view === 'earnings' && <section><p className="eyebrow">Provider settlement</p><h1>Earnings and stake</h1>{session ? <ProviderConsole /> : disconnected('Connect a wallet to inspect earnings, collateral, and bond-exit state.')}</section>}
+        {view === 'earnings' && <section><p className="eyebrow">Provider settlement</p><h1>Earnings and stake</h1>{session ? <><ProviderAnalytics /><ProviderConsole /></> : disconnected('Connect a wallet to inspect earnings, collateral, slashing, and bond-exit state.')}</section>}
       </main>
     </div>
   </div>

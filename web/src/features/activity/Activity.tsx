@@ -16,7 +16,8 @@ export function Activity({ api = new MarketplaceAPI(), authApi = new AuthAPI(), 
       live.current = reconcileRequestEvent(live.current, event)
       onState?.(live.current.state)
       void queryClient.invalidateQueries({ queryKey: ['activity'] })
-    }, () => { void queryClient.invalidateQueries({ queryKey: ['activity'] }) })
+      void queryClient.invalidateQueries({ queryKey: ['account-analytics'] })
+    }, () => { void queryClient.invalidateQueries({ queryKey: ['activity'] }); void queryClient.invalidateQueries({ queryKey: ['account-analytics'] }) })
   }, [authApi, connected, onState, queryClient, subscribe])
   useEffect(() => { const latest = activity.data?.[0]?.state; if (latest) onState?.(latest) }, [activity.data, onState])
 

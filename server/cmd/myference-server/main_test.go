@@ -22,7 +22,7 @@ func TestRootHandlerMountsRelayInferenceAndAccountAPIs(t *testing.T) {
 	marker := func(name string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(name)) })
 	}
-	handler := newRootHandler(marker("relay"), marker("openai"), marker("anthropic"), marker("auth"), marker("market"), marker("operations"), marker("events"))
+	handler := newRootHandler(marker("relay"), marker("openai"), marker("anthropic"), marker("auth"), marker("market"), marker("operations"), marker("analytics"), marker("events"))
 	for path, expected := range map[string]string{
 		"/healthz":                "ok\n",
 		"/relay":                  "relay",
@@ -31,6 +31,7 @@ func TestRootHandlerMountsRelayInferenceAndAccountAPIs(t *testing.T) {
 		"/auth/session":           "auth",
 		"/api/models":             "market",
 		"/api/account/operations": "operations",
+		"/api/account/analytics":  "analytics",
 		"/events":                 "events",
 	} {
 		response := httptest.NewRecorder()
