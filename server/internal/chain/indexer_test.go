@@ -36,6 +36,12 @@ func TestBatchEndCapsRangeWithoutOverflow(t *testing.T) {
 	}
 }
 
+func TestIndexerBatchFitsMonadPublicRPCLimit(t *testing.T) {
+	if indexBatchSize > 100 {
+		t.Fatalf("index batch size %d exceeds Monad public RPC limit", indexBatchSize)
+	}
+}
+
 func TestFirstCodeBlockSkipsPreDeploymentHistory(t *testing.T) {
 	reader := deployedCodeReader{deployment: 50_000_000}
 	got, err := firstCodeBlock(context.Background(), reader, common.Address{1}, 0, 50_378_000)

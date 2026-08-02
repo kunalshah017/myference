@@ -24,7 +24,7 @@ type IndexerConfig struct {
 	Confirmations       uint64
 }
 
-const indexBatchSize uint64 = 250
+const indexBatchSize uint64 = 100
 const maximumInitialHistory uint64 = 10_000
 
 type codeReader interface {
