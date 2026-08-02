@@ -241,21 +241,21 @@ Commit: `git add contracts && git commit -m "feat: add provable slashing and fee
 - Create: `server/internal/store/store.go`
 - Create: `server/internal/store/store_integration_test.go`
 
-- [ ] **Step 1: Write a failing real-PostgreSQL integration test**
+- [x] **Step 1: Write a failing real-PostgreSQL integration test**
 
 The test must connect through `MYFERENCE_TEST_DATABASE_URL`, apply the migration, create account/machine/backend/offer/session/request records, perform a valid state transition, reject an invalid terminal-state transition, and read the corresponding outbox event.
 
-- [ ] **Step 2: Verify RED against real PostgreSQL**
+- [x] **Step 2: Verify RED against real PostgreSQL**
 
 Run: `docker compose up -d --wait postgres && MYFERENCE_TEST_DATABASE_URL=postgres://myference:myference@localhost:5432/myference_test?sslmode=disable go test ./server/internal/store -v`
 
 Expected: FAIL because the migration and store do not exist.
 
-- [ ] **Step 3: Implement schema and store**
+- [x] **Step 3: Implement schema and store**
 
 Use constraints for unique API-key hashes, machine ownership, immutable offer versions, receipt nonces, request transitions, and chain log identity. Write state change and outbox insertion in one SQL transaction. Use PostgreSQL advisory locks for per-request settlement and `FOR UPDATE SKIP LOCKED` for outbox workers.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run the integration command from Step 2 again.
 
