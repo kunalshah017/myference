@@ -4,6 +4,7 @@ import { expect, it } from 'vitest'
 import App from './App'
 
 it('shows an honest disconnected marketplace without fake inventory', async () => {
+  window.history.pushState({}, '', '/app')
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>)
 
   expect(

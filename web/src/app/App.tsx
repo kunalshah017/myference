@@ -8,8 +8,9 @@ import { Billing } from '../features/billing/Billing'
 import { ModelList } from '../features/marketplace/ModelList'
 import { ProviderConsole } from '../features/provider/ProviderConsole'
 import { AuthAPI, MarketplaceAPI, type Session } from '../lib/api'
+import LandingPage from './LandingPage'
 
-function App() {
+function OperationalApp() {
   const api = useMemo(() => new AuthAPI(), [])
   const marketplace = useMemo(() => new MarketplaceAPI(), [])
   const [session, setSession] = useState<Session>()
@@ -94,4 +95,9 @@ function App() {
   )
 }
 
+function App() {
+  return window.location.pathname === '/app' ? <OperationalApp /> : <LandingPage />
+}
+
+export { OperationalApp }
 export default App
