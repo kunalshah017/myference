@@ -228,6 +228,75 @@ contract MyferenceMarketTest is Test {
         assertEq(market.claimable(provider), 0);
     }
 
+    function testSlashConflictingProviderReceiptsExactlyOnce() public {
+        _bondPublish(1 ether, 0, 0);
+        MyferenceMarket.Receipt memory first = _receipt(keccak256("equivocation"), 1, 1 ether);
+        MyferenceMarket.Receipt memory second = _receipt(keccak256("equivocation"), 1, 1 ether);
+        second.outputHash = keccak256("conflicting-output");
+        bytes memory firstSignature = _sign(providerKey, first);
+        bytes memory secondSignature = _sign(providerKey, second);
+
+        market.slashDoubleSign(first, firstSignature, second, secondSignature);
+
+        assertEq(market.providerBonds(provider), 0);
+        assertEq(market.claimable(feeRecipient), MINIMUM_BOND);
+        assertTrue(market.slashedRequests(first.requestId));
+        vm.expectRevert(MyferenceMarket.EvidenceAlreadyUsed.selector);
+        market.slashDoubleSign(first, firstSignature, second, secondSignature);
+    }
+
+    function testSlashRejectsIdenticalOrArbitraryEvidence() public {
+        _bondPublish(1 ether, 0, 0);
+        MyferenceMarket.Receipt memory first = _receipt(keccak256("same"), 1, 1 ether);
+        bytes memory signature = _sign(providerKey, first);
+        vm.expectRevert(MyferenceMarket.InvalidEvidence.selector);
+        market.slashDoubleSign(first, signature, first, signature);
+
+        MyferenceMarket.Receipt memory second = _receipt(keccak256("same"), 1, 1 ether);
+        second.outputHash = keccak256("different");
+        bytes memory arbitrarySignature = _sign(settlementKey, second);
+        vm.expectRevert(MyferenceMarket.InvalidReceiptSignature.selector);
+        market.slashDoubleSign(first, signature, second, arbitrarySignature);
+    }
+
+    function testFeeChangeIsCappedVersionedAndTimelocked() public {
+        vm.prank(owner);
+        market.proposeFee(600);
+        vm.expectRevert(MyferenceMarket.FeeDelayActive.selector);
+        market.executeFeeChange();
+
+        vm.warp(block.timestamp + 2 days);
+        market.executeFeeChange();
+        assertEq(market.feeBasisPoints(), 600);
+        assertEq(market.feeVersion(), 2);
+        assertEq(market.feeBpsByVersion(1), 500);
+        assertEq(market.feeBpsByVersion(2), 600);
+
+        vm.prank(owner);
+        vm.expectRevert(MyferenceMarket.FeeTooHigh.selector);
+        market.proposeFee(1_501);
+    }
+
+    function testPauseCannotBlockMatureWithdrawals() public {
+        vm.prank(customer);
+        market.deposit{ value: 2 ether }();
+        vm.prank(provider);
+        market.depositBond{ value: MINIMUM_BOND }();
+        vm.prank(provider);
+        market.requestBondExit();
+        vm.prank(owner);
+        market.pause();
+
+        vm.prank(customer);
+        market.requestWithdrawal(1 ether);
+        vm.warp(block.timestamp + EXIT_DELAY);
+        vm.prank(provider);
+        market.finalizeBondExit();
+
+        assertEq(market.claimable(customer), 1 ether);
+        assertEq(market.claimable(provider), MINIMUM_BOND);
+    }
+
     function _bondPublish(uint256 inputRate, uint256 outputRate, uint256 computeRate) internal {
         vm.startPrank(provider);
         market.depositBond{ value: MINIMUM_BOND }();

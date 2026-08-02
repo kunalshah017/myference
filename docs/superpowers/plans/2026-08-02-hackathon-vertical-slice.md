@@ -212,21 +212,21 @@ Commit: `git add contracts/src contracts/test && git commit -m "feat: settle sig
 - Modify: `contracts/test/MyferenceMarket.t.sol`
 - Create: `contracts/script/Deploy.s.sol`
 
-- [ ] **Step 1: Write failing governance and evidence tests**
+- [x] **Step 1: Write failing governance and evidence tests**
 
 Test that two different provider-signed receipts with the same request ID slash once; identical receipts do not; arbitrary evidence fails; fee proposals below or equal to 1,500 basis points execute only after the timelock; and pausing cannot block mature withdrawals.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `forge test --root contracts --match-test 'testSlash|testFee|testPause' -vvv`
 
 Expected: FAIL because the evidence and timelock functions are absent.
 
-- [ ] **Step 3: Implement evidence, fee scheduling, and deployment**
+- [x] **Step 3: Implement evidence, fee scheduling, and deployment**
 
 Hash both typed receipts, recover the same provider from both signatures, require matching request IDs and different hashes, then slash the configured amount once. Store fee proposal value and executable timestamp. Deployment reads owner, fee recipient, settlement signer, minimum bond, exit delay, and fee delay from environment and logs the deployed address.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `forge fmt --root contracts --check && forge test --root contracts -vvv`
 

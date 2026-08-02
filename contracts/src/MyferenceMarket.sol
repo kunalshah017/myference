@@ -32,6 +32,11 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     error StaleOffer();
     error MaximumChargeExceeded();
     error InvalidBatch();
+    error InvalidEvidence();
+    error EvidenceAlreadyUsed();
+    error FeeTooHigh();
+    error FeeDelayActive();
+    error NoPendingFee();
 
     struct OfferVersion {
         bool active;
@@ -97,9 +102,14 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     mapping(bytes32 => Session) public sessions;
     mapping(bytes32 => bool) public settledRequests;
     mapping(address => mapping(uint64 => bool)) public usedNonces;
+    mapping(bytes32 => bool) public slashedRequests;
+    mapping(uint64 => uint16) public feeBpsByVersion;
 
     uint16 public feeBasisPoints = 500;
     uint64 public feeVersion = 1;
+    uint16 public pendingFeeBasisPoints;
+    uint64 public pendingFeeAvailableAt;
+    bool public pendingFeeChange;
 
     uint256 public totalCustomerBalances;
     uint256 public totalProviderBonds;
@@ -134,6 +144,9 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         uint256 providerAmount,
         uint256 feeAmount
     );
+    event ProviderSlashed(address indexed provider, bytes32 indexed requestId, uint256 amount);
+    event FeeProposed(uint16 feeBasisPoints, uint64 availableAt);
+    event FeeChanged(uint16 feeBasisPoints, uint64 version);
 
     constructor(
         address initialOwner,
@@ -148,6 +161,7 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         minimumBond = minimumBond_;
         bondExitDelay = bondExitDelay_;
         feeDelay = feeDelay_;
+        feeBpsByVersion[1] = 500;
     }
 
     function deposit() external payable whenNotPaused {
@@ -309,6 +323,55 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         }
     }
 
+    function slashDoubleSign(
+        Receipt calldata first,
+        bytes calldata firstSignature,
+        Receipt calldata second,
+        bytes calldata secondSignature
+    ) external {
+        bytes32 firstDigest = hashReceipt(first);
+        bytes32 secondDigest = hashReceipt(second);
+        if (
+            first.requestId == bytes32(0) || first.requestId != second.requestId
+                || first.provider == address(0) || first.provider != second.provider
+                || firstDigest == secondDigest
+        ) revert InvalidEvidence();
+        if (slashedRequests[first.requestId]) revert EvidenceAlreadyUsed();
+        if (
+            firstDigest.recover(firstSignature) != first.provider
+                || secondDigest.recover(secondSignature) != first.provider
+        ) revert InvalidReceiptSignature();
+
+        uint256 amount = Math.min(providerBonds[first.provider], minimumBond);
+        if (amount == 0) revert InsufficientBond();
+        slashedRequests[first.requestId] = true;
+        providerBonds[first.provider] -= amount;
+        totalProviderBonds -= amount;
+        if (providerBonds[first.provider] == 0) bondExitAvailableAt[first.provider] = 0;
+        _creditClaimable(feeRecipient, amount);
+        emit ProviderSlashed(first.provider, first.requestId, amount);
+    }
+
+    function proposeFee(uint16 newFeeBasisPoints) external onlyOwner {
+        if (newFeeBasisPoints > MAXIMUM_FEE_BASIS_POINTS) revert FeeTooHigh();
+        pendingFeeBasisPoints = newFeeBasisPoints;
+        pendingFeeAvailableAt = uint64(block.timestamp) + feeDelay;
+        pendingFeeChange = true;
+        emit FeeProposed(newFeeBasisPoints, pendingFeeAvailableAt);
+    }
+
+    function executeFeeChange() external {
+        if (!pendingFeeChange) revert NoPendingFee();
+        if (block.timestamp < pendingFeeAvailableAt) revert FeeDelayActive();
+        feeBasisPoints = pendingFeeBasisPoints;
+        ++feeVersion;
+        feeBpsByVersion[feeVersion] = feeBasisPoints;
+        pendingFeeBasisPoints = 0;
+        pendingFeeAvailableAt = 0;
+        pendingFeeChange = false;
+        emit FeeChanged(feeBasisPoints, feeVersion);
+    }
+
     function pause() external onlyOwner {
         _pause();
     }
@@ -333,8 +396,9 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         if (usedNonces[receipt.provider][receipt.nonce]) revert NonceAlreadyUsed();
         if (
             receipt.requestId == bytes32(0) || receipt.status != 1
-                || receipt.settlementSigner != settlementSigner || receipt.feeVersion != feeVersion
-                || receipt.feeBasisPoints != feeBasisPoints || receipt.completedAt > block.timestamp
+                || receipt.settlementSigner != settlementSigner || receipt.feeVersion == 0
+                || feeBpsByVersion[receipt.feeVersion] != receipt.feeBasisPoints
+                || receipt.completedAt > block.timestamp
         ) revert InvalidReceipt();
 
         Session storage session = sessions[receipt.sessionId];
@@ -372,7 +436,7 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         session.spent += charge;
         totalLockedSessions -= charge;
 
-        uint256 feeAmount = Math.mulDiv(charge, feeBasisPoints, 10_000);
+        uint256 feeAmount = Math.mulDiv(charge, receipt.feeBasisPoints, 10_000);
         uint256 providerAmount = charge - feeAmount;
         _creditClaimable(receipt.provider, providerAmount);
         _creditClaimable(feeRecipient, feeAmount);
