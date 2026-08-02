@@ -91,15 +91,22 @@ export class OperationsAPI {
 export class InferenceAPI {
   private readonly baseURL: string
   constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
-  async chat(model: string, apiKey: string, messages: ChatMessage[]) {
+  async chat(model: string, apiKey: string, maximumSpend: string, messages: ChatMessage[]) {
     const response = await fetch(`${this.baseURL}/v1/chat/completions`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, stream: false, messages }),
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'X-Myference-Max-Spend': maximumSpend },
+      body: JSON.stringify({ model, stream: true, messages }),
     })
     if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
-    const payload = await response.json() as { choices?: { message?: { content?: string } }[] }
-    const content = payload.choices?.[0]?.message?.content
+    let content = ''
+    for (const line of (await response.text()).split(/\r?\n/)) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6)
+      if (data === '[DONE]') break
+      const payload = JSON.parse(data) as { choices?: { delta?: { content?: string } }[]; error?: { message?: string } }
+      if (payload.error) throw new Error(payload.error.message || 'Provider execution failed.')
+      content += payload.choices?.[0]?.delta?.content ?? ''
+    }
     if (!content) throw new Error('The provider returned no assistant message.')
     return content
   }

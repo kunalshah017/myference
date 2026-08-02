@@ -6,16 +6,23 @@ import { ChatPlayground } from './ChatPlayground'
 afterEach(() => vi.restoreAllMocks())
 
 it('sends a real OpenAI-compatible chat request with the supplied key', async () => {
-  const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Provider response' } }] }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  const stream = [
+    'data: {"choices":[{"delta":{"content":"Provider "}}]}',
+    'data: {"choices":[{"delta":{"content":"response"}}]}',
+    'data: [DONE]',
+    '',
+  ].join('\n\n')
+  const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } }))
   const user = userEvent.setup()
   render(<ChatPlayground />)
   await user.type(screen.getByLabelText(/model/i), 'qwen')
   await user.type(screen.getByLabelText(/api key/i), 'mf_test_key')
+  await user.type(screen.getByLabelText(/maximum spend/i), '1000000')
   await user.type(screen.getByLabelText(/message/i), 'Hello provider')
   await user.click(screen.getByRole('button', { name: /send request/i }))
 
   expect(await screen.findByText('Provider response')).toBeVisible()
   const [, init] = request.mock.calls[0]
-  expect(init?.headers).toMatchObject({ authorization: 'Bearer mf_test_key' })
-  expect(JSON.parse(String(init?.body))).toEqual({ model: 'qwen', stream: false, messages: [{ role: 'user', content: 'Hello provider' }] })
+  expect(init?.headers).toMatchObject({ authorization: 'Bearer mf_test_key', 'X-Myference-Max-Spend': '1000000' })
+  expect(JSON.parse(String(init?.body))).toEqual({ model: 'qwen', stream: true, messages: [{ role: 'user', content: 'Hello provider' }] })
 })
