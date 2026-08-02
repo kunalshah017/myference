@@ -372,6 +372,7 @@ Required submission evidence includes the public repository, public gateway/heal
 8. Package, publish, document, deploy, rehearse, and submit.
 9. Add macOS lifecycle support.
 10. Add native Anthropic API compatibility, cloud API adapters, and isolated CLI-agent adapters.
+11. Complete the public marketplace and account/provider console against live broker and Monad data.
 
 Every delivery step must leave a runnable, verified state. A feature is not described as working until its real integration path has been executed successfully.
 
@@ -388,3 +389,11 @@ References:
 - https://learn.chatgpt.com/docs/non-interactive-mode.md
 - https://openai.com/policies/may-2025-business-terms/
 - https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk
+
+## 26. Web client
+
+The web client is a React/TypeScript/Vite application under `web/`. It provides the public live model marketplace, provider device authorization, customer deposits and spending sessions, scoped API-key management, request/receipt activity, and provider machine, offer, collateral, and earnings views.
+
+It consumes the same Go control plane and confirmed Monad events as the CLI. It does not contain hard-coded model availability, balances, transactions, providers, or successful request states. Pending chain writes remain pending until confirmed and indexed. Realtime gaps trigger an authoritative refetch.
+
+The complete routes, flows, data boundaries, visual system, accessibility requirements, security controls, and test gates are defined in `docs/superpowers/specs/2026-08-02-myference-web-client-design.md`.

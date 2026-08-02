@@ -1,0 +1,22 @@
+:root {
+  --circuit-ink: #171522;
+  --circuit-ink-soft: #3e3a4c;
+  --relay-violet: #6e5ae6;
+  --relay-violet-dark: #5140bd;
+  --packet-blue: #2f6fed;
+  --proof-mint: #248f71;
+  --fault-coral: #d95d67;
+  --node-mist: #f3f2f8;
+  --paper: #fbfaff;
+  --line: #d7d3e2;
+  --line-strong: #aaa4ba;
+  --focus: #2f6fed;
+  --font-display: 'Unbounded', 'Arial Narrow', sans-serif;
+  --font-body: 'Manrope', 'Segoe UI', sans-serif;
+  --font-data: 'Fragment Mono', 'SFMono-Regular', Consolas, monospace;
+  color: var(--circuit-ink);
+  background: var(--node-mist);
+  font-family: var(--font-body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}

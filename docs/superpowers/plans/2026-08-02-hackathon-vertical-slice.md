@@ -44,6 +44,12 @@ cli/internal/provider/daemon.go              Capacity, leases, streaming, receip
 cli/internal/platform/windows/lifecycle.go   Existing Windows lifecycle migration
 scripts/e2e-testnet.sh                       Real testnet acceptance orchestration
 docs/demo.md                                 Reproducible demo and explorer evidence
+web/src/app/                                 Router, providers, and boundaries
+web/src/features/                            Marketplace, billing, activity, provider
+web/src/lib/                                 API, Monad, realtime, formatting
+web/src/styles/                              Design tokens and global styles
+web/src/test/                                Browser and component test setup
+web/package.json                             React/TypeScript/Vite commands
 ```
 
 ### Task 1: Establish reproducible Go and repository checks
@@ -418,13 +424,159 @@ Expected: PASS against real Anvil and PostgreSQL.
 
 Commit: `git add server/internal/chain server/internal/realtime && git commit -m "feat: index Monad and settle receipts"`
 
-### Task 12: Prove the real Monad testnet vertical slice
+### Task 12: Initialize the real-data-only web client
+
+**Files:**
+- Create: `web/package.json`
+- Create: `web/vite.config.ts`
+- Create: `web/src/main.tsx`
+- Create: `web/src/app/App.tsx`
+- Create: `web/src/app/App.test.tsx`
+- Create: `web/src/styles/tokens.css`
+- Create: `web/src/styles/global.css`
+- Create: `web/src/test/setup.ts`
+
+- [x] **Step 1: Initialize React, TypeScript, and Vite**
+
+Run: `npm create vite@latest web -- --template react-ts`
+
+Then install TanStack Query, Viem, Vitest, Testing Library, `jest-dom`, `user-event`, `jsdom`, and Axe. Use a small typed browser History API route map because current React Router releases have overlapping high-severity advisories. Pin the resolved versions in `web/package-lock.json`.
+
+- [x] **Step 2: Write the failing application-shell test**
+
+```tsx
+it("shows an honest disconnected marketplace without fake inventory", () => {
+  render(<App />);
+  expect(screen.getByRole("heading", { name: /unused machines, useful inference/i })).toBeVisible();
+  expect(screen.getByText(/live marketplace data is not connected/i)).toBeVisible();
+  expect(screen.queryByText(/mock|demo provider|sample balance/i)).not.toBeInTheDocument();
+});
+```
+
+- [x] **Step 3: Verify RED**
+
+Run: `npm --prefix web test -- --run src/app/App.test.tsx`
+
+Expected: FAIL because the default Vite application does not implement the Myference shell.
+
+- [x] **Step 4: Implement the responsive shell and tokens**
+
+Build semantic header, navigation, main, routing rail, marketplace boundary, and account action. Use the web design spec's Circuit Ink, Relay Violet, Packet Blue, Proof Mint, Fault Coral, and Node Mist tokens. The routing rail must say it is awaiting a live request; no animation runs without a real event.
+
+- [x] **Step 5: Verify and commit**
+
+Run: `npm --prefix web test -- --run && npm --prefix web run lint && npm --prefix web run build`
+
+Expected: PASS with a production bundle and no default Vite assets or fake marketplace records.
+
+Commit: `git add web docs/superpowers && git commit -m "feat: initialize Myference web client"`
+
+### Task 13: Implement wallet, device authorization, and API-key flows
+
+**Files:**
+- Create: `web/src/features/auth/ConnectWallet.tsx`
+- Create: `web/src/features/auth/DeviceApproval.tsx`
+- Create: `web/src/features/auth/ApiKeys.tsx`
+- Create: `web/src/lib/chain.ts`
+- Create: `web/src/lib/api.ts`
+- Create: `web/src/features/auth/auth.test.tsx`
+
+- [ ] **Step 1: Write failing auth-boundary tests**
+
+Test unsupported-chain refusal, nonce-bound wallet authentication, expired device code, exact machine identity display, one-time API-key reveal, scope display, and revocation. Use a real loopback HTTP test server; controlled wallet signatures are test inputs, not a fake production login path.
+
+- [ ] **Step 2: Verify RED**
+
+Run: `npm --prefix web test -- --run src/features/auth/auth.test.tsx`
+
+Expected: FAIL because auth features do not exist.
+
+- [ ] **Step 3: Implement secure auth flows**
+
+Define Monad testnet chain ID 10143 with environment-provided RPC and explorer URLs. Request a server nonce, sign domain/chain/origin/nonce/issued/expiry fields, exchange it for a secure HTTP-only session, approve device codes, and create scoped API keys that reveal plaintext once. Never store bearer tokens in local storage.
+
+- [ ] **Step 4: Verify and commit**
+
+Run: `npm --prefix web test -- --run src/features/auth/auth.test.tsx && npm --prefix web run build`
+
+Expected: PASS.
+
+Commit: `git add web && git commit -m "feat: connect wallets devices and API keys"`
+
+### Task 14: Implement live marketplace and request activity
+
+**Files:**
+- Create: `web/src/features/marketplace/ModelList.tsx`
+- Create: `web/src/features/marketplace/ModelDetail.tsx`
+- Create: `web/src/features/activity/RoutingRail.tsx`
+- Create: `web/src/features/activity/Activity.tsx`
+- Create: `web/src/lib/realtime.ts`
+- Create: `web/src/features/marketplace/marketplace.test.tsx`
+
+- [ ] **Step 1: Write failing real-data state tests**
+
+Test loading, empty, available, stale, disconnected, reconnect-gap, and provider-pinned states. Assert all visible prices are all-inclusive MON values and model/provider rows originate from API responses. Test request transitions through reserved, routed, streaming, signed, submitted, and confirmed without skipping or reopening terminal states.
+
+- [ ] **Step 2: Verify RED**
+
+Run: `npm --prefix web test -- --run src/features/marketplace/marketplace.test.tsx`
+
+Expected: FAIL because marketplace and realtime features do not exist.
+
+- [ ] **Step 3: Implement query and realtime reconciliation**
+
+Fetch models/offers through TanStack Query. Obtain a short-lived stream ticket, connect native `EventSource`, apply monotonically increasing event IDs, and refetch authoritative queries after a gap or reconnect. Render no inventory until the API responds.
+
+- [ ] **Step 4: Verify accessibility and commit**
+
+Run: `npm --prefix web test -- --run && npm --prefix web run lint && npm --prefix web run build`
+
+Expected: PASS, including Axe checks for marketplace routes.
+
+Commit: `git add web && git commit -m "feat: show live inference marketplace"`
+
+### Task 15: Implement billing and provider operations
+
+**Files:**
+- Create: `web/src/features/billing/Billing.tsx`
+- Create: `web/src/features/billing/SpendingSession.tsx`
+- Create: `web/src/features/provider/Machines.tsx`
+- Create: `web/src/features/provider/Offers.tsx`
+- Create: `web/src/features/provider/Earnings.tsx`
+- Create: `web/src/lib/amount.ts`
+- Create: `web/src/features/billing/billing.test.tsx`
+- Create: `web/src/features/provider/provider.test.tsx`
+
+- [ ] **Step 1: Write failing integer-amount and transaction tests**
+
+Test decimal MON-to-wei parsing without floating point, deposit simulation, wrong network, rejected wallet, contract revert, pending/finalized deposits, bounded sessions, delayed close, provider bond, immutable offer version, claimable earnings, and explorer links.
+
+- [ ] **Step 2: Verify RED**
+
+Run: `npm --prefix web test -- --run src/features/billing src/features/provider`
+
+Expected: FAIL because billing and provider features do not exist.
+
+- [ ] **Step 3: Implement simulated contract writes and confirmed reads**
+
+Use Viem to simulate every write, request the wallet transaction, display its hash as pending, and wait for configured finality plus indexer observation before updating available balances or routability. Parse and format integer wei only.
+
+- [ ] **Step 4: Verify and commit**
+
+Run: `npm --prefix web test -- --run && npm --prefix web run lint && npm --prefix web run build`
+
+Expected: PASS.
+
+Commit: `git add web && git commit -m "feat: manage Myference billing and providers"`
+
+### Task 16: Prove the real Monad testnet vertical slice
 
 **Files:**
 - Create: `scripts/e2e-testnet.sh`
 - Create: `docs/demo.md`
 - Modify: `README.md`
 - Modify: `Makefile`
+- Modify: `web/`
 
 - [ ] **Step 1: Write the executable acceptance script**
 
@@ -438,7 +590,7 @@ Expected: a successful deployment transaction and explorer-visible contract addr
 
 - [ ] **Step 3: Run the real workflow**
 
-Deposit provider collateral, publish the discovered Ollama offer, deposit customer MON, open a capped session, start the Windows daemon, call the hosted OpenAI-compatible streaming endpoint, co-sign the observed receipt, settle it, and withdraw provider/platform claimable balances.
+Use the web client to deposit provider collateral, publish the discovered Ollama offer, deposit customer MON, open a capped session, and create the real API key. Start the Windows daemon, call the hosted OpenAI-compatible streaming endpoint, observe the real routing rail, co-sign the observed receipt, settle it, and withdraw provider/platform claimable balances.
 
 - [ ] **Step 4: Capture objective evidence**
 
@@ -446,7 +598,7 @@ Record contract address, transaction hashes, request ID, model name, input/outpu
 
 - [ ] **Step 5: Run the full release gate**
 
-Run: `make verify && ./scripts/e2e-testnet.sh`
+Run: `make verify && npm --prefix web test -- --run && npm --prefix web run build && ./scripts/e2e-testnet.sh`
 
 Expected: all automated checks pass and the real testnet acceptance script exits 0 with explorer links.
 
