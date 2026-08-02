@@ -33,10 +33,18 @@ type Proposal struct {
 	CompletedAt                                     time.Time
 }
 
+type Reservation struct {
+	RequestID, SessionID, AccountID, MachineID, OfferID string
+	PriceVersion, MaximumSpend                          uint64
+}
+
 type Dependencies struct {
 	Hub        *relay.Hub
 	Authorize  func(context.Context, string, string, string, uint64) (Principal, error)
 	Candidates func(context.Context, string) ([]router.Candidate, error)
+	Reserve    func(context.Context, Reservation) error
+	Transition func(context.Context, string, string) error
+	Abort      func(context.Context, string, string) error
 	Persist    func(context.Context, Proposal) error
 	Now        func() time.Time
 }
@@ -70,7 +78,7 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 		http.NotFound(response, request)
 		return
 	}
-	if h.dependencies.Hub == nil || h.dependencies.Authorize == nil || h.dependencies.Candidates == nil || h.dependencies.Persist == nil {
+	if h.dependencies.Hub == nil || h.dependencies.Authorize == nil || h.dependencies.Candidates == nil || h.dependencies.Reserve == nil || h.dependencies.Transition == nil || h.dependencies.Abort == nil || h.dependencies.Persist == nil {
 		http.Error(response, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -110,14 +118,27 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	events := h.broker.register(requestID)
 	defer h.broker.unregister(requestID)
+	reservation := Reservation{RequestID: requestID, SessionID: principal.SessionID, AccountID: principal.AccountID, MachineID: selected.MachineID, OfferID: selected.OfferID, PriceVersion: selected.PriceVersion, MaximumSpend: maximumSpend}
+	if err := h.dependencies.Reserve(request.Context(), reservation); err != nil {
+		http.Error(response, "reservation unavailable", http.StatusPaymentRequired)
+		return
+	}
 	prompt := renderPrompt(input.Messages)
 	envelope, err := v1.NewEnvelope("offer-"+requestID, v1.MessageJobOffer, &v1.JobOffer{RequestID: requestID, Model: input.Model, OfferID: selected.OfferID, Prompt: prompt, PriceVersion: selected.PriceVersion, MaximumSpend: maximumSpend, LeaseExpiresAt: h.dependencies.Now().Add(30 * time.Second)})
 	if err != nil || h.dependencies.Hub.Send(selected.MachineID, envelope) != nil {
+		_ = h.dependencies.Abort(request.Context(), requestID, "failed")
 		http.Error(response, "provider unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if err := waitAccepted(request.Context(), events); err != nil {
+		_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 		http.Error(response, "provider did not accept", http.StatusGatewayTimeout)
+		return
+	}
+	if err := h.dependencies.Transition(request.Context(), requestID, "accepted"); err != nil {
+		h.cancel(selected.MachineID, requestID)
+		_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
+		http.Error(response, "reservation transition failed", http.StatusInternalServerError)
 		return
 	}
 	flusher, ok := response.(http.Flusher)
@@ -129,13 +150,20 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	response.Header().Set("Cache-Control", "no-cache")
 	response.Header().Set("X-Request-ID", requestID)
 	response.WriteHeader(http.StatusOK)
+	flusher.Flush()
 	var output strings.Builder
+	streaming := false
 	for {
 		select {
 		case <-request.Context().Done():
 			h.cancel(selected.MachineID, requestID)
+			_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "cancelled")
 			return
-		case event := <-events:
+		case <-events.overflow:
+			h.cancel(selected.MachineID, requestID)
+			_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
+			return
+		case event := <-events.events:
 			if event.Type != v1.MessageOutputChunk {
 				continue
 			}
@@ -144,16 +172,33 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 				return
 			}
 			if chunk.Data != "" {
+				if !streaming {
+					if h.dependencies.Transition(request.Context(), requestID, "streaming") != nil {
+						h.cancel(selected.MachineID, requestID)
+						_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
+						return
+					}
+					streaming = true
+				}
 				output.WriteString(chunk.Data)
 				if writeSSE(response, map[string]any{"id": requestID, "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]string{"content": chunk.Data}}}}) != nil {
 					h.cancel(selected.MachineID, requestID)
+					_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 					return
 				}
 				flusher.Flush()
 			}
 			if chunk.Done {
+				if !streaming {
+					if h.dependencies.Transition(request.Context(), requestID, "streaming") != nil {
+						_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
+						return
+					}
+					streaming = true
+				}
 				proposal := Proposal{RequestID: requestID, SessionID: principal.SessionID, MachineID: selected.MachineID, OfferID: selected.OfferID, Model: input.Model, PriceVersion: selected.PriceVersion, InputTokens: chunk.InputTokens, OutputTokens: chunk.OutputTokens, ComputeMilliseconds: chunk.ComputeMilliseconds, InputHash: saltedHash(prompt), OutputHash: saltedHash(output.String()), CompletedAt: h.dependencies.Now()}
 				if h.dependencies.Persist(request.Context(), proposal) != nil {
+					_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 					return
 				}
 				_ = writeSSE(response, map[string]any{"id": requestID, "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]string{}, "finish_reason": "stop"}}})
@@ -165,7 +210,7 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 }
 
-func waitAccepted(ctx context.Context, events <-chan relay.Event) error {
+func waitAccepted(ctx context.Context, stream *brokerStream) error {
 	timer := time.NewTimer(10 * time.Second)
 	defer timer.Stop()
 	for {
@@ -174,7 +219,9 @@ func waitAccepted(ctx context.Context, events <-chan relay.Event) error {
 			return ctx.Err()
 		case <-timer.C:
 			return errors.New("accept timeout")
-		case event := <-events:
+		case <-stream.overflow:
+			return relay.ErrBackpressure
+		case event := <-stream.events:
 			if event.Type == v1.MessageJobAccept {
 				return nil
 			}
@@ -223,21 +270,26 @@ func saltedHash(value string) [32]byte {
 type eventBroker struct {
 	hub     *relay.Hub
 	mu      sync.RWMutex
-	streams map[string]chan relay.Event
+	streams map[string]*brokerStream
+}
+
+type brokerStream struct {
+	events   chan relay.Event
+	overflow chan struct{}
 }
 
 func newEventBroker(hub *relay.Hub) *eventBroker {
-	broker := &eventBroker{hub: hub, streams: make(map[string]chan relay.Event)}
+	broker := &eventBroker{hub: hub, streams: make(map[string]*brokerStream)}
 	if hub != nil {
 		go broker.run()
 	}
 	return broker
 }
 
-func (b *eventBroker) register(requestID string) <-chan relay.Event {
+func (b *eventBroker) register(requestID string) *brokerStream {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	stream := make(chan relay.Event, 32)
+	stream := &brokerStream{events: make(chan relay.Event, 32), overflow: make(chan struct{}, 1)}
 	b.streams[requestID] = stream
 	return stream
 }
@@ -259,8 +311,12 @@ func (b *eventBroker) run() {
 		b.mu.RUnlock()
 		if stream != nil {
 			select {
-			case stream <- event:
+			case stream.events <- event:
 			default:
+				select {
+				case stream.overflow <- struct{}{}:
+				default:
+				}
 			}
 		}
 	}

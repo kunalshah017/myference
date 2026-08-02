@@ -32,6 +32,16 @@ The machine token is loaded from Windows Credential Manager or macOS Keychain an
 
 On Windows, `legacy-start`, `legacy-status`, and `legacy-stop` expose the preserved reversible host lifecycle while migration continues. The general `stop` command also restores that lifecycle state; a foreground `serve` process stops cleanly with Ctrl+C.
 
+## Broker server
+
+Apply the SQL migrations in numeric order, set `MYFERENCE_DATABASE_URL`, and run:
+
+```text
+go run ./server/cmd/myference-server
+```
+
+The server binds to `127.0.0.1:8080` by default and exposes `/relay` plus the OpenAI-compatible `/v1/chat/completions` streaming endpoint. Set both `MYFERENCE_TLS_CERT` and `MYFERENCE_TLS_KEY` when terminating TLS in the process; deployments may instead keep the server on loopback behind a TLS reverse proxy. Reservations, capacity, request transitions, receipt proposals, and realtime outbox events are persisted in PostgreSQL.
+
 ## Preserved Windows CLI
 
 The existing CLI is documented in [`cli/platform/windows/legacy/README.md`](cli/platform/windows/legacy/README.md). It runs Ollama on loopback and exposes the original private-LAN streaming gateway. That gateway is preserved for migration and recovery; marketplace traffic uses the authenticated outbound provider daemon above.

@@ -33,6 +33,8 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	writeProvider(t, provider, "capacity", v1.MessageCapacity, &v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "offer-1", Model: "qwen", PriceVersion: 3}}})
 
 	proposals := make(chan Proposal, 1)
+	transitions := make(chan string, 2)
+	aborts := make(chan string, 1)
 	handler := NewOpenAI(Dependencies{
 		Hub: hub,
 		Authorize: func(_ context.Context, token, model, endpoint string, maximum uint64) (Principal, error) {
@@ -44,7 +46,15 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 		Candidates: func(context.Context, string) ([]router.Candidate, error) {
 			return []router.Candidate{{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", Capabilities: []string{"text", "stream"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 80, PriceVersion: 3}}, nil
 		},
-		Persist: func(_ context.Context, proposal Proposal) error { proposals <- proposal; return nil },
+		Reserve: func(_ context.Context, reservation Reservation) error {
+			if reservation.SessionID != "session-1" || reservation.OfferID != "offer-1" || reservation.MaximumSpend != 100 {
+				t.Fatalf("reservation=%+v", reservation)
+			}
+			return nil
+		},
+		Transition: func(_ context.Context, _ string, state string) error { transitions <- state; return nil },
+		Abort:      func(_ context.Context, _ string, state string) error { aborts <- state; return nil },
+		Persist:    func(_ context.Context, proposal Proposal) error { proposals <- proposal; return nil },
 	})
 	apiServer := httptest.NewServer(handler)
 	defer apiServer.Close()
@@ -94,6 +104,9 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("receipt proposal was not persisted")
 	}
+	if first, second := <-transitions, <-transitions; first != "accepted" || second != "streaming" {
+		t.Fatalf("transitions=%q,%q", first, second)
+	}
 
 	// SSE frames must remain parseable and ordered.
 	scanner := bufio.NewScanner(strings.NewReader(text))
@@ -105,6 +118,51 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	}
 	if frames != 3 {
 		t.Fatalf("SSE frames=%d body=%q", frames, text)
+	}
+
+	cancelSeen := make(chan struct{}, 1)
+	go func() {
+		_, payload, readErr := provider.Read(context.Background())
+		if readErr != nil {
+			return
+		}
+		var envelope v1.Envelope
+		if json.Unmarshal(payload, &envelope) != nil {
+			return
+		}
+		var offer v1.JobOffer
+		if envelope.DecodeBody(&offer) != nil {
+			return
+		}
+		writeProvider(t, provider, "accept-cancel", v1.MessageJobAccept, &v1.JobAccept{RequestID: offer.RequestID})
+		_, payload, readErr = provider.Read(context.Background())
+		if readErr == nil && json.Unmarshal(payload, &envelope) == nil && envelope.Type == v1.MessageCancel {
+			cancelSeen <- struct{}{}
+		}
+	}()
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancelRequest, _ := http.NewRequestWithContext(cancelCtx, http.MethodPost, apiServer.URL+"/v1/chat/completions", strings.NewReader(body))
+	cancelRequest.Header.Set("Authorization", "Bearer api-token")
+	cancelRequest.Header.Set("Content-Type", "application/json")
+	cancelRequest.Header.Set("X-Myference-Max-Spend", "100")
+	cancelResponse, err := http.DefaultClient.Do(cancelRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	cancelResponse.Body.Close()
+	select {
+	case <-cancelSeen:
+	case <-time.After(time.Second):
+		t.Fatal("provider did not receive cancellation")
+	}
+	select {
+	case state := <-aborts:
+		if state != "cancelled" {
+			t.Fatalf("abort state=%q", state)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled reservation was not released")
 	}
 }
 

@@ -26,6 +26,7 @@ type Options struct {
 	QueueSize        int
 	HeartbeatTimeout time.Duration
 	MaximumMessage   int64
+	CapacityHandler  func(string, v1.Capacity) error
 }
 
 type Event struct {
@@ -120,6 +121,11 @@ func (h *Hub) AcceptInbound(machineID string, envelope v1.Envelope) error {
 		var capacity v1.Capacity
 		if err := envelope.DecodeBody(&capacity); err != nil {
 			return err
+		}
+		if h.options.CapacityHandler != nil {
+			if err := h.options.CapacityHandler(machineID, capacity); err != nil {
+				return err
+			}
 		}
 	case v1.MessageJobAccept:
 		var accepted v1.JobAccept

@@ -358,6 +358,8 @@ Expected: PASS and a runnable Windows executable.
 
 Current evidence: the race-enabled CLI suite passes against real local Ollama `qwen2.5:0.5b`; the Windows amd64 cross-build is a valid PE32+ executable. Running that executable and integration suite on physical Windows remains an explicit release gate.
 
+The arm64 macOS development host has no Wine or Windows VM installed. Installing an emulator would not validate Credential Manager, PowerShell lifecycle, firewall, or power-management behavior, so physical Windows remains the meaningful gate.
+
 - [x] **Step 5: Commit**
 
 Commit: `git add cli && git commit -m "feat: migrate Windows Ollama provider"`
@@ -371,25 +373,25 @@ Commit: `git add cli && git commit -m "feat: migrate Windows Ollama provider"`
 - Create: `server/internal/api/openai_integration_test.go`
 - Create: `server/cmd/myference-server/main.go`
 
-- [ ] **Step 1: Write failing router tests**
+- [x] **Step 1: Write failing router tests**
 
 Use deterministic provider records to prove filtering by confirmed bond, model capability, health, capacity, session balance, price bound, and optional pin. Prove stable ranking by price, latency, success, and reputation and no post-stream retry.
 
-- [ ] **Step 2: Write a failing real relay/API integration test**
+- [x] **Step 2: Write a failing real relay/API integration test**
 
 Run the HTTP server and provider daemon on loopback sockets, submit `/v1/chat/completions` with `stream:true`, and assert valid SSE order, `[DONE]`, request ID propagation, cancellation, and persisted receipt proposal. The provider side must invoke the configured real Ollama integration backend when the integration tag is enabled.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run: `go test ./server/internal/router ./server/internal/api -v`
 
 Expected: FAIL because router and API handlers do not exist.
 
-- [ ] **Step 4: Implement reservation, routing, and SSE**
+- [x] **Step 4: Implement reservation, routing, and SSE**
 
 Authenticate the API key, validate request bounds, reserve from a confirmed spending session, lock offer/fee versions, lease one provider, forward ordered chunks, flush SSE, meter observed content, and persist the terminal transition and receipt proposal transactionally.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `go test -race ./server/... ./protocol/... -v`
 
