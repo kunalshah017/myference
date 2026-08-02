@@ -41,3 +41,14 @@ func TestRootHandlerMountsRelayInferenceAndAccountAPIs(t *testing.T) {
 		}
 	}
 }
+
+func TestListenAddressUsesRenderPortWhenConfigured(t *testing.T) {
+	values := map[string]string{"PORT": "10000"}
+	if got := listenAddress(func(name string) string { return values[name] }); got != "0.0.0.0:10000" {
+		t.Fatalf("listenAddress() = %q", got)
+	}
+	values["MYFERENCE_LISTEN_ADDR"] = "127.0.0.1:9090"
+	if got := listenAddress(func(name string) string { return values[name] }); got != "127.0.0.1:9090" {
+		t.Fatalf("explicit listen address = %q", got)
+	}
+}

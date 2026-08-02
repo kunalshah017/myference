@@ -63,7 +63,13 @@ Then run:
 go run ./server/cmd/myference-server
 ```
 
-The server binds to `127.0.0.1:8080` by default. It exposes `/relay`, `/v1/chat/completions`, native Anthropic `/v1/messages`, `/healthz`, wallet/device authentication, marketplace/account APIs, and ticketed SSE. Set both `MYFERENCE_TLS_CERT` and `MYFERENCE_TLS_KEY` when terminating TLS in-process, or keep it on loopback behind a TLS reverse proxy.
+The server binds to `127.0.0.1:8080` by default and automatically uses `0.0.0.0:$PORT` on managed hosts such as Render. It exposes `/relay`, `/v1/chat/completions`, native Anthropic `/v1/messages`, `/healthz`, wallet/device authentication, marketplace/account APIs, and ticketed SSE. Set both `MYFERENCE_TLS_CERT` and `MYFERENCE_TLS_KEY` when terminating TLS in-process, or keep it on loopback behind a TLS reverse proxy.
+
+## Render deployment
+
+[`render.yaml`](render.yaml) defines a Singapore-region Go API, React static site, and private managed PostgreSQL database. The API runs every numeric migration before boot. Blueprint secrets are intentionally prompted rather than committed: the Monad RPC URL, deployed contract address and start block, settlement key, web origin, auth domain, explorer URL, and the static site's API URL must all be real values.
+
+Validate the infrastructure definition with `render blueprints validate render.yaml`. The contract must be deployed first because the API verifies the configured chain, bytecode, and settlement signer during startup.
 
 Requests reserve only finalized session allowance. After real output, the broker builds the receipt exclusively from measured usage and indexed immutable prices, asks the authorized headless machine signer to sign the exact Monad EIP-712 domain, co-signs it, and durably queues the batch. The runtime persists the raw transaction before broadcast; only the finality-aware indexer moves a request to `settled` and changes visible balances.
 

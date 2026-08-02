@@ -117,7 +117,7 @@ func run() error {
 	}
 	defer events.Close()
 	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, events), webOrigin)
-	server := &http.Server{Addr: envOr("MYFERENCE_LISTEN_ADDR", "127.0.0.1:8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: listenAddress(os.Getenv), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
 	if (certificate == "") != (key == "") {
@@ -176,4 +176,14 @@ func envOr(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func listenAddress(getenv func(string) string) string {
+	if address := strings.TrimSpace(getenv("MYFERENCE_LISTEN_ADDR")); address != "" {
+		return address
+	}
+	if port := strings.TrimSpace(getenv("PORT")); port != "" {
+		return "0.0.0.0:" + port
+	}
+	return "127.0.0.1:8080"
 }
