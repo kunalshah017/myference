@@ -181,10 +181,13 @@ func (m JobAccept) Validate() error {
 }
 
 type OutputChunk struct {
-	RequestID string `json:"request_id"`
-	Sequence  uint64 `json:"sequence"`
-	Data      string `json:"data,omitempty"`
-	Done      bool   `json:"done,omitempty"`
+	RequestID           string `json:"request_id"`
+	Sequence            uint64 `json:"sequence"`
+	Data                string `json:"data,omitempty"`
+	Done                bool   `json:"done,omitempty"`
+	InputTokens         uint64 `json:"input_tokens,omitempty"`
+	OutputTokens        uint64 `json:"output_tokens,omitempty"`
+	ComputeMilliseconds uint64 `json:"compute_milliseconds,omitempty"`
 }
 
 func (m OutputChunk) Validate() error {

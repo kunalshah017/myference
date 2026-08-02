@@ -275,13 +275,13 @@ func (d *Daemon) startJob(parent context.Context, connection *websocket.Conn, of
 		defer d.wg.Done()
 		defer d.removeJob(offer.RequestID)
 		sequence := uint64(0)
-		_, err := selected.Generate(jobCtx, backend.Request{Model: offer.Model, Prompt: offer.Prompt}, func(content string) error {
+		usage, err := selected.Generate(jobCtx, backend.Request{Model: offer.Model, Prompt: offer.Prompt}, func(content string) error {
 			sequence++
 			return d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Data: content})
 		})
 		if err == nil {
 			sequence++
-			_ = d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true})
+			_ = d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ComputeMilliseconds: usage.ComputeMilliseconds})
 		}
 	}()
 	return nil
