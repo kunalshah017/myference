@@ -24,6 +24,13 @@ type IndexerConfig struct {
 	Confirmations       uint64
 }
 
+const indexBatchSize uint64 = 250
+const maximumInitialHistory uint64 = 10_000
+
+type codeReader interface {
+	CodeAt(context.Context, common.Address, *big.Int) ([]byte, error)
+}
+
 type Indexer struct {
 	eth           *ethclient.Client
 	db            *sql.DB
@@ -88,6 +95,16 @@ func (i *Indexer) Sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if target > next && target-next > maximumInitialHistory {
+		configuredNext := next
+		next, err = firstCodeBlock(ctx, i.eth, i.contract, configuredNext, target)
+		if err != nil {
+			return err
+		}
+		if last == nil || next > configuredNext {
+			i.startBlock = next
+		}
+	}
 	if last != nil {
 		canonical, err := i.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(*last))
 		if err != nil || canonical.Hash().Hex() != lastHash {
@@ -97,12 +114,55 @@ func (i *Indexer) Sync(ctx context.Context) error {
 			next = i.startBlock
 		}
 	}
-	for block := next; block <= target; block++ {
-		if err := i.indexBlock(ctx, block); err != nil {
+	for next <= target {
+		end := batchEnd(next, target, indexBatchSize)
+		if err := i.indexRange(ctx, next, end); err != nil {
 			return err
 		}
+		if end == ^uint64(0) {
+			break
+		}
+		next = end + 1
 	}
 	return nil
+}
+
+func firstCodeBlock(ctx context.Context, reader codeReader, contract common.Address, configured, head uint64) (uint64, error) {
+	code, err := reader.CodeAt(ctx, contract, new(big.Int).SetUint64(configured))
+	if err != nil {
+		return 0, err
+	}
+	if len(code) > 0 {
+		return configured, nil
+	}
+	code, err = reader.CodeAt(ctx, contract, new(big.Int).SetUint64(head))
+	if err != nil {
+		return 0, err
+	}
+	if len(code) == 0 {
+		return 0, errors.New("contract bytecode is unavailable at the confirmed chain head")
+	}
+	low, high := configured, head
+	for low < high {
+		mid := low + (high-low)/2
+		code, err = reader.CodeAt(ctx, contract, new(big.Int).SetUint64(mid))
+		if err != nil {
+			return 0, err
+		}
+		if len(code) == 0 {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	return low, nil
+}
+
+func batchEnd(next, target, size uint64) uint64 {
+	if size == 0 || target-next < size-1 {
+		return target
+	}
+	return next + size - 1
 }
 
 func (i *Indexer) cursor(ctx context.Context) (uint64, *uint64, string, error) {
@@ -123,12 +183,12 @@ func (i *Indexer) cursor(ctx context.Context) (uint64, *uint64, string, error) {
 	return next, &value, hash.String, nil
 }
 
-func (i *Indexer) indexBlock(ctx context.Context, number uint64) error {
-	header, err := i.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(number))
+func (i *Indexer) indexRange(ctx context.Context, from, to uint64) error {
+	header, err := i.eth.HeaderByNumber(ctx, new(big.Int).SetUint64(to))
 	if err != nil {
 		return err
 	}
-	logs, err := i.eth.FilterLogs(ctx, ethereum.FilterQuery{FromBlock: new(big.Int).SetUint64(number), ToBlock: new(big.Int).SetUint64(number), Addresses: []common.Address{i.contract}})
+	logs, err := i.eth.FilterLogs(ctx, ethereum.FilterQuery{FromBlock: new(big.Int).SetUint64(from), ToBlock: new(big.Int).SetUint64(to), Addresses: []common.Address{i.contract}})
 	if err != nil {
 		return err
 	}
@@ -137,7 +197,7 @@ func (i *Indexer) indexBlock(ctx context.Context, number uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO chain_blocks (chain_id,contract_address,block_number,block_hash,parent_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (chain_id,contract_address,block_number) DO UPDATE SET block_hash=EXCLUDED.block_hash,parent_hash=EXCLUDED.parent_hash`, i.chainID.String(), i.contract.Hex(), number, header.Hash().Hex(), header.ParentHash.Hex()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO chain_blocks (chain_id,contract_address,block_number,block_hash,parent_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (chain_id,contract_address,block_number) DO UPDATE SET block_hash=EXCLUDED.block_hash,parent_hash=EXCLUDED.parent_hash`, i.chainID.String(), i.contract.Hex(), to, header.Hash().Hex(), header.ParentHash.Hex()); err != nil {
 		return err
 	}
 	for _, eventLog := range logs {
@@ -151,7 +211,7 @@ func (i *Indexer) indexBlock(ctx context.Context, number uint64) error {
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO chain_cursors (chain_id,contract_address,next_block,last_block,last_block_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (chain_id,contract_address) DO UPDATE SET next_block=EXCLUDED.next_block,last_block=EXCLUDED.last_block,last_block_hash=EXCLUDED.last_block_hash`, i.chainID.String(), i.contract.Hex(), number+1, number, header.Hash().Hex()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO chain_cursors (chain_id,contract_address,next_block,last_block,last_block_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (chain_id,contract_address) DO UPDATE SET next_block=EXCLUDED.next_block,last_block=EXCLUDED.last_block,last_block_hash=EXCLUDED.last_block_hash`, i.chainID.String(), i.contract.Hex(), to+1, to, header.Hash().Hex()); err != nil {
 		return err
 	}
 	return tx.Commit()
