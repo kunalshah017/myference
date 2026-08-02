@@ -175,29 +175,29 @@ Commit: `git add contracts && git commit -m "feat: add Monad deposits bonds and 
 - Modify: `contracts/test/MyferenceMarket.t.sol`
 - Create: `contracts/test/MyferenceMarketInvariant.t.sol`
 
-- [ ] **Step 1: Write failing session tests**
+- [x] **Step 1: Write failing session tests**
 
 Test that opening a session locks its allowance, expiry is enforced, closing starts a delay, pending settlement can complete during the delay, and unused funds return only after finalization.
 
-- [ ] **Step 2: Write failing receipt tests**
+- [x] **Step 2: Write failing receipt tests**
 
 Create real EIP-712 provider and Myference signatures with Foundry signing helpers. Assert exact billing, 95/5 distribution at 500 basis points, maximum-spend enforcement, replay rejection, bad signature rejection, stale price rejection, and atomic accounting across a batch.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run: `forge test --root contracts --match-test 'testSession|testSettle' -vvv`
 
 Expected: FAIL because session and settlement functions are absent.
 
-- [ ] **Step 4: Implement sessions and settlement**
+- [x] **Step 4: Implement sessions and settlement**
 
 Lock allowance when the customer opens a session. Verify provider and configured settlement-signer EIP-712 signatures. Recompute token and millisecond charges with `Math.mulDiv(..., Math.Rounding.Ceil)`. Mark request IDs and nonces before crediting provider and fee recipient claimable balances.
 
-- [ ] **Step 5: Add invariants**
+- [x] **Step 5: Add invariants**
 
 The invariant handler must attempt arbitrary deposit, session, settlement, and withdrawal sequences. Assert conservation of MON, no request settles twice, no session spends above allowance, and `feeBps <= 1500`.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run: `forge test --root contracts -vvv`
 

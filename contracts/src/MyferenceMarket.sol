@@ -20,6 +20,18 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     error ExitDelayActive();
     error NothingToClaim();
     error TransferFailed();
+    error SessionAlreadyExists();
+    error InvalidSession();
+    error SessionExpired();
+    error SessionCloseDelayActive();
+    error SessionAllowanceExceeded();
+    error RequestAlreadySettled();
+    error NonceAlreadyUsed();
+    error InvalidReceipt();
+    error InvalidReceiptSignature();
+    error StaleOffer();
+    error MaximumChargeExceeded();
+    error InvalidBatch();
 
     struct OfferVersion {
         bool active;
@@ -30,6 +42,45 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         uint256 outputPerMillion;
         uint256 computePerSecond;
     }
+
+    struct Session {
+        address customer;
+        uint256 allowance;
+        uint256 spent;
+        uint64 expiresAt;
+        uint64 closeAvailableAt;
+        bool finalized;
+    }
+
+    struct Receipt {
+        bytes32 requestId;
+        bytes32 sessionId;
+        address customer;
+        address provider;
+        address settlementSigner;
+        bytes32 offerId;
+        uint64 priceVersion;
+        bytes32 modelHash;
+        bytes32 capabilityHash;
+        uint64 inputTokens;
+        uint64 outputTokens;
+        uint64 computeMilliseconds;
+        uint64 maximumCharge;
+        uint64 totalCharge;
+        uint16 feeBasisPoints;
+        uint64 feeVersion;
+        uint8 status;
+        uint64 completedAt;
+        bytes32 inputHash;
+        bytes32 outputHash;
+        uint64 nonce;
+    }
+
+    bytes32 public constant RECEIPT_TYPEHASH = keccak256(
+        "Receipt(bytes32 requestId,bytes32 sessionId,address customer,address provider,address settlementSigner,bytes32 offerId,uint64 priceVersion,bytes32 modelHash,bytes32 capabilityHash,uint64 inputTokens,uint64 outputTokens,uint64 computeMilliseconds,uint64 maximumCharge,uint64 totalCharge,uint16 feeBasisPoints,uint64 feeVersion,uint8 status,uint64 completedAt,bytes32 inputHash,bytes32 outputHash,uint64 nonce)"
+    );
+    uint64 public constant SESSION_CLOSE_DELAY = 1 days;
+    uint16 public constant MAXIMUM_FEE_BASIS_POINTS = 1_500;
 
     address public immutable feeRecipient;
     address public immutable settlementSigner;
@@ -43,6 +94,12 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     mapping(address => uint64) public bondExitAvailableAt;
     mapping(address => mapping(bytes32 => uint64)) public latestOfferVersion;
     mapping(address => mapping(bytes32 => mapping(uint64 => OfferVersion))) public offerVersions;
+    mapping(bytes32 => Session) public sessions;
+    mapping(bytes32 => bool) public settledRequests;
+    mapping(address => mapping(uint64 => bool)) public usedNonces;
+
+    uint16 public feeBasisPoints = 500;
+    uint64 public feeVersion = 1;
 
     uint256 public totalCustomerBalances;
     uint256 public totalProviderBonds;
@@ -64,6 +121,18 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         uint256 inputPerMillion,
         uint256 outputPerMillion,
         uint256 computePerSecond
+    );
+    event SessionOpened(
+        bytes32 indexed sessionId, address indexed customer, uint256 allowance, uint64 expiresAt
+    );
+    event SessionCloseRequested(bytes32 indexed sessionId, uint64 availableAt);
+    event SessionClosed(bytes32 indexed sessionId, uint256 returnedAmount);
+    event ReceiptSettled(
+        bytes32 indexed requestId,
+        bytes32 indexed sessionId,
+        address indexed provider,
+        uint256 providerAmount,
+        uint256 feeAmount
     );
 
     constructor(
@@ -168,6 +237,78 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
         );
     }
 
+    function openSession(bytes32 sessionId, uint256 allowance, uint64 expiresAt)
+        external
+        whenNotPaused
+    {
+        if (sessionId == bytes32(0) || allowance == 0 || expiresAt <= block.timestamp) {
+            revert InvalidSession();
+        }
+        if (sessions[sessionId].customer != address(0)) revert SessionAlreadyExists();
+        if (customerBalances[msg.sender] < allowance) revert InsufficientBalance();
+        customerBalances[msg.sender] -= allowance;
+        totalCustomerBalances -= allowance;
+        totalLockedSessions += allowance;
+        sessions[sessionId] = Session({
+            customer: msg.sender,
+            allowance: allowance,
+            spent: 0,
+            expiresAt: expiresAt,
+            closeAvailableAt: 0,
+            finalized: false
+        });
+        emit SessionOpened(sessionId, msg.sender, allowance, expiresAt);
+    }
+
+    function requestSessionClose(bytes32 sessionId) external {
+        Session storage session = sessions[sessionId];
+        if (session.customer != msg.sender || session.finalized) revert InvalidSession();
+        if (session.closeAvailableAt != 0) revert SessionCloseDelayActive();
+        uint64 availableAt = uint64(block.timestamp) + SESSION_CLOSE_DELAY;
+        session.closeAvailableAt = availableAt;
+        emit SessionCloseRequested(sessionId, availableAt);
+    }
+
+    function finalizeSessionClose(bytes32 sessionId) external {
+        Session storage session = sessions[sessionId];
+        if (session.customer != msg.sender || session.finalized) revert InvalidSession();
+        if (session.closeAvailableAt == 0 || block.timestamp < session.closeAvailableAt) {
+            revert SessionCloseDelayActive();
+        }
+        session.finalized = true;
+        uint256 remaining = session.allowance - session.spent;
+        totalLockedSessions -= remaining;
+        customerBalances[msg.sender] += remaining;
+        totalCustomerBalances += remaining;
+        emit SessionClosed(sessionId, remaining);
+    }
+
+    function hashReceipt(Receipt memory receipt) public view returns (bytes32) {
+        return _hashTypedDataV4(keccak256(abi.encode(RECEIPT_TYPEHASH, receipt)));
+    }
+
+    function settleReceipt(
+        Receipt calldata receipt,
+        bytes calldata providerSignature,
+        bytes calldata settlementSignature
+    ) external whenNotPaused {
+        _settleReceipt(receipt, providerSignature, settlementSignature);
+    }
+
+    function settleReceipts(
+        Receipt[] calldata receipts,
+        bytes[] calldata providerSignatures,
+        bytes[] calldata settlementSignatures
+    ) external whenNotPaused {
+        if (
+            receipts.length == 0 || receipts.length != providerSignatures.length
+                || receipts.length != settlementSignatures.length
+        ) revert InvalidBatch();
+        for (uint256 i; i < receipts.length; ++i) {
+            _settleReceipt(receipts[i], providerSignatures[i], settlementSignatures[i]);
+        }
+    }
+
     function pause() external onlyOwner {
         _pause();
     }
@@ -179,5 +320,64 @@ contract MyferenceMarket is Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     function _creditClaimable(address account, uint256 amount) internal {
         claimable[account] += amount;
         totalClaimable += amount;
+    }
+
+    function _settleReceipt(
+        Receipt calldata receipt,
+        bytes calldata providerSignature,
+        bytes calldata settlementSignature
+    ) internal {
+        if (settledRequests[receipt.requestId]) {
+            revert RequestAlreadySettled();
+        }
+        if (usedNonces[receipt.provider][receipt.nonce]) revert NonceAlreadyUsed();
+        if (
+            receipt.requestId == bytes32(0) || receipt.status != 1
+                || receipt.settlementSigner != settlementSigner || receipt.feeVersion != feeVersion
+                || receipt.feeBasisPoints != feeBasisPoints || receipt.completedAt > block.timestamp
+        ) revert InvalidReceipt();
+
+        Session storage session = sessions[receipt.sessionId];
+        if (
+            session.customer != receipt.customer || session.customer == address(0)
+                || session.finalized
+        ) revert InvalidSession();
+        if (receipt.completedAt > session.expiresAt) revert SessionExpired();
+
+        OfferVersion storage offer =
+            offerVersions[receipt.provider][receipt.offerId][receipt.priceVersion];
+        if (
+            !offer.active || offer.modelHash != receipt.modelHash
+                || offer.capabilityHash != receipt.capabilityHash
+        ) revert StaleOffer();
+
+        uint256 charge = Math.mulDiv(
+            receipt.inputTokens, offer.inputPerMillion, 1_000_000, Math.Rounding.Ceil
+        ) + Math.mulDiv(receipt.outputTokens, offer.outputPerMillion, 1_000_000, Math.Rounding.Ceil)
+        + Math.mulDiv(
+            receipt.computeMilliseconds, offer.computePerSecond, 1_000, Math.Rounding.Ceil
+        );
+        if (charge != receipt.totalCharge) revert InvalidReceipt();
+        if (charge > receipt.maximumCharge) revert MaximumChargeExceeded();
+        if (session.spent + charge > session.allowance) revert SessionAllowanceExceeded();
+
+        bytes32 digest = hashReceipt(receipt);
+        if (
+            digest.recover(providerSignature) != receipt.provider
+                || digest.recover(settlementSignature) != settlementSigner
+        ) revert InvalidReceiptSignature();
+
+        settledRequests[receipt.requestId] = true;
+        usedNonces[receipt.provider][receipt.nonce] = true;
+        session.spent += charge;
+        totalLockedSessions -= charge;
+
+        uint256 feeAmount = Math.mulDiv(charge, feeBasisPoints, 10_000);
+        uint256 providerAmount = charge - feeAmount;
+        _creditClaimable(receipt.provider, providerAmount);
+        _creditClaimable(feeRecipient, feeAmount);
+        emit ReceiptSettled(
+            receipt.requestId, receipt.sessionId, receipt.provider, providerAmount, feeAmount
+        );
     }
 }
