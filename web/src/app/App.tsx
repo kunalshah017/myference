@@ -6,6 +6,9 @@ const routeStages = [
 ]
 
 function App() {
+  const api = useMemo(() => new AuthAPI(), [])
+  const [session, setSession] = useState<Session>()
+  useEffect(() => { void api.session().then(setSession).catch(() => undefined) }, [api])
   return (
     <div className="app-shell">
       <header className="site-header">
@@ -22,7 +25,7 @@ function App() {
             <span className="state-mark" aria-hidden="true" />
             Network not connected
           </span>
-          <button type="button" disabled>Connect wallet</button>
+          <ConnectWallet api={api} onConnected={setSession} />
         </div>
       </header>
 
@@ -77,10 +80,9 @@ function App() {
 
           <aside className="account-context" aria-labelledby="account-title">
             <p className="eyebrow">Account context</p>
-            <h2 id="account-title">No wallet connected</h2>
+            <h2 id="account-title">{session ? `${session.wallet_address.slice(0, 6)}…${session.wallet_address.slice(-4)}` : 'No wallet connected'}</h2>
             <p>
-              Connect a Monad wallet to view escrow, create a bounded spending
-              session, or register a provider machine.
+              {session ? 'Manage escrow, bounded spending, and provider machines from this wallet-bound account.' : 'Connect a Monad wallet to view escrow, create a bounded spending session, or register a provider machine.'}
             </p>
             <dl>
               <div><dt>Escrow</dt><dd>Unavailable</dd></div>
@@ -89,6 +91,8 @@ function App() {
             </dl>
           </aside>
         </div>
+
+        {session && <div className="account-tools"><DeviceApproval api={api} /><ApiKeys api={api} /></div>}
 
         <section id="activity" className="activity" aria-labelledby="activity-title">
           <div className="section-heading">
@@ -112,3 +116,8 @@ function App() {
 }
 
 export default App
+import { useEffect, useMemo, useState } from 'react'
+import { ApiKeys } from '../features/auth/ApiKeys'
+import { ConnectWallet } from '../features/auth/ConnectWallet'
+import { DeviceApproval } from '../features/auth/DeviceApproval'
+import { AuthAPI, type Session } from '../lib/api'

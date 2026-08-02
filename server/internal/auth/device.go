@@ -35,13 +35,17 @@ type DeviceAuthorization struct {
 	ExpiresAt                       time.Time
 }
 
-type Machine struct{ ID, AccountID, Name string }
+type Machine struct {
+	ID        string `json:"id"`
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
+}
 type MachinePrincipal struct{ MachineID, AccountID string }
 
 type APIKeyScope struct {
 	Models      []string `json:"models"`
 	Endpoints   []string `json:"endpoints"`
-	MaxSpendWei uint64   `json:"max_spend_wei"`
+	MaxSpendWei uint64   `json:"max_spend_wei,string"`
 }
 
 type APIKey struct{ ID, Token string }
@@ -77,7 +81,7 @@ func (s *Service) CreateDeviceAuthorization(ctx context.Context, machineName str
 		return DeviceAuthorization{}, err
 	}
 	userCode := strings.ToUpper(hex.EncodeToString(userBytes))
-	expiresAt := s.now().Add(lifetime)
+	expiresAt := s.now().UTC().Truncate(time.Microsecond).Add(lifetime)
 	_, err = s.db.ExecContext(ctx, `INSERT INTO device_authorizations (device_code_hash, user_code_hash, machine_name, expires_at) VALUES ($1, $2, $3, $4)`, digest(deviceCode), digest(userCode), machineName, expiresAt)
 	return DeviceAuthorization{DeviceCode: deviceCode, UserCode: userCode, ExpiresAt: expiresAt}, err
 }
@@ -125,9 +129,10 @@ func (s *Service) ExchangeDeviceAuthorization(ctx context.Context, deviceCode st
 	}
 	defer tx.Rollback()
 	var machine Machine
+	var accountID sql.NullString
 	var expiresAt time.Time
 	var exchangedAt sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT account_id, machine_name, expires_at, exchanged_at FROM device_authorizations WHERE device_code_hash = $1 FOR UPDATE`, digest(deviceCode)).Scan(&machine.AccountID, &machine.Name, &expiresAt, &exchangedAt)
+	err = tx.QueryRowContext(ctx, `SELECT account_id, machine_name, expires_at, exchanged_at FROM device_authorizations WHERE device_code_hash = $1 FOR UPDATE`, digest(deviceCode)).Scan(&accountID, &machine.Name, &expiresAt, &exchangedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Machine{}, "", ErrInvalidCredential
 	}
@@ -140,6 +145,10 @@ func (s *Service) ExchangeDeviceAuthorization(ctx context.Context, deviceCode st
 	if !s.now().Before(expiresAt) {
 		return Machine{}, "", ErrAuthorizationExpired
 	}
+	if !accountID.Valid {
+		return Machine{}, "", ErrAuthorizationPending
+	}
+	machine.AccountID = accountID.String
 	machine.ID, err = randomID("mach")
 	if err != nil {
 		return Machine{}, "", err

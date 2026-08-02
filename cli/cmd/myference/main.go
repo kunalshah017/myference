@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kunalshah017/myference/cli/internal/account"
 	"github.com/kunalshah017/myference/cli/internal/backend"
 	"github.com/kunalshah017/myference/cli/internal/backend/ollama"
 	"github.com/kunalshah017/myference/cli/internal/config"
@@ -34,9 +36,11 @@ func main() {
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference backend <add|list|start|stop> | capacity | status | serve | stop")
+		return errors.New("usage: myference login | backend <add|list|start|stop> | capacity | status | serve | stop")
 	}
 	switch args[0] {
+	case "login":
+		return runLogin(context.Background(), args[1:], output, defaultLoginDependencies())
 	case "backend":
 		return runBackend(args[1:], output)
 	case "capacity", "publish":
@@ -69,6 +73,91 @@ func run(args []string, output io.Writer) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+type loginDependencies struct {
+	HTTPClient     *http.Client
+	OpenBrowser    func(string) error
+	SaveCredential func(string, string, string) error
+	Wait           func(context.Context, time.Duration) error
+}
+
+func defaultLoginDependencies() loginDependencies {
+	return loginDependencies{
+		HTTPClient:     &http.Client{Timeout: 15 * time.Second},
+		OpenBrowser:    openBrowser,
+		SaveCredential: credential.Save,
+		Wait: func(ctx context.Context, duration time.Duration) error {
+			timer := time.NewTimer(duration)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
+	}
+}
+
+func runLogin(ctx context.Context, args []string, output io.Writer, dependencies loginDependencies) error {
+	flags := flag.NewFlagSet("login", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	serverURL := flags.String("server", "https://api.myference.network", "Myference server URL")
+	machineName := flags.String("name", "", "machine name")
+	path := flags.String("config", defaultConfigPath(), "configuration path")
+	noBrowser := flags.Bool("no-browser", false, "print the verification URL without opening it")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*machineName) == "" {
+		hostname, err := os.Hostname()
+		if err != nil || strings.TrimSpace(hostname) == "" {
+			return errors.New("--name is required when the hostname is unavailable")
+		}
+		*machineName = hostname
+	}
+	client, err := account.NewClient(*serverURL, dependencies.HTTPClient)
+	if err != nil {
+		return err
+	}
+	authorization, err := client.CreateDeviceAuthorization(ctx, *machineName)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(output, "Approve machine %q at %s\nCode: %s\n", *machineName, authorization.VerificationURI, authorization.UserCode); err != nil {
+		return err
+	}
+	if !*noBrowser {
+		if err := dependencies.OpenBrowser(authorization.VerificationURI); err != nil {
+			_, _ = fmt.Fprintf(output, "Browser did not open; use the URL above.\n")
+		}
+	}
+	var exchanged account.DeviceToken
+	for {
+		exchanged, err = client.ExchangeDeviceAuthorization(ctx, authorization.DeviceCode)
+		if !errors.Is(err, account.ErrPending) {
+			break
+		}
+		if err := dependencies.Wait(ctx, 2*time.Second); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if err := dependencies.SaveCredential(machineCredentialService, exchanged.Machine.ID, exchanged.Token); err != nil {
+		return fmt.Errorf("store machine credential: %w", err)
+	}
+	cfg := config.Config{ServerURL: *serverURL, AccountID: exchanged.Machine.AccountID, MachineID: exchanged.Machine.ID}
+	if existing, loadErr := config.Load(*path); loadErr == nil {
+		cfg.Backends = existing.Backends
+	}
+	if err := config.Save(*path, cfg); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "Machine %s connected to account %s.\n", exchanged.Machine.ID, exchanged.Machine.AccountID)
+	return err
 }
 
 func runServe(ctx context.Context, path string, output io.Writer) error {

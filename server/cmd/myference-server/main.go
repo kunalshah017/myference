@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -71,10 +72,16 @@ func run() error {
 			return repository.CompleteInference(ctx, store.ReceiptProposal{RequestID: proposal.RequestID, SessionID: proposal.SessionID, MachineID: proposal.MachineID, OfferID: proposal.OfferID, Model: proposal.Model, PriceVersion: proposal.PriceVersion, InputTokens: proposal.InputTokens, OutputTokens: proposal.OutputTokens, ComputeMilliseconds: proposal.ComputeMilliseconds, InputHash: proposal.InputHash, OutputHash: proposal.OutputHash, CompletedAt: proposal.CompletedAt})
 		},
 	})
-	mux := http.NewServeMux()
-	mux.Handle("/relay", hub)
-	mux.Handle("/v1/chat/completions", openAI)
-	server := &http.Server{Addr: envOr("MYFERENCE_LISTEN_ADDR", "127.0.0.1:8080"), Handler: mux, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	webOrigin := envOr("MYFERENCE_WEB_ORIGIN", "http://127.0.0.1:5173")
+	authHTTP := auth.NewHandler(authService, auth.HTTPConfig{
+		Domain:          envOr("MYFERENCE_AUTH_DOMAIN", "localhost"),
+		AllowedOrigins:  []string{webOrigin},
+		ChainID:         10143,
+		SessionLifetime: 12 * time.Hour,
+		SecureCookies:   strings.HasPrefix(webOrigin, "https://"),
+		VerificationURL: strings.TrimSuffix(webOrigin, "/") + "/devices",
+	})
+	server := &http.Server{Addr: envOr("MYFERENCE_LISTEN_ADDR", "127.0.0.1:8080"), Handler: newRootHandler(hub, openAI, authHTTP), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
 	if (certificate == "") != (key == "") {
@@ -101,6 +108,14 @@ func run() error {
 		defer cancel()
 		return server.Shutdown(shutdown)
 	}
+}
+
+func newRootHandler(relayHandler, openAIHandler, authHandler http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/relay", relayHandler)
+	mux.Handle("/v1/chat/completions", openAIHandler)
+	mux.Handle("/auth/", authHandler)
+	return mux
 }
 
 func envOr(name, fallback string) string {

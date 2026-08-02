@@ -1,0 +1,101 @@
+package account
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+var (
+	ErrPending  = errors.New("device authorization pending")
+	ErrExpired  = errors.New("device authorization expired")
+	ErrConsumed = errors.New("device authorization consumed")
+)
+
+type Client struct {
+	baseURL string
+	http    *http.Client
+}
+
+type DeviceAuthorization struct {
+	DeviceCode      string    `json:"device_code"`
+	UserCode        string    `json:"user_code"`
+	VerificationURI string    `json:"verification_uri"`
+	ExpiresAt       time.Time `json:"expires_at"`
+}
+
+type Machine struct {
+	ID        string `json:"id"`
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
+}
+
+type DeviceToken struct {
+	Machine Machine `json:"machine"`
+	Token   string  `json:"token"`
+}
+
+func NewClient(baseURL string, client *http.Client) (*Client, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !isLoopbackHTTP(parsed)) {
+		return nil, errors.New("server URL must use HTTPS except on loopback")
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	return &Client{baseURL: strings.TrimSuffix(baseURL, "/"), http: client}, nil
+}
+
+func (c *Client) CreateDeviceAuthorization(ctx context.Context, machineName string) (DeviceAuthorization, error) {
+	var result DeviceAuthorization
+	err := c.post(ctx, "/auth/device", map[string]string{"machine_name": machineName}, &result)
+	return result, err
+}
+
+func (c *Client) ExchangeDeviceAuthorization(ctx context.Context, deviceCode string) (DeviceToken, error) {
+	var result DeviceToken
+	err := c.post(ctx, "/auth/device/token", map[string]string{"device_code": deviceCode}, &result)
+	return result, err
+}
+
+func (c *Client) post(ctx context.Context, path string, input, output any) error {
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(input); err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, &body)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusOK, http.StatusCreated:
+		return json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(output)
+	case http.StatusTooEarly:
+		return ErrPending
+	case http.StatusGone:
+		return ErrExpired
+	case http.StatusConflict:
+		return ErrConsumed
+	default:
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+		return fmt.Errorf("server returned %s: %s", response.Status, strings.TrimSpace(string(message)))
+	}
+}
+
+func isLoopbackHTTP(parsed *url.URL) bool {
+	host := parsed.Hostname()
+	return parsed.Scheme == "http" && (host == "127.0.0.1" || host == "localhost" || host == "::1")
+}

@@ -480,6 +480,14 @@ Commit: `git add web docs/superpowers && git commit -m "feat: initialize Myferen
 ### Task 13: Implement wallet, device authorization, and API-key flows
 
 **Files:**
+- Create: `migrations/000004_browser_auth.sql`
+- Create: `server/internal/auth/browser.go`
+- Create: `server/internal/auth/http.go`
+- Create: `server/internal/auth/http_integration_test.go`
+- Create: `cli/internal/account/client.go`
+- Create: `cli/internal/account/client_test.go`
+- Modify: `cli/cmd/myference/main.go`
+- Modify: `server/cmd/myference-server/main.go`
 - Create: `web/src/features/auth/ConnectWallet.tsx`
 - Create: `web/src/features/auth/DeviceApproval.tsx`
 - Create: `web/src/features/auth/ApiKeys.tsx`
@@ -487,21 +495,21 @@ Commit: `git add web docs/superpowers && git commit -m "feat: initialize Myferen
 - Create: `web/src/lib/api.ts`
 - Create: `web/src/features/auth/auth.test.tsx`
 
-- [ ] **Step 1: Write failing auth-boundary tests**
+- [x] **Step 1: Write failing auth-boundary tests**
 
 Test unsupported-chain refusal, nonce-bound wallet authentication, expired device code, exact machine identity display, one-time API-key reveal, scope display, and revocation. Use a real loopback HTTP test server; controlled wallet signatures are test inputs, not a fake production login path.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `npm --prefix web test -- --run src/features/auth/auth.test.tsx`
 
 Expected: FAIL because auth features do not exist.
 
-- [ ] **Step 3: Implement secure auth flows**
+- [x] **Step 3: Implement secure auth flows**
 
 Define Monad testnet chain ID 10143 with environment-provided RPC and explorer URLs. Request a server nonce, sign domain/chain/origin/nonce/issued/expiry fields, exchange it for a secure HTTP-only session, approve device codes, and create scoped API keys that reveal plaintext once. Never store bearer tokens in local storage.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `npm --prefix web test -- --run src/features/auth/auth.test.tsx && npm --prefix web run build`
 

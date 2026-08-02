@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"io"
+	"os/exec"
 
 	platform "github.com/kunalshah017/myference/cli/internal/platform/windows"
 )
@@ -22,4 +23,8 @@ func runPlatformCommand(command string, _ []string, _ io.Writer) error {
 	default:
 		return lifecycle.Stop(context.Background())
 	}
+}
+
+func openBrowser(uri string) error {
+	return exec.Command("rundll32", "url.dll,FileProtocolHandler", uri).Start()
 }
