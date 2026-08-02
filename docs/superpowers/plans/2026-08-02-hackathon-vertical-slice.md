@@ -142,25 +142,25 @@ Commit: `git add protocol/v1 && git commit -m "feat: define relay and receipt pr
 - Create: `contracts/src/MyferenceMarket.sol`
 - Create: `contracts/test/MyferenceMarket.t.sol`
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Tests must prove that deposits increase only the sender's balance; withdrawals use pull payments; an unbonded provider cannot publish; a bonded provider can publish a price version; a price update increments the immutable version; and a bond cannot withdraw before its delay.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `forge test --root contracts -vvv`
 
 Expected: FAIL because `MyferenceMarket.sol` does not exist.
 
-- [ ] **Step 3: Implement the minimum market state**
+- [x] **Step 3: Implement the minimum market state**
 
 Use OpenZeppelin `Ownable2Step`, `Pausable`, `ReentrancyGuard`, `EIP712`, `ECDSA`, and `Math`. Store customer balances, claimable withdrawals, provider bond state, and `mapping(address => mapping(bytes32 => Offer))`. Publish native-MON deposit, withdrawal, bond, bond-exit, and versioned-offer events.
 
-- [ ] **Step 4: Add fuzz coverage**
+- [x] **Step 4: Add fuzz coverage**
 
 Fuzz deposit and withdrawal amounts across non-zero `uint128` values. Prove contract balance equals customer balances plus provider bonds plus locked sessions plus claimable funds.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `forge fmt --root contracts --check && forge test --root contracts -vvv`
 

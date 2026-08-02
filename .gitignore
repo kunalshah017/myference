@@ -11,6 +11,9 @@ cli/platform/windows/legacy/myference.config.json
 bin/
 dist/
 coverage/
+contracts/cache/
+contracts/out/
+contracts/broadcast/
 
 # Local worktrees
 .worktrees/
