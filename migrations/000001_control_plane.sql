@@ -89,3 +89,24 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 
 CREATE INDEX IF NOT EXISTS outbox_unpublished_idx ON outbox (id) WHERE published_at IS NULL;
+
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS revoked_at timestamptz;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS scope_json jsonb NOT NULL DEFAULT '{}';
+
+CREATE TABLE IF NOT EXISTS device_authorizations (
+    device_code_hash bytea PRIMARY KEY,
+    user_code_hash bytea NOT NULL UNIQUE,
+    machine_name text NOT NULL,
+    account_id text REFERENCES accounts(id),
+    expires_at timestamptz NOT NULL,
+    approved_at timestamptz,
+    exchanged_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS machine_tokens (
+    machine_id text PRIMARY KEY REFERENCES machines(id) ON DELETE CASCADE,
+    token_hash bytea NOT NULL,
+    revoked_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);

@@ -272,21 +272,21 @@ Commit: `git add migrations server/internal/store && git commit -m "feat: add Po
 - Create: `cli/internal/credential/store_darwin.go`
 - Create: `cli/internal/config/config.go`
 
-- [ ] **Step 1: Write failing device-flow tests**
+- [x] **Step 1: Write failing device-flow tests**
 
 Against real PostgreSQL, create a short-lived device code, poll while pending, approve it with a wallet-bound account, exchange it exactly once, hash the issued machine token, revoke it, and reject subsequent authentication. Test API-key model and spend scopes.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `MYFERENCE_TEST_DATABASE_URL=postgres://myference:myference@localhost:5432/myference_test?sslmode=disable go test ./server/internal/auth -v`
 
 Expected: FAIL because device authorization is absent.
 
-- [ ] **Step 3: Implement authentication**
+- [x] **Step 3: Implement authentication**
 
 Generate device codes and bearer tokens with `crypto/rand`; store only SHA-256 token hashes; compare with constant-time operations; enforce expiry and one-time exchange. Store the resulting machine token in Windows Credential Manager or macOS Keychain. Keep wallet keys outside the CLI.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `go test ./server/internal/auth ./cli/internal/credential/... -v`
 
