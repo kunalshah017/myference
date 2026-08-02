@@ -40,6 +40,7 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	writeProvider(t, provider, "capacity", v1.MessageCapacity, &v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "offer-1", Model: "qwen", PriceVersion: 3}}})
 
 	proposals := make(chan Proposal, 1)
+	workspaces := make(chan []v1.WorkspaceFile, 1)
 	transitions := make(chan string, 2)
 	aborts := make(chan string, 1)
 	handler := NewOpenAI(Dependencies{
@@ -51,7 +52,7 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 			return Principal{AccountID: "account-1", SessionID: "session-1", SessionBalance: 100}, nil
 		},
 		Candidates: func(context.Context, string) ([]router.Candidate, error) {
-			return []router.Candidate{{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", Capabilities: []string{"text", "stream"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 80, PriceVersion: 3}}, nil
+			return []router.Candidate{{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", Capabilities: []string{"text", "stream", "workspace"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 80, PriceVersion: 3}}, nil
 		},
 		Reserve: func(_ context.Context, reservation Reservation) error {
 			if reservation.SessionID != "session-1" || reservation.OfferID != "offer-1" || reservation.MaximumSpend != 100 {
@@ -79,12 +80,13 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 		if envelope.DecodeBody(&offer) != nil {
 			return
 		}
+		workspaces <- offer.Workspace
 		writeProvider(t, provider, "accept", v1.MessageJobAccept, &v1.JobAccept{RequestID: offer.RequestID})
 		writeProvider(t, provider, "chunk-1", v1.MessageOutputChunk, &v1.OutputChunk{RequestID: offer.RequestID, Sequence: 1, Data: "hello"})
 		writeProvider(t, provider, "chunk-2", v1.MessageOutputChunk, &v1.OutputChunk{RequestID: offer.RequestID, Sequence: 2, Done: true, InputTokens: 4, OutputTokens: 1, ComputeMilliseconds: 12})
 	}()
 
-	body := `{"model":"qwen","stream":true,"messages":[{"role":"user","content":"say hello"}]}`
+	body := `{"model":"qwen","stream":true,"messages":[{"role":"user","content":"say hello"}],"myference_workspace":[{"path":"src/main.go","content_base64":"cGFja2FnZSBtYWlu"}]}`
 	request, _ := http.NewRequest(http.MethodPost, apiServer.URL+"/v1/chat/completions", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer api-token")
 	request.Header.Set("Content-Type", "application/json")
@@ -102,6 +104,10 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	requestID := response.Header.Get("X-Request-ID")
 	if requestID == "" || !strings.Contains(text, requestID) {
 		t.Fatalf("request ID not propagated: %q %q", requestID, text)
+	}
+	workspace := <-workspaces
+	if len(workspace) != 1 || workspace[0].Path != "src/main.go" || workspace[0].ContentBase64 != "cGFja2FnZSBtYWlu" {
+		t.Fatalf("workspace not relayed: %+v", workspace)
 	}
 	select {
 	case proposal := <-proposals:

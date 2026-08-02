@@ -69,11 +69,17 @@ func (c *Client) ReceiptTerms(ctx context.Context) (ReceiptTerms, error) {
 	}
 	call := &bind.CallOpts{Context: ctx}
 	settlementSigner, err := c.contract.SettlementSigner(call)
-	if err != nil { return ReceiptTerms{}, err }
+	if err != nil {
+		return ReceiptTerms{}, err
+	}
 	feeBasisPoints, err := c.contract.FeeBasisPoints(call)
-	if err != nil { return ReceiptTerms{}, err }
+	if err != nil {
+		return ReceiptTerms{}, err
+	}
 	feeVersion, err := c.contract.FeeVersion(call)
-	if err != nil { return ReceiptTerms{}, err }
+	if err != nil {
+		return ReceiptTerms{}, err
+	}
 	return ReceiptTerms{ChainID: c.chainID.Uint64(), Contract: c.contractAddress, SettlementSigner: settlementSigner, FeeBasisPoints: feeBasisPoints, FeeVersion: feeVersion}, nil
 }
 

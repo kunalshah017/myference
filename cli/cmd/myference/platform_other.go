@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package main
 
@@ -10,7 +10,7 @@ import (
 )
 
 func runPlatformCommand(string, []string, io.Writer) error {
-	return errors.New("Windows lifecycle commands require the Windows build")
+	return errors.New("service lifecycle commands require Windows or macOS")
 }
 
 func openBrowser(uri string) error {

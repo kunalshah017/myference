@@ -2,6 +2,7 @@ package router
 
 import (
 	"errors"
+	"math/big"
 	"sort"
 	"strings"
 )
@@ -29,6 +30,24 @@ type Candidate struct {
 	LatencyMilliseconds uint64
 	SuccessBasisPoints  uint16
 	Reputation          uint64
+	InputPerMillion     uint64
+	OutputPerMillion    uint64
+	ComputePerSecond    uint64
+}
+
+func WorstCaseCost(candidate Candidate, maximumInputTokens, maximumOutputTokens, maximumComputeMilliseconds uint64) (uint64, error) {
+	total := new(big.Int)
+	for _, item := range []struct {
+		units, rate, divisor uint64
+	}{{maximumInputTokens, candidate.InputPerMillion, 1_000_000}, {maximumOutputTokens, candidate.OutputPerMillion, 1_000_000}, {maximumComputeMilliseconds, candidate.ComputePerSecond, 1_000}} {
+		part := new(big.Int).Mul(new(big.Int).SetUint64(item.units), new(big.Int).SetUint64(item.rate))
+		part.Add(part, new(big.Int).SetUint64(item.divisor-1)).Div(part, new(big.Int).SetUint64(item.divisor))
+		total.Add(total, part)
+	}
+	if !total.IsUint64() {
+		return 0, ErrNoEligibleProvider
+	}
+	return total.Uint64(), nil
 }
 
 func Select(request Request, candidates []Candidate) (Candidate, error) {

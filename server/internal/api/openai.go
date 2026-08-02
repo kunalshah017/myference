@@ -36,6 +36,8 @@ type Proposal struct {
 type Reservation struct {
 	RequestID, SessionID, AccountID, MachineID, OfferID string
 	PriceVersion, MaximumSpend                          uint64
+	MaximumInputTokens, MaximumOutputTokens             uint64
+	MaximumComputeMilliseconds                          uint64
 }
 
 type Dependencies struct {
@@ -63,9 +65,12 @@ func NewOpenAI(dependencies Dependencies) http.Handler {
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Stream   bool          `json:"stream"`
-	Messages []chatMessage `json:"messages"`
+	Model               string             `json:"model"`
+	Stream              bool               `json:"stream"`
+	Messages            []chatMessage      `json:"messages"`
+	Workspace           []v1.WorkspaceFile `json:"myference_workspace,omitempty"`
+	MaxTokens           uint64             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens uint64             `json:"max_completion_tokens,omitempty"`
 }
 
 type chatMessage struct {
@@ -90,13 +95,24 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 		http.Error(response, "invalid streaming chat request", http.StatusBadRequest)
 		return
 	}
+	maximumOutputTokens := input.MaxCompletionTokens
+	if maximumOutputTokens == 0 {
+		maximumOutputTokens = input.MaxTokens
+	}
+	if maximumOutputTokens == 0 {
+		maximumOutputTokens = 4096
+	}
+	if maximumOutputTokens > 1_000_000 || (input.MaxTokens != 0 && input.MaxCompletionTokens != 0) {
+		http.Error(response, "invalid output token limit", http.StatusBadRequest)
+		return
+	}
 	maximumSpend, err := strconv.ParseUint(request.Header.Get("X-Myference-Max-Spend"), 10, 64)
 	if err != nil || maximumSpend == 0 {
 		http.Error(response, "valid X-Myference-Max-Spend is required", http.StatusBadRequest)
 		return
 	}
 	token := strings.TrimSpace(strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "))
-	principal, err := h.dependencies.Authorize(request.Context(), token, input.Model, request.URL.Path, maximumSpend)
+	principal, err := h.dependencies.Authorize(request.Context(), token, input.Model, authorizedEndpoint(request.Context(), request.URL.Path), maximumSpend)
 	if err != nil {
 		http.Error(response, "unauthorized", http.StatusUnauthorized)
 		return
@@ -106,7 +122,24 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 		http.Error(response, "routing unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	selected, err := router.Select(router.Request{Model: input.Model, Capabilities: []string{"text", "stream"}, MaximumSpend: maximumSpend, SessionBalance: principal.SessionBalance, PinMachineID: request.Header.Get("X-Myference-Machine")}, candidates)
+	requiredCapabilities := []string{"text", "stream"}
+	if len(input.Workspace) != 0 {
+		requiredCapabilities = append(requiredCapabilities, "workspace")
+	}
+	prompt := renderPrompt(input.Messages)
+	// Byte length bounds tokenizer output, while the fixed allowance covers provider chat templates
+	// and special tokens that are not present in the customer-visible prompt.
+	maximumInputTokens := uint64(len([]byte(prompt)))*4 + 256
+	const maximumComputeMilliseconds uint64 = 120_000
+	for index := range candidates {
+		cost, costErr := router.WorstCaseCost(candidates[index], maximumInputTokens, maximumOutputTokens, maximumComputeMilliseconds)
+		if costErr != nil {
+			candidates[index].MaximumCost = ^uint64(0)
+		} else if candidates[index].InputPerMillion != 0 || candidates[index].OutputPerMillion != 0 || candidates[index].ComputePerSecond != 0 {
+			candidates[index].MaximumCost = cost
+		}
+	}
+	selected, err := router.Select(router.Request{Model: input.Model, Capabilities: requiredCapabilities, MaximumSpend: maximumSpend, SessionBalance: principal.SessionBalance, PinMachineID: request.Header.Get("X-Myference-Machine")}, candidates)
 	if err != nil || !h.dependencies.Hub.Connected(selected.MachineID) {
 		http.Error(response, "no eligible provider", http.StatusServiceUnavailable)
 		return
@@ -118,13 +151,12 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	events := h.broker.register(requestID)
 	defer h.broker.unregister(requestID)
-	reservation := Reservation{RequestID: requestID, SessionID: principal.SessionID, AccountID: principal.AccountID, MachineID: selected.MachineID, OfferID: selected.OfferID, PriceVersion: selected.PriceVersion, MaximumSpend: maximumSpend}
+	reservation := Reservation{RequestID: requestID, SessionID: principal.SessionID, AccountID: principal.AccountID, MachineID: selected.MachineID, OfferID: selected.OfferID, PriceVersion: selected.PriceVersion, MaximumSpend: maximumSpend, MaximumInputTokens: maximumInputTokens, MaximumOutputTokens: maximumOutputTokens, MaximumComputeMilliseconds: maximumComputeMilliseconds}
 	if err := h.dependencies.Reserve(request.Context(), reservation); err != nil {
 		http.Error(response, "reservation unavailable", http.StatusPaymentRequired)
 		return
 	}
-	prompt := renderPrompt(input.Messages)
-	envelope, err := v1.NewEnvelope("offer-"+requestID, v1.MessageJobOffer, &v1.JobOffer{RequestID: requestID, Model: input.Model, OfferID: selected.OfferID, Prompt: prompt, PriceVersion: selected.PriceVersion, MaximumSpend: maximumSpend, LeaseExpiresAt: h.dependencies.Now().Add(30 * time.Second)})
+	envelope, err := v1.NewEnvelope("offer-"+requestID, v1.MessageJobOffer, &v1.JobOffer{RequestID: requestID, Model: input.Model, OfferID: selected.OfferID, Prompt: prompt, PriceVersion: selected.PriceVersion, MaximumSpend: maximumSpend, MaximumOutputTokens: maximumOutputTokens, LeaseExpiresAt: h.dependencies.Now().Add(time.Duration(maximumComputeMilliseconds) * time.Millisecond), Workspace: input.Workspace})
 	if err != nil || h.dependencies.Hub.Send(selected.MachineID, envelope) != nil {
 		_ = h.dependencies.Abort(request.Context(), requestID, "failed")
 		http.Error(response, "provider unavailable", http.StatusServiceUnavailable)
@@ -153,8 +185,14 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	flusher.Flush()
 	var output strings.Builder
 	streaming := false
+	generationTimer := time.NewTimer(time.Duration(maximumComputeMilliseconds) * time.Millisecond)
+	defer generationTimer.Stop()
 	for {
 		select {
+		case <-generationTimer.C:
+			h.cancel(selected.MachineID, requestID)
+			_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
+			return
 		case <-request.Context().Done():
 			h.cancel(selected.MachineID, requestID)
 			_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "cancelled")
@@ -188,6 +226,13 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 				}
 				flusher.Flush()
 			}
+			if chunk.ErrorCode != "" {
+				_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
+				_ = writeSSE(response, map[string]any{"error": map[string]string{"type": "provider_error", "code": chunk.ErrorCode, "message": "provider execution failed"}})
+				fmt.Fprint(response, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
 			if chunk.Done {
 				if !streaming {
 					if h.dependencies.Transition(request.Context(), requestID, "streaming") != nil {
@@ -196,12 +241,20 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 					}
 					streaming = true
 				}
+				if chunk.InputTokens > maximumInputTokens || chunk.OutputTokens > maximumOutputTokens || chunk.ComputeMilliseconds > maximumComputeMilliseconds {
+					h.cancel(selected.MachineID, requestID)
+					_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
+					_ = writeSSE(response, map[string]any{"error": map[string]string{"type": "provider_error", "code": "usage_limit_exceeded", "message": "provider usage exceeded reserved limits"}})
+					fmt.Fprint(response, "data: [DONE]\n\n")
+					flusher.Flush()
+					return
+				}
 				proposal := Proposal{RequestID: requestID, SessionID: principal.SessionID, MachineID: selected.MachineID, OfferID: selected.OfferID, Model: input.Model, PriceVersion: selected.PriceVersion, InputTokens: chunk.InputTokens, OutputTokens: chunk.OutputTokens, ComputeMilliseconds: chunk.ComputeMilliseconds, InputHash: saltedHash(prompt), OutputHash: saltedHash(output.String()), CompletedAt: h.dependencies.Now()}
 				if h.dependencies.Persist(request.Context(), proposal) != nil {
 					_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 					return
 				}
-				_ = writeSSE(response, map[string]any{"id": requestID, "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]string{}, "finish_reason": "stop"}}})
+				_ = writeSSE(response, map[string]any{"id": requestID, "object": "chat.completion.chunk", "model": input.Model, "choices": []any{map[string]any{"index": 0, "delta": map[string]string{}, "finish_reason": "stop"}}, "usage": map[string]uint64{"prompt_tokens": chunk.InputTokens, "completion_tokens": chunk.OutputTokens, "total_tokens": chunk.InputTokens + chunk.OutputTokens}})
 				fmt.Fprint(response, "data: [DONE]\n\n")
 				flusher.Flush()
 				return

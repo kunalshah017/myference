@@ -75,6 +75,6 @@ func TestOpenAIStreamsFromActualProviderDaemonAndRealOllama(t *testing.T) {
 			t.Fatalf("real usage missing: %+v", proposal)
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("real receipt proposal missing")
+		t.Fatalf("real receipt proposal missing; response=%q", data)
 	}
 }

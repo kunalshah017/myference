@@ -83,6 +83,23 @@ func TestBoundedQueueAppliesBackpressure(t *testing.T) {
 	}
 }
 
+func TestDaemonUpdatesIndividualBackendCapacityWithoutRestart(t *testing.T) {
+	daemon := NewDaemon(Config{Offers: []v1.OfferCapacity{{OfferID: "one", Model: "m", PriceVersion: 1}}}, map[string]backend.Backend{"one": testBackend{}})
+	if err := daemon.UpdateBackends([]v1.OfferCapacity{{OfferID: "two", Model: "m", PriceVersion: 1}}, map[string]backend.Backend{"two": testBackend{}}); err != nil {
+		t.Fatal(err)
+	}
+	capacity := daemon.Capacity()
+	if capacity.Available != 1 || len(capacity.Offers) != 1 || capacity.Offers[0].OfferID != "two" {
+		t.Fatalf("capacity=%+v", capacity)
+	}
+	if err := daemon.UpdateBackends(nil, map[string]backend.Backend{}); err != nil {
+		t.Fatal(err)
+	}
+	if capacity = daemon.Capacity(); capacity.Available != 0 || len(capacity.Offers) != 0 {
+		t.Fatalf("stopped capacity=%+v", capacity)
+	}
+}
+
 func TestDaemonConnectsToRealTLSRelayAndStreamsBackend(t *testing.T) {
 	events := make(chan v1.Envelope, 4)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +124,7 @@ func TestDaemonConnectsToRealTLSRelayAndStreamsBackend(t *testing.T) {
 			}
 			events <- envelope
 		}
-		offer, err := v1.NewEnvelope("offer", v1.MessageJobOffer, &v1.JobOffer{RequestID: "request-1", Model: "model", OfferID: "local", PriceVersion: 1, MaximumSpend: 10, LeaseExpiresAt: time.Now().Add(time.Minute), Prompt: "real prompt"})
+		offer, err := v1.NewEnvelope("offer", v1.MessageJobOffer, &v1.JobOffer{RequestID: "request-1", Model: "model", OfferID: "local", PriceVersion: 1, MaximumSpend: 10, MaximumOutputTokens: 100, LeaseExpiresAt: time.Now().Add(time.Minute), Prompt: "real prompt"})
 		if err != nil {
 			t.Errorf("create offer: %v", err)
 			return
@@ -162,7 +179,77 @@ func TestDaemonConnectsToRealTLSRelayAndStreamsBackend(t *testing.T) {
 	}
 }
 
+func TestDaemonTerminatesAcceptedJobWhenBackendFails(t *testing.T) {
+	events := make(chan v1.Envelope, 2)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close(websocket.StatusNormalClosure, "test complete")
+		for range 2 {
+			if _, _, err := connection.Read(r.Context()); err != nil {
+				return
+			}
+		}
+		offer, _ := v1.NewEnvelope("offer", v1.MessageJobOffer, &v1.JobOffer{RequestID: "failed-request", Model: "model", OfferID: "local", PriceVersion: 1, MaximumSpend: 10, MaximumOutputTokens: 100, LeaseExpiresAt: time.Now().Add(time.Minute), Prompt: "fail"})
+		payload, _ := json.Marshal(offer)
+		if connection.Write(r.Context(), websocket.MessageText, payload) != nil {
+			return
+		}
+		for range 2 {
+			_, payload, readErr := connection.Read(r.Context())
+			if readErr != nil {
+				return
+			}
+			envelope, decodeErr := v1.DecodeEnvelope(bytes.NewReader(payload), 1<<20)
+			if decodeErr != nil {
+				t.Errorf("decode failure event: %v", decodeErr)
+				return
+			}
+			events <- envelope
+		}
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	daemon := NewDaemon(Config{RelayURL: "wss" + strings.TrimPrefix(server.URL, "https"), Token: "token", MachineID: "machine", Offers: []v1.OfferCapacity{{OfferID: "local", Model: "model", PriceVersion: 1}}, HTTPClient: client, HeartbeatInterval: time.Hour}, map[string]backend.Backend{"local": failingBackend{}})
+	done := make(chan error, 1)
+	go func() { done <- daemon.Serve(ctx) }()
+	receive := func() v1.Envelope {
+		select {
+		case event := <-events:
+			return event
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for terminal backend failure")
+			return v1.Envelope{}
+		}
+	}
+	first, second := receive(), receive()
+	if first.Type != v1.MessageJobAccept || second.Type != v1.MessageOutputChunk {
+		t.Fatalf("events=%s,%s", first.Type, second.Type)
+	}
+	var failure v1.OutputChunk
+	if err := second.DecodeBody(&failure); err != nil || !failure.Done || failure.ErrorCode != "backend_failed" {
+		t.Fatalf("failure=%+v err=%v", failure, err)
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("serve returned %v", err)
+	}
+}
+
 type testBackend struct{}
+
+type failingBackend struct{}
+
+func (failingBackend) Models(context.Context) ([]backend.Model, error) {
+	return []backend.Model{{Name: "model"}}, nil
+}
+func (failingBackend) Generate(context.Context, backend.Request, func(string) error) (backend.Usage, error) {
+	return backend.Usage{}, errors.New("backend failed")
+}
 
 func (testBackend) Models(context.Context) ([]backend.Model, error) {
 	return []backend.Model{{Name: "model"}}, nil

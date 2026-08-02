@@ -59,14 +59,18 @@ func (c *Client) Models(ctx context.Context) ([]backend.Model, error) {
 }
 
 func (c *Client) Generate(ctx context.Context, input backend.Request, onContent func(string) error) (backend.Usage, error) {
-	if input.Model == "" || input.Prompt == "" || onContent == nil {
+	if input.Model == "" || input.Prompt == "" || onContent == nil || len(input.Workspace) != 0 {
 		return backend.Usage{}, errors.New("model, prompt, and content callback are required")
+	}
+	maximumOutputTokens := input.MaximumOutputTokens
+	if maximumOutputTokens == 0 {
+		maximumOutputTokens = 4096
 	}
 	body, err := json.Marshal(map[string]any{
 		"model":   input.Model,
 		"prompt":  input.Prompt,
 		"stream":  true,
-		"options": map[string]any{"temperature": 0},
+		"options": map[string]any{"temperature": 0, "num_predict": maximumOutputTokens},
 	})
 	if err != nil {
 		return backend.Usage{}, err

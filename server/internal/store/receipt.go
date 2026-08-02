@@ -3,12 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
 
@@ -38,9 +38,23 @@ func (s *Store) PrepareReceipt(ctx context.Context, requestID string, domain Rec
 	if err != nil {
 		return v1.Receipt{}, "", "", err
 	}
-	offerID := crypto.Keccak256Hash([]byte(proposal.OfferID))
-	modelHash := crypto.Keccak256Hash([]byte(proposal.Model))
-	capabilityHash := crypto.Keccak256Hash([]byte("stream,text"))
+	var offerHashText, modelHashText, capabilityHashText string
+	if err := tx.QueryRowContext(ctx, `SELECT offer_hash,model_hash,capability_hash FROM requests WHERE id=$1`, requestID).Scan(&offerHashText, &modelHashText, &capabilityHashText); err != nil {
+		return v1.Receipt{}, "", "", err
+	}
+	parseHash := func(value string) (common.Hash, bool) {
+		if len(value) != 66 || !strings.HasPrefix(value, "0x") {
+			return common.Hash{}, false
+		}
+		decoded, err := hex.DecodeString(value[2:])
+		return common.BytesToHash(decoded), err == nil && len(decoded) == 32
+	}
+	offerID, validOffer := parseHash(offerHashText)
+	modelHash, validModel := parseHash(modelHashText)
+	capabilityHash, validCapability := parseHash(capabilityHashText)
+	if !validOffer || !validModel || !validCapability {
+		return v1.Receipt{}, "", "", v1.ErrInvalidReceipt
+	}
 	var inputRate, outputRate, computeRate string
 	err = tx.QueryRowContext(ctx, `SELECT input_per_million::text,output_per_million::text,compute_per_second::text FROM chain_offers WHERE chain_id=$1 AND lower(contract_address)=lower($2) AND lower(provider)=lower($3) AND offer_id=$4 AND version=$5 AND model_hash=$6 AND capability_hash=$7`, domain.ChainID, domain.ContractAddress, provider, offerID.Hex(), proposal.PriceVersion, modelHash.Hex(), capabilityHash.Hex()).Scan(&inputRate, &outputRate, &computeRate)
 	if err != nil {

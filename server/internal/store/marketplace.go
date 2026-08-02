@@ -59,9 +59,9 @@ func (s *Store) MarketplaceModels(ctx context.Context, staleAfter time.Duration)
 	rows, err := s.db.QueryContext(ctx, `SELECT prs.model,
 		count(*) FILTER (WHERE prs.healthy AND prs.capacity>0 AND prs.updated_at >= $1),
 		COALESCE(sum(prs.capacity) FILTER (WHERE prs.healthy AND prs.updated_at >= $1),0),
-		min(o.input_per_million)::text,min(o.output_per_million)::text,min(o.compute_per_second)::text,
+		min(prs.input_per_million)::text,min(prs.output_per_million)::text,min(prs.compute_per_second)::text,
 		bool_and(prs.updated_at < $1)
-		FROM provider_routing_state prs JOIN offers o ON o.id=prs.offer_id AND o.version=prs.price_version
+		FROM provider_routing_state prs
 		WHERE prs.confirmed_bond GROUP BY prs.model ORDER BY prs.model`, cutoff)
 	if err != nil {
 		return nil, err
@@ -81,13 +81,12 @@ func (s *Store) MarketplaceModels(ctx context.Context, staleAfter time.Duration)
 func (s *Store) MarketplaceModel(ctx context.Context, modelName string, staleAfter time.Duration) (MarketModelDetail, error) {
 	cutoff := time.Now().Add(-staleAfter)
 	rows, err := s.db.QueryContext(ctx, `SELECT prs.machine_id,a.wallet_address,prs.offer_id,prs.model,array_to_json(prs.capabilities),prs.price_version,
-		o.input_per_million::text,o.output_per_million::text,o.compute_per_second::text,prs.capacity,
+		prs.input_per_million::text,prs.output_per_million::text,prs.compute_per_second::text,prs.capacity,
 		prs.latency_milliseconds,prs.success_basis_points,prs.reputation,
 		(prs.healthy AND prs.capacity>0 AND prs.updated_at >= $2),prs.updated_at < $2,prs.updated_at
 		FROM provider_routing_state prs
-		JOIN offers o ON o.id=prs.offer_id AND o.version=prs.price_version
 		JOIN machines m ON m.id=prs.machine_id JOIN accounts a ON a.id=m.account_id
-		WHERE prs.model=$1 AND prs.confirmed_bond ORDER BY o.input_per_million,o.output_per_million,prs.machine_id`, modelName, cutoff)
+		WHERE prs.model=$1 AND prs.confirmed_bond ORDER BY prs.input_per_million,prs.output_per_million,prs.machine_id`, modelName, cutoff)
 	if err != nil {
 		return MarketModelDetail{}, err
 	}

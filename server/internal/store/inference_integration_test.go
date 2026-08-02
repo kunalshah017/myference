@@ -53,14 +53,14 @@ func TestInferenceReservationRoutingAndReceiptAreDurableAndAtomic(t *testing.T) 
 	if err := s.CreateOffer(ctx, Offer{ID: "offer-1", BackendID: "backend-1", Version: 3, InputPerMillion: 1, OutputPerMillion: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertRoutingState(ctx, RoutingState{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", Capabilities: []string{"text", "stream"}, PriceVersion: 3, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 60, LatencyMilliseconds: 20, SuccessBasisPoints: 9900, Reputation: 80}); err != nil {
+	if err := s.UpsertRoutingState(ctx, RoutingState{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", BackendKind: "ollama", Capabilities: []string{"text", "stream"}, PriceVersion: 3, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 60, InputPerMillion: 1, OutputPerMillion: 1, LatencyMilliseconds: 20, SuccessBasisPoints: 9900, Reputation: 80}); err != nil {
 		t.Fatal(err)
 	}
 	candidates, err := s.RoutingCandidates(ctx, "qwen")
 	if err != nil || len(candidates) != 1 || !candidates[0].ConfirmedBond {
 		t.Fatalf("candidates=%+v err=%v", candidates, err)
 	}
-	reservation := InferenceReservation{RequestID: "request-1", SessionID: "session-1", AccountID: "customer", MachineID: "machine-1", OfferID: "offer-1", PriceVersion: 3, MaximumSpend: 60}
+	reservation := InferenceReservation{RequestID: "request-1", SessionID: "session-1", AccountID: "customer", MachineID: "machine-1", OfferID: "offer-1", PriceVersion: 3, MaximumSpend: 60, MaximumInputTokens: 4, MaximumOutputTokens: 1, MaximumComputeMilliseconds: 12}
 	if err := s.ReserveInference(ctx, reservation); err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +83,9 @@ func TestInferenceReservationRoutingAndReceiptAreDurableAndAtomic(t *testing.T) 
 		t.Fatal(err)
 	}
 	completed := time.Now().UTC().Truncate(time.Microsecond)
+	if err := s.CompleteInference(ctx, ReceiptProposal{RequestID: "request-1", SessionID: "session-1", MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", PriceVersion: 3, InputTokens: 4, OutputTokens: 2, ComputeMilliseconds: 12, InputHash: [32]byte{1}, OutputHash: [32]byte{2}, CompletedAt: completed}); !errors.Is(err, ErrUsageLimitExceeded) {
+		t.Fatalf("expected untrusted provider usage rejection, got %v", err)
+	}
 	if err := s.CompleteInference(ctx, ReceiptProposal{RequestID: "request-1", SessionID: "session-1", MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", PriceVersion: 3, InputTokens: 4, OutputTokens: 1, ComputeMilliseconds: 12, InputHash: [32]byte{1}, OutputHash: [32]byte{2}, CompletedAt: completed}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,12 +150,18 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_offers(chain_id,contract_address,provider,offer_id,version,model_hash,capability_hash,input_per_million,output_per_million,compute_per_second) VALUES (10143,$1,'0x1111111111111111111111111111111111111111',$2,1,$3,$4,10,20,30)`, contract, offerHash, modelHash, capabilityHash); err != nil {
 		t.Fatal(err)
 	}
-	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "local-qwen", Model: "qwen", PriceVersion: 1, BackendKind: "ollama", OfferHash: offerHash, ModelHash: modelHash, CapabilityHash: capabilityHash}}}
+	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "local-qwen", Model: "qwen", PriceVersion: 1, BackendKind: "ollama", OfferHash: offerHash, ModelHash: modelHash, CapabilityHash: capabilityHash, Capabilities: []string{"stream", "text"}}}}
 	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", capacity, 10143, contract); !errors.Is(err, ErrIneligibleRoute) {
 		t.Fatalf("expected unauthorized signer rejection, got %v", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_provider_signers(chain_id,contract_address,provider,signer,allowed) VALUES (10143,$1,'0x1111111111111111111111111111111111111111','0x3333333333333333333333333333333333333333',true)`, contract); err != nil {
 		t.Fatal(err)
+	}
+	tampered := capacity
+	tampered.Offers = append([]v1.OfferCapacity(nil), capacity.Offers...)
+	tampered.Offers[0].OfferHash = crypto.Keccak256Hash([]byte("different-offer")).Hex()
+	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", tampered, 10143, contract); !errors.Is(err, ErrIneligibleRoute) {
+		t.Fatalf("expected label/hash mismatch rejection, got %v", err)
 	}
 	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", capacity, 10143, contract); err != nil {
 		t.Fatal(err)
@@ -164,6 +173,55 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	if len(candidates) != 1 || !candidates[0].ConfirmedBond || candidates[0].MaximumCost != 60 || candidates[0].Capacity != 1 {
 		t.Fatalf("unexpected reconciled route: %+v", candidates)
 	}
+	if err := s.CreateAccount(ctx, Account{ID: "second-provider", WalletAddress: "0x7777777777777777777777777777777777777777"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMachine(ctx, Machine{ID: "second-machine", AccountID: "second-provider", Name: "second-provider"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE machines SET signer_address='0x8888888888888888888888888888888888888888' WHERE id='second-machine'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_accounts(chain_id,contract_address,address,provider_bond) VALUES (10143,$1,'0x7777777777777777777777777777777777777777',100)`, contract); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_provider_signers(chain_id,contract_address,provider,signer,allowed) VALUES (10143,$1,'0x7777777777777777777777777777777777777777','0x8888888888888888888888888888888888888888',true)`, contract); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_offers(chain_id,contract_address,provider,offer_id,version,model_hash,capability_hash,input_per_million,output_per_million,compute_per_second) VALUES (10143,$1,'0x7777777777777777777777777777777777777777',$2,1,$3,$4,100,200,300)`, contract, offerHash, modelHash, capabilityHash); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReconcileProviderCapacity(ctx, "second-machine", capacity, 10143, contract); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = s.RoutingCandidates(ctx, "qwen")
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("colliding offer candidates=%+v err=%v", candidates, err)
+	}
+	for _, candidate := range candidates {
+		if candidate.MachineID == "reconcile-machine" && (candidate.InputPerMillion != 10 || candidate.OutputPerMillion != 20 || candidate.ComputePerSecond != 30) {
+			t.Fatalf("first provider rates were overwritten: %+v", candidate)
+		}
+		if candidate.MachineID == "second-machine" && (candidate.InputPerMillion != 100 || candidate.OutputPerMillion != 200 || candidate.ComputePerSecond != 300) {
+			t.Fatalf("second provider inherited colliding rates: %+v", candidate)
+		}
+	}
+	detail, err := s.MarketplaceModel(ctx, "qwen", time.Hour)
+	if err != nil || len(detail.Offers) != 2 {
+		t.Fatalf("colliding marketplace offers=%+v err=%v", detail.Offers, err)
+	}
+	for _, item := range detail.Offers {
+		if item.MachineID == "reconcile-machine" && (item.InputPerMillion != "10" || item.OutputPerMillion != "20" || item.ComputePerSecond != "30") {
+			t.Fatalf("marketplace mixed first provider rates: %+v", item)
+		}
+		if item.MachineID == "second-machine" && (item.InputPerMillion != "100" || item.OutputPerMillion != "200" || item.ComputePerSecond != "300") {
+			t.Fatalf("marketplace mixed second provider rates: %+v", item)
+		}
+	}
+	operations, err := s.AccountOperations(ctx, "second-provider", 10143, contract, "https://testnet.monadexplorer.com", 1)
+	if err != nil || len(operations.Machines) != 1 || len(operations.Machines[0].Backends) != 1 || !operations.Machines[0].Backends[0].Healthy || operations.Machines[0].Backends[0].Capacity != 1 {
+		t.Fatalf("second provider operations=%+v err=%v", operations.Machines, err)
+	}
 	requestID := "0x" + strings.Repeat("12", 32)
 	sessionID := "0x" + strings.Repeat("34", 32)
 	if err := s.CreateAccount(ctx, Account{ID: "receipt-customer", WalletAddress: "0x5555555555555555555555555555555555555555"}); err != nil {
@@ -172,7 +230,7 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO sessions(id,account_id,state,confirmed_balance_wei) VALUES ($1,'receipt-customer','open',60)`, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO requests(id,session_id,state,machine_id,offer_id,price_version,maximum_spend) VALUES ($1,$2,'streaming','reconcile-machine','local-qwen',1,60)`, requestID, sessionID); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO requests(id,session_id,state,machine_id,offer_id,price_version,maximum_spend,maximum_input_tokens,maximum_output_tokens,maximum_compute_milliseconds,offer_hash,model_hash,capability_hash) SELECT $1,$2,'streaming','reconcile-machine','local-qwen',1,60,1,1,1,offer_hash,model_hash,capability_hash FROM provider_routing_state WHERE machine_id='reconcile-machine' AND offer_id='local-qwen'`, requestID, sessionID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CompleteInference(ctx, ReceiptProposal{RequestID: requestID, SessionID: sessionID, MachineID: "reconcile-machine", OfferID: "local-qwen", Model: "qwen", PriceVersion: 1, InputTokens: 1, OutputTokens: 1, ComputeMilliseconds: 1, InputHash: [32]byte{1}, OutputHash: [32]byte{2}, CompletedAt: time.Unix(100, 0)}); err != nil {

@@ -2,14 +2,25 @@ package v1
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"path"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+const (
+	MaximumWorkspaceFiles = 64
+	MaximumWorkspaceBytes = 512 << 10
+)
+
+var windowsAbsolutePath = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 
 const ProtocolVersion uint16 = 1
 
@@ -126,13 +137,14 @@ func (m Hello) Validate() error {
 }
 
 type OfferCapacity struct {
-	OfferID        string `json:"offer_id"`
-	Model          string `json:"model"`
-	PriceVersion   uint64 `json:"price_version"`
-	BackendKind    string `json:"backend_kind,omitempty"`
-	OfferHash      string `json:"offer_hash,omitempty"`
-	ModelHash      string `json:"model_hash,omitempty"`
-	CapabilityHash string `json:"capability_hash,omitempty"`
+	OfferID        string   `json:"offer_id"`
+	Model          string   `json:"model"`
+	PriceVersion   uint64   `json:"price_version"`
+	BackendKind    string   `json:"backend_kind,omitempty"`
+	OfferHash      string   `json:"offer_hash,omitempty"`
+	ModelHash      string   `json:"model_hash,omitempty"`
+	CapabilityHash string   `json:"capability_hash,omitempty"`
+	Capabilities   []string `json:"capabilities,omitempty"`
 }
 
 func (o OfferCapacity) Validate() error {
@@ -150,6 +162,16 @@ func (o OfferCapacity) Validate() error {
 		}
 	}
 	if provided != 0 && (provided != len(hashes) || strings.TrimSpace(o.BackendKind) == "") {
+		return ErrInvalidMessage
+	}
+	previous := ""
+	for _, capability := range o.Capabilities {
+		if (capability != "stream" && capability != "text" && capability != "workspace") || capability <= previous {
+			return ErrInvalidMessage
+		}
+		previous = capability
+	}
+	if provided != 0 && len(o.Capabilities) == 0 {
 		return ErrInvalidMessage
 	}
 	return nil
@@ -170,18 +192,54 @@ func (m Capacity) Validate() error {
 }
 
 type JobOffer struct {
-	RequestID      string    `json:"request_id"`
-	Model          string    `json:"model"`
-	OfferID        string    `json:"offer_id"`
-	Prompt         string    `json:"prompt"`
-	PriceVersion   uint64    `json:"price_version"`
-	MaximumSpend   uint64    `json:"maximum_spend"`
-	LeaseExpiresAt time.Time `json:"lease_expires_at"`
+	RequestID           string          `json:"request_id"`
+	Model               string          `json:"model"`
+	OfferID             string          `json:"offer_id"`
+	Prompt              string          `json:"prompt"`
+	PriceVersion        uint64          `json:"price_version"`
+	MaximumSpend        uint64          `json:"maximum_spend"`
+	MaximumOutputTokens uint64          `json:"maximum_output_tokens"`
+	LeaseExpiresAt      time.Time       `json:"lease_expires_at"`
+	Workspace           []WorkspaceFile `json:"workspace,omitempty"`
+}
+
+type WorkspaceFile struct {
+	Path          string `json:"path"`
+	ContentBase64 string `json:"content_base64"`
 }
 
 func (m JobOffer) Validate() error {
-	if strings.TrimSpace(m.RequestID) == "" || strings.TrimSpace(m.Model) == "" || strings.TrimSpace(m.OfferID) == "" || strings.TrimSpace(m.Prompt) == "" || m.PriceVersion == 0 || m.MaximumSpend == 0 || !m.LeaseExpiresAt.After(time.Now()) {
+	if strings.TrimSpace(m.RequestID) == "" || strings.TrimSpace(m.Model) == "" || strings.TrimSpace(m.OfferID) == "" || strings.TrimSpace(m.Prompt) == "" || m.PriceVersion == 0 || m.MaximumSpend == 0 || m.MaximumOutputTokens == 0 || !m.LeaseExpiresAt.After(time.Now()) {
 		return ErrInvalidMessage
+	}
+	if len(m.Workspace) > MaximumWorkspaceFiles {
+		return ErrInvalidMessage
+	}
+	total := 0
+	paths := make([]string, 0, len(m.Workspace))
+	seen := make(map[string]struct{}, len(m.Workspace))
+	for _, file := range m.Workspace {
+		name := strings.TrimSpace(file.Path)
+		clean := path.Clean(strings.ReplaceAll(name, `\`, "/"))
+		if name == "" || strings.ContainsRune(name, '\\') || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") || windowsAbsolutePath.MatchString(name) || clean != name {
+			return ErrInvalidMessage
+		}
+		if _, exists := seen[clean]; exists {
+			return ErrInvalidMessage
+		}
+		seen[clean] = struct{}{}
+		paths = append(paths, clean)
+		decoded, err := base64.StdEncoding.DecodeString(file.ContentBase64)
+		if err != nil || len(decoded) > MaximumWorkspaceBytes-total {
+			return ErrInvalidMessage
+		}
+		total += len(decoded)
+	}
+	sort.Strings(paths)
+	for index := 1; index < len(paths); index++ {
+		if strings.HasPrefix(paths[index], paths[index-1]+"/") {
+			return ErrInvalidMessage
+		}
 	}
 	return nil
 }
@@ -205,10 +263,14 @@ type OutputChunk struct {
 	InputTokens         uint64 `json:"input_tokens,omitempty"`
 	OutputTokens        uint64 `json:"output_tokens,omitempty"`
 	ComputeMilliseconds uint64 `json:"compute_milliseconds,omitempty"`
+	ErrorCode           string `json:"error_code,omitempty"`
 }
 
 func (m OutputChunk) Validate() error {
-	if strings.TrimSpace(m.RequestID) == "" || m.Sequence == 0 || (m.Data == "" && !m.Done) {
+	if strings.TrimSpace(m.RequestID) == "" || m.Sequence == 0 || (m.Data == "" && !m.Done) || (m.ErrorCode != "" && (!m.Done || m.Data != "" || m.InputTokens != 0 || m.OutputTokens != 0 || m.ComputeMilliseconds != 0)) {
+		return ErrInvalidMessage
+	}
+	if m.ErrorCode != "" && m.ErrorCode != "backend_failed" && m.ErrorCode != "cancelled" {
 		return ErrInvalidMessage
 	}
 	return nil

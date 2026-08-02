@@ -45,7 +45,7 @@ func TestMarketplaceServesOnlyPersistedOffersAndAccountActivity(t *testing.T) {
 	if err := repository.CreateOffer(ctx, store.Offer{ID: offerID, BackendID: backendID, Version: 1, InputPerMillion: 10, OutputPerMillion: 20, ComputePerSecond: 30}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.UpsertRoutingState(ctx, store.RoutingState{MachineID: machineID, OfferID: offerID, Model: model, Capabilities: []string{"chat", "stream"}, PriceVersion: 1, MaximumCost: 100, ConfirmedBond: true, Healthy: true, Capacity: 2, SuccessBasisPoints: 9900}); err != nil {
+	if err := repository.UpsertRoutingState(ctx, store.RoutingState{MachineID: machineID, OfferID: offerID, Model: model, BackendKind: "ollama", Capabilities: []string{"chat", "stream"}, PriceVersion: 1, MaximumCost: 100, InputPerMillion: 10, OutputPerMillion: 20, ComputePerSecond: 30, ConfirmedBond: true, Healthy: true, Capacity: 2, SuccessBasisPoints: 9900}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.CreateSession(ctx, store.Session{ID: "market-session-" + suffix, AccountID: accountID, State: "open"}); err != nil {

@@ -13,6 +13,7 @@ type Config struct {
 	MachineID       string    `json:"machine_id"`
 	ChainID         uint64    `json:"chain_id,omitempty"`
 	ContractAddress string    `json:"contract_address,omitempty"`
+	SignerAddress   string    `json:"signer_address,omitempty"`
 	Backends        []Backend `json:"backends,omitempty"`
 }
 
@@ -23,6 +24,7 @@ type Backend struct {
 	Model        string `json:"model"`
 	PriceVersion uint64 `json:"price_version,omitempty"`
 	Enabled      bool   `json:"enabled"`
+	Image        string `json:"image,omitempty"`
 }
 
 func Load(path string) (Config, error) {

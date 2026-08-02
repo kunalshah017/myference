@@ -9,8 +9,15 @@ type Model struct {
 }
 
 type Request struct {
-	Model  string
-	Prompt string
+	Model               string
+	Prompt              string
+	Workspace           []WorkspaceFile
+	MaximumOutputTokens uint64
+}
+
+type WorkspaceFile struct {
+	Path    string
+	Content []byte
 }
 
 type Usage struct {

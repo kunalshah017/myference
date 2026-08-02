@@ -1,4 +1,4 @@
-.PHONY: test vet build contracts verify
+.PHONY: test vet build contracts web scripts verify release
 
 test:
 	go test ./...
@@ -12,4 +12,15 @@ build:
 contracts:
 	forge test --root contracts
 
-verify: test vet build contracts
+web:
+	npm --prefix web test -- --run
+	npm --prefix web run lint
+	npm --prefix web run build
+
+scripts:
+	bash -n scripts/build-release.sh scripts/e2e-testnet.sh
+
+verify: test vet build contracts web scripts
+
+release:
+	./scripts/build-release.sh

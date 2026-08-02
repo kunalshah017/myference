@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/kunalshah017/myference/cli/internal/config"
+	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
 
 func TestBackendCommandsAddListStartStopAndStatus(t *testing.T) {
@@ -44,6 +48,42 @@ func TestBackendCommandsAddListStartStopAndStatus(t *testing.T) {
 	}
 	if len(loaded.Backends) != 1 || !loaded.Backends[0].Enabled {
 		t.Fatalf("unexpected backend state: %+v", loaded.Backends)
+	}
+}
+
+func TestBackendAddSupportsCloudAndCommandAgentsWithoutPersistingSecrets(t *testing.T) {
+	proxy := filepath.Join(t.TempDir(), "myference-agent-proxy")
+	if err := os.WriteFile(proxy, []byte("test proxy"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MYFERENCE_AGENT_PROXY", proxy)
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1"}); err != nil {
+		t.Fatal(err)
+	}
+	saved := map[string]string{}
+	save := func(service, account, secret string) error { saved[service+":"+account] = secret; return nil }
+	for _, args := range [][]string{{"add", "--config", path, "--name", "cloud", "--kind", "openai", "--model", "remote", "--url", "https://provider.example", "--secret", "cloud-secret"}, {"add", "--config", path, "--name", "code", "--kind", "codex", "--model", "codex", "--image", "registry.example/codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--secret", "agent-secret"}} {
+		if err := runBackendWithCredentials(args, &bytes.Buffer{}, save); err != nil {
+			t.Fatalf("args=%v err=%v", args, err)
+		}
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "cloud-secret") || strings.Contains(string(raw), "agent-secret") {
+		t.Fatal("backend secret persisted in config")
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Backends) != 2 || loaded.Backends[0].Kind != "openai" || loaded.Backends[1].Kind != "codex" {
+		t.Fatalf("backends=%+v", loaded.Backends)
+	}
+	if saved["myference.backend:mach-1/cloud"] != "cloud-secret" || saved["myference.backend:mach-1/code"] != "agent-secret" {
+		t.Fatalf("saved=%v", saved)
 	}
 }
 
@@ -118,9 +158,45 @@ func TestRelayURLUsesOutboundWebSocketEndpoint(t *testing.T) {
 	}
 }
 
+func TestStatusJSONProvidesPlatformAttestationWithoutSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct", MachineID: "machine"}); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.Load(path)
+	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{offerCapacity(config.Backend{Name: "local", Kind: "ollama", Model: "qwen", PriceVersion: 1})}}
+	if err := writeStatusJSON(cfg, capacity, &output, func(string, string) (string, error) { return fmt.Sprintf("%x", crypto.FromECDSA(key)), nil }, func() time.Time { return time.Unix(1_700_000_000, 0) }); err != nil {
+		t.Fatal(err)
+	}
+	var status struct {
+		MachineID       string      `json:"machine_id"`
+		GOOS            string      `json:"goos"`
+		GOARCH          string      `json:"goarch"`
+		Signature       string      `json:"attestation_signature"`
+		Capacity        v1.Capacity `json:"capacity"`
+		CapacitySHA256  string      `json:"capacity_sha256"`
+		CapacityPayload string      `json:"capacity_payload"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.MachineID != "machine" || status.GOOS == "" || status.GOARCH == "" || len(status.Signature) != 132 || status.Capacity.Available != 1 || len(status.CapacitySHA256) != 64 || status.CapacityPayload == "" {
+		t.Fatalf("status=%+v", status)
+	}
+}
+
 func TestOfferCapacityCarriesDeterministicMonadProofKeys(t *testing.T) {
 	offer := offerCapacity(config.Backend{Name: "local", Kind: "ollama", Model: "qwen", PriceVersion: 4, Enabled: true})
-	if offer.PriceVersion != 4 || len(offer.OfferHash) != 66 || len(offer.ModelHash) != 66 || len(offer.CapabilityHash) != 66 || offer.BackendKind != "ollama" {
+	if offer.PriceVersion != 4 || len(offer.OfferHash) != 66 || len(offer.ModelHash) != 66 || len(offer.CapabilityHash) != 66 || offer.BackendKind != "ollama" || !slices.Equal(offer.Capabilities, []string{"stream", "text"}) {
 		t.Fatalf("unexpected offer proof keys: %+v", offer)
+	}
+	agent := offerCapacity(config.Backend{Name: "agent", Kind: "codex", Model: "codex", PriceVersion: 1, Enabled: true})
+	if !slices.Equal(agent.Capabilities, []string{"stream", "text", "workspace"}) {
+		t.Fatalf("command agent lacks workspace capability: %+v", agent)
 	}
 }

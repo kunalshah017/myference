@@ -16,6 +16,7 @@ let verifyBody: Record<string, string> = {}
 let approvedCode = ''
 let authorizedSigner = ''
 let revokedKey = ''
+let createdEndpoints: string[] = []
 
 afterEach(cleanup)
 
@@ -43,6 +44,7 @@ beforeAll(async () => {
       } else if (request.url === '/auth/api-keys' && request.method === 'GET') {
         send(200, [{ id: 'key-existing', scope: { models: ['qwen'], endpoints: ['/v1/chat/completions'], max_spend_wei: 500 }, created_at: '2026-08-02T17:00:00Z' }])
       } else if (request.url === '/auth/api-keys' && request.method === 'POST') {
+        createdEndpoints = body.endpoints
         send(201, { id: 'key-new', token: 'key-new.one-time-secret', scope: body })
       } else if (request.url?.startsWith('/auth/api-keys/') && request.method === 'DELETE') {
         revokedKey = request.url.split('/').at(-1) ?? ''
@@ -105,6 +107,7 @@ describe('account authentication', () => {
     await userEvent.type(screen.getByLabelText(/maximum spend/i), '1000')
     await userEvent.click(screen.getByRole('button', { name: /create api key/i }))
     expect(await screen.findByText('key-new.one-time-secret')).toBeVisible()
+    expect(createdEndpoints).toEqual(['/v1/chat/completions', '/v1/messages'])
     await userEvent.click(screen.getByRole('button', { name: /i saved this key/i }))
     expect(screen.queryByText('key-new.one-time-secret')).not.toBeInTheDocument()
     await act(async () => { await userEvent.click(screen.getByRole('button', { name: /revoke key-existing/i })) })

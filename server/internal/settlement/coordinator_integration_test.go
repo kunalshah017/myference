@@ -122,7 +122,10 @@ func TestCoordinatorObtainsMachineSignatureAndSettlesActualReceipt(t *testing.T)
 	if err := indexer.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO requests(id,session_id,state,machine_id,offer_id,price_version,maximum_spend) VALUES ($1,$2,'streaming','machine','local-qwen',1,100)`, requestID.Hex(), sessionID.Hex()); err != nil {
+	if err := repository.UpsertRoutingState(ctx, store.RoutingState{MachineID: "machine", OfferID: "local-qwen", Model: "qwen", BackendKind: "ollama", Capabilities: []string{"stream", "text"}, PriceVersion: 1, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 100, InputPerMillion: 100_000_000}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO requests(id,session_id,state,machine_id,offer_id,price_version,maximum_spend,maximum_input_tokens,maximum_output_tokens,maximum_compute_milliseconds,offer_hash,model_hash,capability_hash) VALUES ($1,$2,'streaming','machine','local-qwen',1,100,1,1,1,$3,$4,$5)`, requestID.Hex(), sessionID.Hex(), offerID.Hex(), modelHash.Hex(), capabilityHash.Hex()); err != nil {
 		t.Fatal(err)
 	}
 

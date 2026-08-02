@@ -61,6 +61,13 @@ func TestRetryStopsAfterFirstOutput(t *testing.T) {
 	}
 }
 
+func TestWorstCaseCostUsesRequestedTokensAndComputeDeadline(t *testing.T) {
+	cost, err := WorstCaseCost(Candidate{InputPerMillion: 1_000_000, OutputPerMillion: 2_000_000, ComputePerSecond: 3}, 4, 5, 30_000)
+	if err != nil || cost != 104 {
+		t.Fatalf("cost=%d err=%v", cost, err)
+	}
+}
+
 func with(candidate Candidate, change func(*Candidate)) Candidate {
 	change(&candidate)
 	return candidate

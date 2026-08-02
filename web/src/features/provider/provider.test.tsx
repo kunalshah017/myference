@@ -18,8 +18,9 @@ it('shows real machines, immutable offer versions, collateral, and earnings', as
   }
   const api = { operations: async () => operations } as OperationsAPI
   let bond = 0n
+  let capabilities: string[] = []
   const confirmed: SubmittedTransaction = { hash: '0xbond', confirm: async () => undefined }
-  const writer = { depositBond: async (value: bigint) => { bond = value; return confirmed } } as MarketWriter
+  const writer = { depositBond: async (value: bigint) => { bond = value; return confirmed }, publishOffer: async (offer:{capabilities:string[]})=>{capabilities=offer.capabilities;return confirmed} } as unknown as MarketWriter
   render(<QueryClientProvider client={new QueryClient()}><ProviderConsole api={api} writer={writer} /></QueryClientProvider>)
   expect(await screen.findByText('studio-node')).toBeVisible()
   expect(screen.getByText(/version 4/i)).toBeVisible()
@@ -27,4 +28,6 @@ it('shows real machines, immutable offer versions, collateral, and earnings', as
   await userEvent.type(screen.getByLabelText(/bond MON/i), '2')
   await userEvent.click(screen.getByRole('button', { name: /deposit collateral/i }))
   expect(bond).toBe(2_000_000_000_000_000_000n)
+  await userEvent.type(screen.getByLabelText(/offer name/i),'local-qwen');await userEvent.type(screen.getByLabelText(/^model$/i),'qwen');await userEvent.click(screen.getByLabelText(/temporary workspace/i));await userEvent.type(screen.getByLabelText(/input \/ 1M/i),'10');await userEvent.type(screen.getByLabelText(/output \/ 1M/i),'20');await userEvent.type(screen.getByLabelText(/compute \/ second/i),'30');await userEvent.click(screen.getByRole('button',{name:/publish next offer/i}))
+  expect(capabilities).toEqual(['text','stream','workspace'])
 })

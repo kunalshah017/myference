@@ -40,6 +40,16 @@ func TestOperationsReturnsIndexedEconomicsMachinesOffersAndEarnings(t *testing.T
 	accountID, machineID, backendID := "ops-account-"+suffix, "ops-machine-"+suffix, "ops-backend-"+suffix
 	wallet := "0x3333333333333333333333333333333333333333"
 	contract := "0x4444444444444444444444444444444444444444"
+	for _, statement := range []string{
+		`DELETE FROM chain_settlements WHERE chain_id=10143 AND contract_address=$1 AND lower(provider)=lower($2)`,
+		`DELETE FROM chain_sessions WHERE chain_id=10143 AND contract_address=$1 AND lower(customer)=lower($2)`,
+		`DELETE FROM chain_offers WHERE chain_id=10143 AND contract_address=$1 AND lower(provider)=lower($2)`,
+		`DELETE FROM chain_accounts WHERE chain_id=10143 AND contract_address=$1 AND lower(address)=lower($2)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement, contract, wallet); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM accounts WHERE wallet_address=$1`, wallet); err != nil {
 		t.Fatal(err)
 	}

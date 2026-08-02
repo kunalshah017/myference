@@ -2,13 +2,16 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 	"github.com/kunalshah017/myference/server/internal/router"
 )
@@ -16,21 +19,25 @@ import (
 var (
 	ErrInsufficientBalance = errors.New("insufficient confirmed session balance")
 	ErrIneligibleRoute     = errors.New("route is no longer eligible")
+	ErrUsageLimitExceeded  = errors.New("provider usage exceeds reserved limits")
 )
 
 type RoutingState struct {
-	MachineID, OfferID, Model                      string
-	Capabilities                                   []string
-	PriceVersion, MaximumCost, LatencyMilliseconds uint64
-	ConfirmedBond, Healthy                         bool
-	Capacity                                       uint32
-	SuccessBasisPoints                             uint16
-	Reputation                                     uint64
+	MachineID, OfferID, Model, BackendKind              string
+	Capabilities                                        []string
+	PriceVersion, MaximumCost, LatencyMilliseconds      uint64
+	ConfirmedBond, Healthy                              bool
+	Capacity                                            uint32
+	SuccessBasisPoints                                  uint16
+	Reputation                                          uint64
+	InputPerMillion, OutputPerMillion, ComputePerSecond uint64
 }
 
 type InferenceReservation struct {
 	RequestID, SessionID, AccountID, MachineID, OfferID string
 	PriceVersion, MaximumSpend                          uint64
+	MaximumInputTokens, MaximumOutputTokens             uint64
+	MaximumComputeMilliseconds                          uint64
 }
 
 type ReceiptProposal struct {
@@ -42,14 +49,16 @@ type ReceiptProposal struct {
 }
 
 func (s *Store) UpsertRoutingState(ctx context.Context, state RoutingState) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_routing_state (machine_id, offer_id, model, capabilities, price_version, confirmed_bond, healthy, capacity, maximum_cost, latency_milliseconds, success_basis_points, reputation)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		ON CONFLICT (machine_id, offer_id) DO UPDATE SET model=EXCLUDED.model, capabilities=EXCLUDED.capabilities, price_version=EXCLUDED.price_version, confirmed_bond=EXCLUDED.confirmed_bond, healthy=EXCLUDED.healthy, capacity=EXCLUDED.capacity, maximum_cost=EXCLUDED.maximum_cost, latency_milliseconds=EXCLUDED.latency_milliseconds, success_basis_points=EXCLUDED.success_basis_points, reputation=EXCLUDED.reputation, updated_at=now()`, state.MachineID, state.OfferID, state.Model, state.Capabilities, state.PriceVersion, state.ConfirmedBond, state.Healthy, state.Capacity, decimal(state.MaximumCost), state.LatencyMilliseconds, state.SuccessBasisPoints, state.Reputation)
+	capabilities := append([]string(nil), state.Capabilities...)
+	sort.Strings(capabilities)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_routing_state (machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second,latency_milliseconds,success_basis_points,reputation)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+		ON CONFLICT (machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,price_version=EXCLUDED.price_version,confirmed_bond=EXCLUDED.confirmed_bond,healthy=EXCLUDED.healthy,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,latency_milliseconds=EXCLUDED.latency_milliseconds,success_basis_points=EXCLUDED.success_basis_points,reputation=EXCLUDED.reputation,updated_at=now()`, state.MachineID, state.OfferID, state.Model, state.BackendKind, capabilities, crypto.Keccak256Hash([]byte(state.OfferID)).Hex(), crypto.Keccak256Hash([]byte(state.Model)).Hex(), crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex(), state.PriceVersion, state.ConfirmedBond, state.Healthy, state.Capacity, decimal(state.MaximumCost), decimal(state.InputPerMillion), decimal(state.OutputPerMillion), decimal(state.ComputePerSecond), state.LatencyMilliseconds, state.SuccessBasisPoints, state.Reputation)
 	return err
 }
 
 func (s *Store) RoutingCandidates(ctx context.Context, model string) ([]router.Candidate, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT machine_id, offer_id, model, array_to_json(capabilities), price_version, confirmed_bond, healthy, capacity, maximum_cost::text, latency_milliseconds, success_basis_points, reputation FROM provider_routing_state WHERE model=$1`, model)
+	rows, err := s.db.QueryContext(ctx, `SELECT machine_id,offer_id,model,array_to_json(capabilities),price_version,confirmed_bond,healthy,capacity,maximum_cost::text,latency_milliseconds,success_basis_points,reputation,input_per_million::text,output_per_million::text,compute_per_second::text FROM provider_routing_state WHERE model=$1`, model)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +67,8 @@ func (s *Store) RoutingCandidates(ctx context.Context, model string) ([]router.C
 	for rows.Next() {
 		var candidate router.Candidate
 		var maximum, capabilities string
-		if err := rows.Scan(&candidate.MachineID, &candidate.OfferID, &candidate.Model, &capabilities, &candidate.PriceVersion, &candidate.ConfirmedBond, &candidate.Healthy, &candidate.Capacity, &maximum, &candidate.LatencyMilliseconds, &candidate.SuccessBasisPoints, &candidate.Reputation); err != nil {
+		var inputRate, outputRate, computeRate string
+		if err := rows.Scan(&candidate.MachineID, &candidate.OfferID, &candidate.Model, &capabilities, &candidate.PriceVersion, &candidate.ConfirmedBond, &candidate.Healthy, &candidate.Capacity, &maximum, &candidate.LatencyMilliseconds, &candidate.SuccessBasisPoints, &candidate.Reputation, &inputRate, &outputRate, &computeRate); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(capabilities), &candidate.Capabilities); err != nil {
@@ -67,6 +77,16 @@ func (s *Store) RoutingCandidates(ctx context.Context, model string) ([]router.C
 		candidate.MaximumCost, err = strconv.ParseUint(maximum, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("routing cost exceeds broker limit: %w", err)
+		}
+		candidate.InputPerMillion, err = strconv.ParseUint(inputRate, 10, 64)
+		if err == nil {
+			candidate.OutputPerMillion, err = strconv.ParseUint(outputRate, 10, 64)
+		}
+		if err == nil {
+			candidate.ComputePerSecond, err = strconv.ParseUint(computeRate, 10, 64)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("routing rate exceeds broker limit: %w", err)
 		}
 		result = append(result, candidate)
 	}
@@ -117,6 +137,11 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 		if offered.OfferHash == "" {
 			continue
 		}
+		capabilities := append([]string(nil), offered.Capabilities...)
+		sort.Strings(capabilities)
+		if crypto.Keccak256Hash([]byte(offered.OfferID)).Hex() != offered.OfferHash || crypto.Keccak256Hash([]byte(offered.Model)).Hex() != offered.ModelHash || crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex() != offered.CapabilityHash {
+			return ErrIneligibleRoute
+		}
 		var input, output, compute, bond string
 		var exit uint64
 		err := tx.QueryRowContext(ctx, `SELECT o.input_per_million::text,o.output_per_million::text,o.compute_per_second::text,a.provider_bond::text,a.bond_exit_available_at FROM chain_offers o JOIN chain_accounts a ON a.chain_id=o.chain_id AND a.contract_address=o.contract_address AND lower(a.address)=lower(o.provider) WHERE o.chain_id=$1 AND lower(o.contract_address)=lower($2) AND lower(o.provider)=lower($3) AND o.offer_id=$4 AND o.version=$5 AND o.model_hash=$6 AND o.capability_hash=$7`, chainID, contractAddress, wallet, offered.OfferHash, offered.PriceVersion, offered.ModelHash, offered.CapabilityHash).Scan(&input, &output, &compute, &bond, &exit)
@@ -140,7 +165,7 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 		if capacity.Available > 0 {
 			available = 1
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO provider_routing_state(machine_id,offer_id,model,capabilities,price_version,confirmed_bond,healthy,capacity,maximum_cost) VALUES ($1,$2,$3,$4,$5,true,true,$6,$7) ON CONFLICT(machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,capabilities=EXCLUDED.capabilities,price_version=EXCLUDED.price_version,confirmed_bond=true,healthy=true,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,updated_at=now()`, machineID, offered.OfferID, offered.Model, []string{"text", "stream"}, offered.PriceVersion, available, decimal(inputValue+outputValue+computeValue)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO provider_routing_state(machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,true,$10,$11,$12,$13,$14) ON CONFLICT(machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,price_version=EXCLUDED.price_version,confirmed_bond=true,healthy=true,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,updated_at=now()`, machineID, offered.OfferID, offered.Model, offered.BackendKind, capabilities, offered.OfferHash, offered.ModelHash, offered.CapabilityHash, offered.PriceVersion, available, decimal(inputValue+outputValue+computeValue), input, output, compute); err != nil {
 			return err
 		}
 	}
@@ -158,6 +183,9 @@ func (s *Store) OpenSession(ctx context.Context, accountID string) (string, uint
 }
 
 func (s *Store) ReserveInference(ctx context.Context, reservation InferenceReservation) error {
+	if reservation.MaximumInputTokens == 0 || reservation.MaximumOutputTokens == 0 || reservation.MaximumComputeMilliseconds == 0 {
+		return ErrIneligibleRoute
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -185,14 +213,32 @@ func (s *Store) ReserveInference(ctx context.Context, reservation InferenceReser
 	if err != nil || locked > confirmed || reservation.MaximumSpend > confirmed-locked {
 		return ErrInsufficientBalance
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=capacity-1, updated_at=now() WHERE machine_id=$1 AND offer_id=$2 AND price_version=$3 AND confirmed_bond AND healthy AND capacity>0 AND maximum_cost <= $4`, reservation.MachineID, reservation.OfferID, reservation.PriceVersion, decimal(reservation.MaximumSpend))
-	if err != nil {
+	var offerHash, modelHash, capabilityHash, inputRate, outputRate, computeRate string
+	if err := tx.QueryRowContext(ctx, `SELECT offer_hash,model_hash,capability_hash,input_per_million::text,output_per_million::text,compute_per_second::text FROM provider_routing_state WHERE machine_id=$1 AND offer_id=$2 AND price_version=$3 AND confirmed_bond AND healthy AND capacity>0 FOR UPDATE`, reservation.MachineID, reservation.OfferID, reservation.PriceVersion).Scan(&offerHash, &modelHash, &capabilityHash, &inputRate, &outputRate, &computeRate); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrIneligibleRoute
+		}
 		return err
 	}
-	if rows, _ := result.RowsAffected(); rows != 1 {
+	candidate := router.Candidate{}
+	candidate.InputPerMillion, err = strconv.ParseUint(inputRate, 10, 64)
+	if err == nil {
+		candidate.OutputPerMillion, err = strconv.ParseUint(outputRate, 10, 64)
+	}
+	if err == nil {
+		candidate.ComputePerSecond, err = strconv.ParseUint(computeRate, 10, 64)
+	}
+	worstCase, costErr := router.WorstCaseCost(candidate, reservation.MaximumInputTokens, reservation.MaximumOutputTokens, reservation.MaximumComputeMilliseconds)
+	if err != nil || costErr != nil || worstCase > reservation.MaximumSpend {
 		return ErrIneligibleRoute
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO requests (id, session_id, state, machine_id, offer_id, price_version, maximum_spend) VALUES ($1,$2,'created',$3,$4,$5,$6)`, reservation.RequestID, reservation.SessionID, reservation.MachineID, reservation.OfferID, reservation.PriceVersion, decimal(reservation.MaximumSpend)); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE provider_routing_state SET capacity=capacity-1,updated_at=now() WHERE machine_id=$1 AND offer_id=$2`, reservation.MachineID, reservation.OfferID); err != nil {
+		return err
+	}
+	if offerHash == "" || modelHash == "" || capabilityHash == "" {
+		return ErrIneligibleRoute
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO requests (id,session_id,state,machine_id,offer_id,price_version,maximum_spend,maximum_input_tokens,maximum_output_tokens,maximum_compute_milliseconds,offer_hash,model_hash,capability_hash) VALUES ($1,$2,'created',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, reservation.RequestID, reservation.SessionID, reservation.MachineID, reservation.OfferID, reservation.PriceVersion, decimal(reservation.MaximumSpend), reservation.MaximumInputTokens, reservation.MaximumOutputTokens, reservation.MaximumComputeMilliseconds, offerHash, modelHash, capabilityHash); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO inference_reservations (request_id, session_id, amount) VALUES ($1,$2,$3)`, reservation.RequestID, reservation.SessionID, decimal(reservation.MaximumSpend)); err != nil {
@@ -219,7 +265,7 @@ func (s *Store) CompleteInference(ctx context.Context, proposal ReceiptProposal)
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE requests SET state='completed', updated_at=now() WHERE id=$1 AND session_id=$2 AND state='streaming'`, proposal.RequestID, proposal.SessionID)
+	result, err := tx.ExecContext(ctx, `UPDATE requests SET state='completed',updated_at=now() WHERE id=$1 AND session_id=$2 AND state='streaming' AND $3<=maximum_input_tokens AND $4<=maximum_output_tokens AND $5<=maximum_compute_milliseconds`, proposal.RequestID, proposal.SessionID, proposal.InputTokens, proposal.OutputTokens, proposal.ComputeMilliseconds)
 	if err != nil {
 		return err
 	}
@@ -227,6 +273,10 @@ func (s *Store) CompleteInference(ctx context.Context, proposal ReceiptProposal)
 		var exists bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM receipt_proposals WHERE request_id=$1)`, proposal.RequestID).Scan(&exists); err == nil && exists {
 			return nil
+		}
+		var exceeded bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM requests WHERE id=$1 AND state='streaming' AND ($2>maximum_input_tokens OR $3>maximum_output_tokens OR $4>maximum_compute_milliseconds))`, proposal.RequestID, proposal.InputTokens, proposal.OutputTokens, proposal.ComputeMilliseconds).Scan(&exceeded); err == nil && exceeded {
+			return ErrUsageLimitExceeded
 		}
 		return ErrInvalidTransition
 	}

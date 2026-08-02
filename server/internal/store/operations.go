@@ -84,7 +84,7 @@ func (s *Store) AccountOperations(ctx context.Context, accountID string, chainID
 		return AccountOperations{}, err
 	}
 
-	machineRows, err := s.db.QueryContext(ctx, `SELECT m.id,m.name,m.revoked_at IS NOT NULL,b.id,b.kind,b.model,b.enabled,COALESCE(prs.healthy,false),COALESCE(prs.capacity,0) FROM machines m LEFT JOIN backends b ON b.machine_id=m.id LEFT JOIN LATERAL (SELECT id,version FROM offers WHERE backend_id=b.id ORDER BY version DESC LIMIT 1) o ON true LEFT JOIN provider_routing_state prs ON prs.machine_id=m.id AND prs.offer_id=o.id AND prs.price_version=o.version WHERE m.account_id=$1 ORDER BY m.created_at,b.id`, accountID)
+	machineRows, err := s.db.QueryContext(ctx, `SELECT m.id,m.name,m.revoked_at IS NOT NULL,b.id,b.kind,b.model,b.enabled,COALESCE(prs.healthy,false),COALESCE(prs.capacity,0) FROM machines m LEFT JOIN backends b ON b.machine_id=m.id LEFT JOIN LATERAL (SELECT bool_or(healthy) AS healthy,COALESCE(sum(capacity),0) AS capacity FROM provider_routing_state WHERE machine_id=m.id AND model=b.model AND backend_kind=b.kind) prs ON true WHERE m.account_id=$1 ORDER BY m.created_at,b.id`, accountID)
 	if err != nil {
 		return AccountOperations{}, err
 	}

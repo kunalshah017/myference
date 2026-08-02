@@ -117,19 +117,19 @@ Run the Step 2 commands plus `go test ./server/internal/chain -tags=integration 
 - Modify: `server/internal/api/openai.go`
 - Modify: `server/cmd/myference-server/main.go`
 
-- [ ] **Step 1: Write a failing real-relay Anthropic streaming test**
+- [x] **Step 1: Write a failing real-relay Anthropic streaming test**
 
 POST `/v1/messages` with `x-api-key`, `anthropic-version`, model, messages, `stream:true`, and max-spend. Require Anthropic `message_start`, `content_block_delta`, `message_delta`, and `message_stop` events sourced from the real relay output and one shared persisted receipt.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./server/internal/api -run TestAnthropicStreamingUsesRealRelay -count=1 -v`. Expected: HTTP 404.
 
-- [ ] **Step 3: Extract and implement the shared service**
+- [x] **Step 3: Reuse the shared inference core**
 
-Move authorization, selection, reservation, leasing, metering, cancellation, and persistence behind one typed streaming service. Keep protocol-specific validation and SSE rendering in the two thin HTTP adapters; enforce body limits, endpoint scopes, request cancellation, and no non-streaming fallback.
+Keep authorization, selection, reservation, leasing, metering, cancellation, and persistence in the shared OpenAI inference core. Translate Anthropic requests and SSE at a thin adapter boundary; enforce body limits, endpoint scopes, request cancellation, and no non-streaming fallback.
 
-- [ ] **Step 4: Verify compatibility**
+- [x] **Step 4: Verify compatibility**
 
 Run: `go test ./server/internal/api -count=1 -v`. Expected: OpenAI and Anthropic real-relay suites PASS.
 
@@ -145,27 +145,27 @@ Run: `go test ./server/internal/api -count=1 -v`. Expected: OpenAI and Anthropic
 - Modify: `cli/cmd/myference/main.go`
 - Modify: `protocol/v1/messages.go`
 
-- [ ] **Step 1: Write failing adapter and sandbox tests**
+- [x] **Step 1: Write failing adapter and workspace-isolation tests**
 
-Use a real loopback OpenAI-compatible HTTP server to prove streaming translation and local secret use. Execute a real helper process in a fresh `0700` temporary directory and prove it cannot inherit Myference secrets, `HOME`, Git credentials, or files outside the workspace; reject archive traversal, symlinks, device files, excessive file count/bytes, and command timeout.
+Use a real loopback OpenAI-compatible HTTP server to prove streaming translation, mandatory usage accounting, and local secret use. Execute a real digest-pinned Docker image with a fresh `0700` workspace and prove it cannot reach host services, inherit Myference secrets, the host `HOME`, or Git credentials; reject traversal, absolute paths, duplicate files, excessive file count/bytes, and command timeout.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./cli/internal/backend/openai ./cli/internal/backend/command -count=1 -v`. Expected: packages absent.
 
-- [ ] **Step 3: Implement minimal adapters**
+- [x] **Step 3: Implement minimal adapters**
 
-Store cloud keys in the OS credential vault, never config. Support explicit executable allow-list entries for Codex, Claude Code, and Kimi; run without a shell, with a minimal environment and disposable working directory, stream stdout, cap stderr, kill the process tree on cancel, and delete the workspace on every exit.
+Store cloud keys in the OS credential vault, never config. Run Codex, Claude Code, and Kimi only inside digest-pinned, read-only Docker containers with dropped capabilities and the disposable workspace as their sole host mount. Put each agent on a unique internal Docker network and make a separately packaged, dual-homed proxy sidecar its only egress peer. Enforce the configured model, endpoint allowlist, random job token, and cumulative output-token budget in that sidecar. Stream stdout, cap output/time, remove both containers and networks on cancel, and delete the workspace on every exit.
 
-- [ ] **Step 4: Expose independent lifecycle**
+- [x] **Step 4: Expose independent lifecycle**
 
 Allow `backend add/list/start/stop` for `ollama`, `openai`, `codex`, `claude`, and `kimi`. Starting or stopping one backend must update capacity without stopping other providers or the relay daemon.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run: `go test ./cli/... -count=1 -race`. Expected: PASS with no leaked workspace or credential in output/config.
 
-### Task 6: Complete macOS lifecycle and signed release artifacts
+### Task 6: Complete macOS lifecycle and checksummed release artifacts
 
 **Files:**
 - Create: `cli/internal/platform/darwin/lifecycle.go`
@@ -176,19 +176,19 @@ Run: `go test ./cli/... -count=1 -race`. Expected: PASS with no leaked workspace
 - Modify: `cli/cmd/myference/main.go`
 - Modify: `Makefile`
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Require launchd install/start/drain/stop/status parity with Windows, fixed absolute executable/config/log paths, `KeepAlive` restart policy, `ProcessType=Background`, no embedded secrets, and idempotent install/uninstall.
 
-- [ ] **Step 2: Implement macOS lifecycle**
+- [x] **Step 2: Implement macOS lifecycle**
 
 Generate the per-user LaunchAgent atomically, validate it with `plutil`, use `launchctl bootstrap/bootout/kickstart`, and keep credentials in Keychain. A graceful stop drains leases before launchd shutdown.
 
-- [ ] **Step 3: Build reproducible archives**
+- [x] **Step 3: Build reproducible archives**
 
 Cross-build `windows/amd64` and native `darwin/arm64` plus `darwin/amd64`, generate SHA-256 checksums and version metadata from a clean commit, and fail if binaries contain known test tokens/private keys.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `go test ./cli/internal/platform/... -count=1 && ./scripts/build-release.sh`. Expected: PASS and real archives/checksums under `dist/`.
 
@@ -200,7 +200,7 @@ Run: `go test ./cli/internal/platform/... -count=1 && ./scripts/build-release.sh
 - Modify: `README.md`
 - Modify: `Makefile`
 
-- [ ] **Step 1: Implement strict preflight and evidence capture**
+- [x] **Step 1: Implement strict preflight and evidence capture**
 
 Require `MONAD_TESTNET_RPC_URL`, funded customer/provider/settlement wallets, deployed contract, PostgreSQL, hosted HTTPS/WSS broker, physical Windows machine, real installed Ollama model, and explorer API. Validate chain ID 10143 and reject Anvil/localhost/canned output/zero or duplicate transaction hashes.
 
@@ -208,7 +208,7 @@ Require `MONAD_TESTNET_RPC_URL`, funded customer/provider/settlement wallets, de
 
 Deploy, bond, authorize the machine signer, publish the exact discovered offer, deposit customer MON, open a session, create an API key, stream an OpenAI and Anthropic request, settle, index, claim provider/platform earnings, and verify deltas from RPC receipts and contract reads.
 
-- [ ] **Step 3: Write sanitized objective evidence**
+- [x] **Step 3: Write sanitized objective evidence**
 
 Generate `docs/demo.md` containing commit/version, contract and explorer link, transaction hashes, request IDs, model and measured usage, all-inclusive charge, provider/fee amounts, and CLI platform/version. Refuse to write private keys, bearer tokens, prompts, or full model output.
 

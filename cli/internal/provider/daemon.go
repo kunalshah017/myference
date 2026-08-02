@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -132,24 +133,29 @@ type Config struct {
 	Offers            []v1.OfferCapacity
 	HTTPClient        *http.Client
 	HeartbeatInterval time.Duration
+	DrainTimeout      time.Duration
 	SignerKey         *ecdsa.PrivateKey
 	ChainID           uint64
 	Contract          v1.Address
 }
 
 type Daemon struct {
-	config   Config
-	backends map[string]backend.Backend
-	state    *RequestState
-	writeMu  sync.Mutex
-	jobsMu   sync.Mutex
-	jobs     map[string]context.CancelFunc
-	wg       sync.WaitGroup
+	config     Config
+	backends   map[string]backend.Backend
+	backendsMu sync.RWMutex
+	state      *RequestState
+	writeMu    sync.Mutex
+	jobsMu     sync.Mutex
+	jobs       map[string]context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 func NewDaemon(config Config, backends map[string]backend.Backend) *Daemon {
 	if config.HeartbeatInterval <= 0 {
 		config.HeartbeatInterval = 10 * time.Second
+	}
+	if config.DrainTimeout <= 0 {
+		config.DrainTimeout = 30 * time.Second
 	}
 	return &Daemon{config: config, backends: backends, state: NewRequestState(), jobs: make(map[string]context.CancelFunc)}
 }
@@ -173,18 +179,33 @@ func (d *Daemon) Serve(ctx context.Context) error {
 			stopHeartbeat()
 			<-heartbeatDone
 		}
-		d.cancelAll()
-		d.wg.Wait()
+		if ctx.Err() == nil {
+			d.cancelAll()
+			d.wg.Wait()
+		} else {
+			drained := make(chan struct{})
+			go func() { d.wg.Wait(); close(drained) }()
+			timer := time.NewTimer(d.config.DrainTimeout)
+			select {
+			case <-drained:
+				if !timer.Stop() {
+					<-timer.C
+				}
+			case <-timer.C:
+				d.cancelAll()
+				<-drained
+			}
+		}
 		connection.Close(websocket.StatusNormalClosure, "provider stopped")
 	}()
 	if err := d.send(ctx, connection, v1.MessageHello, &v1.Hello{MachineID: d.config.MachineID}); err != nil {
 		return err
 	}
-	capacity := &v1.Capacity{Available: uint32(len(d.config.Offers)), Offers: d.config.Offers}
-	if err := d.send(ctx, connection, v1.MessageCapacity, capacity); err != nil {
+	capacity := d.Capacity()
+	if err := d.send(ctx, connection, v1.MessageCapacity, &capacity); err != nil {
 		return err
 	}
-	go d.heartbeat(heartbeatCtx, connection, capacity, heartbeatDone)
+	go d.heartbeat(heartbeatCtx, connection, heartbeatDone)
 	heartbeatStarted = true
 	for {
 		_, payload, err := connection.Read(ctx)
@@ -245,7 +266,7 @@ func (d *Daemon) signProposal(proposal v1.ReceiptProposal) (v1.ReceiptSignature,
 	return v1.ReceiptSignature{RequestID: proposal.RequestID, Signer: signer, Signature: signature}, nil
 }
 
-func (d *Daemon) heartbeat(ctx context.Context, connection *websocket.Conn, capacity *v1.Capacity, done chan<- struct{}) {
+func (d *Daemon) heartbeat(ctx context.Context, connection *websocket.Conn, done chan<- struct{}) {
 	defer close(done)
 	ticker := time.NewTicker(d.config.HeartbeatInterval)
 	defer ticker.Stop()
@@ -254,7 +275,8 @@ func (d *Daemon) heartbeat(ctx context.Context, connection *websocket.Conn, capa
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := d.send(ctx, connection, v1.MessageCapacity, capacity); err != nil {
+			capacity := d.Capacity()
+			if err := d.send(ctx, connection, v1.MessageCapacity, &capacity); err != nil {
 				connection.Close(websocket.StatusInternalError, "heartbeat failed")
 				return
 			}
@@ -266,18 +288,46 @@ func (d *Daemon) validate() error {
 	if strings.TrimSpace(d.config.RelayURL) == "" || strings.TrimSpace(d.config.Token) == "" || strings.TrimSpace(d.config.MachineID) == "" {
 		return errors.New("relay URL, machine token, and machine ID are required")
 	}
-	if len(d.config.Offers) == 0 {
+	if err := validateBackends(d.config.Offers, d.backends); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateBackends(offers []v1.OfferCapacity, backends map[string]backend.Backend) error {
+	if len(offers) == 0 {
 		return errors.New("at least one enabled backend is required")
 	}
-	for _, offer := range d.config.Offers {
-		if err := offer.Validate(); err != nil || d.backends[offer.OfferID] == nil {
+	for _, offer := range offers {
+		if err := offer.Validate(); err != nil || backends[offer.OfferID] == nil {
 			return errors.New("every offer requires a valid backend")
 		}
 	}
 	return nil
 }
 
+func (d *Daemon) UpdateBackends(offers []v1.OfferCapacity, backends map[string]backend.Backend) error {
+	if len(offers) > 0 {
+		if err := validateBackends(offers, backends); err != nil {
+			return err
+		}
+	}
+	d.backendsMu.Lock()
+	d.config.Offers = append([]v1.OfferCapacity(nil), offers...)
+	d.backends = backends
+	d.backendsMu.Unlock()
+	return nil
+}
+
+func (d *Daemon) Capacity() v1.Capacity {
+	d.backendsMu.RLock()
+	defer d.backendsMu.RUnlock()
+	offers := append([]v1.OfferCapacity(nil), d.config.Offers...)
+	return v1.Capacity{Available: uint32(len(offers)), Offers: offers}
+}
+
 func (d *Daemon) startJob(parent context.Context, connection *websocket.Conn, offer v1.JobOffer) error {
+	d.backendsMu.RLock()
 	selected := d.backends[offer.OfferID]
 	configured := false
 	for _, candidate := range d.config.Offers {
@@ -286,13 +336,14 @@ func (d *Daemon) startJob(parent context.Context, connection *websocket.Conn, of
 			break
 		}
 	}
+	d.backendsMu.RUnlock()
 	if selected == nil || !configured || time.Now().After(offer.LeaseExpiresAt) {
 		return v1.ErrInvalidMessage
 	}
 	if err := d.state.Accept(offer.RequestID); err != nil {
 		return err
 	}
-	jobCtx, cancel := context.WithCancel(parent)
+	jobCtx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	d.jobsMu.Lock()
 	d.jobs[offer.RequestID] = cancel
 	d.jobsMu.Unlock()
@@ -306,14 +357,26 @@ func (d *Daemon) startJob(parent context.Context, connection *websocket.Conn, of
 		defer d.wg.Done()
 		defer d.removeJob(offer.RequestID)
 		sequence := uint64(0)
-		usage, err := selected.Generate(jobCtx, backend.Request{Model: offer.Model, Prompt: offer.Prompt}, func(content string) error {
+		workspace := make([]backend.WorkspaceFile, 0, len(offer.Workspace))
+		for _, file := range offer.Workspace {
+			content, decodeErr := base64.StdEncoding.DecodeString(file.ContentBase64)
+			if decodeErr != nil {
+				return
+			}
+			workspace = append(workspace, backend.WorkspaceFile{Path: file.Path, Content: content})
+		}
+		usage, err := selected.Generate(jobCtx, backend.Request{Model: offer.Model, Prompt: offer.Prompt, Workspace: workspace, MaximumOutputTokens: offer.MaximumOutputTokens}, func(content string) error {
 			sequence++
 			return d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Data: content})
 		})
-		if err == nil {
-			sequence++
-			_ = d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ComputeMilliseconds: usage.ComputeMilliseconds})
+		sequence++
+		if err != nil {
+			failureContext, stopFailure := context.WithTimeout(context.WithoutCancel(jobCtx), 5*time.Second)
+			defer stopFailure()
+			_ = d.sendChunk(failureContext, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, ErrorCode: "backend_failed"})
+			return
 		}
+		_ = d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ComputeMilliseconds: usage.ComputeMilliseconds})
 	}()
 	return nil
 }

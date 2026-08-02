@@ -19,9 +19,10 @@ func TestMessageRoundTripAndValidation(t *testing.T) {
 	}{
 		{"hello", MessageHello, &Hello{MachineID: "machine-1"}, func() Validatable { return &Hello{} }},
 		{"capacity", MessageCapacity, &Capacity{Available: 1, Offers: []OfferCapacity{{OfferID: "offer-1", Model: "qwen", PriceVersion: 1}}}, func() Validatable { return &Capacity{} }},
-		{"job offer", MessageJobOffer, &JobOffer{RequestID: "request-1", Model: "qwen", OfferID: "offer-1", PriceVersion: 1, MaximumSpend: 10, LeaseExpiresAt: lease, Prompt: "hello"}, func() Validatable { return &JobOffer{} }},
+		{"job offer", MessageJobOffer, &JobOffer{RequestID: "request-1", Model: "qwen", OfferID: "offer-1", PriceVersion: 1, MaximumSpend: 10, MaximumOutputTokens: 100, LeaseExpiresAt: lease, Prompt: "hello", Workspace: []WorkspaceFile{{Path: "src/main.go", ContentBase64: "cGFja2FnZSBtYWlu"}}}, func() Validatable { return &JobOffer{} }},
 		{"job accept", MessageJobAccept, &JobAccept{RequestID: "request-1"}, func() Validatable { return &JobAccept{} }},
 		{"output chunk", MessageOutputChunk, &OutputChunk{RequestID: "request-1", Sequence: 1, Data: "hello"}, func() Validatable { return &OutputChunk{} }},
+		{"output failure", MessageOutputChunk, &OutputChunk{RequestID: "request-1", Sequence: 1, Done: true, ErrorCode: "backend_failed"}, func() Validatable { return &OutputChunk{} }},
 		{"cancel", MessageCancel, &Cancel{RequestID: "request-1", Reason: "customer_cancelled"}, func() Validatable { return &Cancel{} }},
 		{"receipt proposal", MessageReceiptProposal, &ReceiptProposal{RequestID: "request-1", ChainID: 10143, Contract: addressWithLastByte(9), Receipt: validReceipt()}, func() Validatable { return &ReceiptProposal{} }},
 		{"receipt signature", MessageReceiptSignature, &ReceiptSignature{RequestID: "request-1", Signer: addressWithLastByte(1), Signature: bytes.Repeat([]byte{1}, 65)}, func() Validatable { return &ReceiptSignature{} }},
@@ -48,6 +49,32 @@ func TestMessageRoundTripAndValidation(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestWorkspaceRejectsTraversalAbsolutePathsAndOversize(t *testing.T) {
+	base := JobOffer{RequestID: "request", Model: "agent", OfferID: "offer", PriceVersion: 1, MaximumSpend: 1, MaximumOutputTokens: 100, LeaseExpiresAt: time.Now().Add(time.Minute), Prompt: "work"}
+	for _, filePath := range []string{"../secret", "/etc/passwd", `C:\\Users\\secret`, `src\\main.go`} {
+		candidate := base
+		candidate.Workspace = []WorkspaceFile{{Path: filePath, ContentBase64: "eA=="}}
+		if err := candidate.Validate(); !errors.Is(err, ErrInvalidMessage) {
+			t.Fatalf("path=%q err=%v", filePath, err)
+		}
+	}
+	candidate := base
+	candidate.Workspace = []WorkspaceFile{{Path: "large.bin", ContentBase64: strings.Repeat("A", 14<<20)}}
+	if err := candidate.Validate(); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("oversize err=%v", err)
+	}
+	for _, files := range [][]WorkspaceFile{
+		{{Path: "same", ContentBase64: "eA=="}, {Path: "same", ContentBase64: "eQ=="}},
+		{{Path: "src", ContentBase64: "eA=="}, {Path: "src/main.go", ContentBase64: "eQ=="}},
+	} {
+		candidate := base
+		candidate.Workspace = files
+		if err := candidate.Validate(); !errors.Is(err, ErrInvalidMessage) {
+			t.Fatalf("conflicting workspace paths accepted: %+v", files)
+		}
 	}
 }
 

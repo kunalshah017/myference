@@ -12,7 +12,7 @@ export function ApiKeys({ api = new AuthAPI() }: { api?: AuthAPI }) {
     event.preventDefault(); setError('')
     if (!/^\d+$/.test(maximum) || maximum === '0') { setError('Maximum spend must be a positive integer in wei.'); return }
     try {
-      const key = await api.createAPIKey({ models: [model.trim()], endpoints: ['/v1/chat/completions'], max_spend_wei: maximum })
+      const key = await api.createAPIKey({ models: [model.trim()], endpoints: ['/v1/chat/completions', '/v1/messages'], max_spend_wei: maximum })
       setRevealed(key.token ?? '')
       setKeys((current) => [{ ...key, token: undefined }, ...current])
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'API key creation failed.') }

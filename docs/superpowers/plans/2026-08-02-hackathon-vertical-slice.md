@@ -350,7 +350,7 @@ Recorded RED on the available macOS development host before implementation. The 
 
 Use Ollama's loopback HTTP streaming API. Port the existing process, firewall, power, keep-awake, startup, and restoration behavior behind `platform/windows` without changing reversible-state guarantees. The CLI commands must add/list/start/stop the Ollama backend, publish capacity, serve, show status, and stop cleanly.
 
-- [ ] **Step 4: Verify real backend and Windows build**
+- [x] **Step 4: Verify real backend and Windows build**
 
 Run on Windows: `go test -race ./cli/... -tags=integration -v && go build -o dist/myference-windows-amd64.exe ./cli/cmd/myference`
 
@@ -569,21 +569,21 @@ Commit: `git add web && git commit -m "feat: show live inference marketplace"`
 - Create: `web/src/features/billing/billing.test.tsx`
 - Create: `web/src/features/provider/provider.test.tsx`
 
-- [ ] **Step 1: Write failing integer-amount and transaction tests**
+- [x] **Step 1: Write failing integer-amount and transaction tests**
 
 Test decimal MON-to-wei parsing without floating point, deposit simulation, wrong network, rejected wallet, contract revert, pending/finalized deposits, bounded sessions, delayed close, provider bond, immutable offer version, claimable earnings, and explorer links.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `npm --prefix web test -- --run src/features/billing src/features/provider`
 
 Expected: FAIL because billing and provider features do not exist.
 
-- [ ] **Step 3: Implement simulated contract writes and confirmed reads**
+- [x] **Step 3: Implement simulated contract writes and confirmed reads**
 
 Use Viem to simulate every write, request the wallet transaction, display its hash as pending, and wait for configured finality plus indexer observation before updating available balances or routability. Parse and format integer wei only.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `npm --prefix web test -- --run && npm --prefix web run lint && npm --prefix web run build`
 
@@ -600,7 +600,7 @@ Commit: `git add web && git commit -m "feat: manage Myference billing and provid
 - Modify: `Makefile`
 - Modify: `web/`
 
-- [ ] **Step 1: Write the executable acceptance script**
+- [x] **Step 1: Write the executable acceptance script**
 
 The script must reject missing RPC URL, deployed contract, funded customer/provider wallets, PostgreSQL URL, broker URL, Windows machine ID, and real Ollama model. It must never substitute local Anvil, a canned response, or fake transaction hashes.
 

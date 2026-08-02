@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -77,7 +78,7 @@ func run() error {
 			return repository.RoutingCandidates(ctx, model)
 		},
 		Reserve: func(ctx context.Context, reservation api.Reservation) error {
-			return repository.ReserveInference(ctx, store.InferenceReservation{RequestID: reservation.RequestID, SessionID: reservation.SessionID, AccountID: reservation.AccountID, MachineID: reservation.MachineID, OfferID: reservation.OfferID, PriceVersion: reservation.PriceVersion, MaximumSpend: reservation.MaximumSpend})
+			return repository.ReserveInference(ctx, store.InferenceReservation{RequestID: reservation.RequestID, SessionID: reservation.SessionID, AccountID: reservation.AccountID, MachineID: reservation.MachineID, OfferID: reservation.OfferID, PriceVersion: reservation.PriceVersion, MaximumSpend: reservation.MaximumSpend, MaximumInputTokens: reservation.MaximumInputTokens, MaximumOutputTokens: reservation.MaximumOutputTokens, MaximumComputeMilliseconds: reservation.MaximumComputeMilliseconds})
 		},
 		Transition: repository.TransitionRequest,
 		Abort:      repository.AbortInference,
@@ -85,6 +86,7 @@ func run() error {
 			return chainState.coordinator.Complete(ctx, store.ReceiptProposal{RequestID: proposal.RequestID, SessionID: proposal.SessionID, MachineID: proposal.MachineID, OfferID: proposal.OfferID, Model: proposal.Model, PriceVersion: proposal.PriceVersion, InputTokens: proposal.InputTokens, OutputTokens: proposal.OutputTokens, ComputeMilliseconds: proposal.ComputeMilliseconds, InputHash: proposal.InputHash, OutputHash: proposal.OutputHash, CompletedAt: proposal.CompletedAt})
 		},
 	})
+	anthropic := api.NewAnthropic(openAI)
 	webOrigin := envOr("MYFERENCE_WEB_ORIGIN", "http://127.0.0.1:5173")
 	authHTTP := auth.NewHandler(authService, auth.HTTPConfig{
 		Domain:          envOr("MYFERENCE_AUTH_DOMAIN", "localhost"),
@@ -110,7 +112,7 @@ func run() error {
 		return err
 	}
 	defer events.Close()
-	handler := allowWebOrigin(newRootHandler(hub, openAI, authHTTP, marketplace, operations, events), webOrigin)
+	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, events), webOrigin)
 	server := &http.Server{Addr: envOr("MYFERENCE_LISTEN_ADDR", "127.0.0.1:8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
@@ -140,10 +142,12 @@ func run() error {
 	}
 }
 
-func newRootHandler(relayHandler, openAIHandler, authHandler, marketplaceHandler, operationsHandler, eventsHandler http.Handler) http.Handler {
+func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, eventsHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	mux.Handle("/relay", relayHandler)
 	mux.Handle("/v1/chat/completions", openAIHandler)
+	mux.Handle("/v1/messages", anthropicHandler)
 	mux.Handle("/auth/", authHandler)
 	mux.Handle("/api/account/", operationsHandler)
 	mux.Handle("/api/", marketplaceHandler)
