@@ -302,21 +302,21 @@ Commit: `git add server/internal/auth cli/internal/credential cli/internal/confi
 - Create: `cli/internal/provider/daemon.go`
 - Create: `cli/internal/provider/daemon_test.go`
 
-- [ ] **Step 1: Write failing relay tests with real loopback sockets**
+- [x] **Step 1: Write failing relay tests with real loopback sockets**
 
 Start an actual TLS test server and WebSocket client. Test authentication, heartbeat expiry, capacity updates, one lease acceptance, ordered chunks, duplicate chunk rejection, cancellation, bounded queue backpressure, reconnect cursor, and refusal to retry after the first output chunk.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./server/internal/relay ./cli/internal/provider -v`
 
 Expected: FAIL because the relay hub and daemon do not exist.
 
-- [ ] **Step 3: Implement broker and daemon state machines**
+- [x] **Step 3: Implement broker and daemon state machines**
 
 Use bounded channels, explicit deadlines, one writer goroutine per WebSocket, ping/pong heartbeats, context cancellation, monotonic sequence checks, and idempotent request maps. Never log prompt or output bodies.
 
-- [ ] **Step 4: Verify race safety and commit**
+- [x] **Step 4: Verify race safety and commit**
 
 Run: `go test -race ./server/internal/relay ./cli/internal/provider -v`
 
