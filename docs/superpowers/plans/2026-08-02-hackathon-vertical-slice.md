@@ -54,14 +54,18 @@ docs/demo.md                                 Reproducible demo and explorer evid
 - Create: `docker-compose.yml`
 - Create: `protocol/v1/price_test.go`
 
-- [ ] **Step 1: Write the failing integer-price test**
+- [x] **Step 1: Write the failing integer-price test**
 
 ```go
 func TestChargeRoundsUpAndNeverExceedsMaximum(t *testing.T) {
 	price := Price{InputPerMillion: 100, OutputPerMillion: 200, ComputePerSecond: 300}
 	charge, err := price.Charge(1, 2, 1, 1_000)
-	if err != nil || charge != 401 {
+	if err != nil || charge != 3 {
 		t.Fatalf("charge=%d err=%v", charge, err)
+	}
+	charge, err = price.Charge(1_000_000, 1_000_000, 1_000, 600)
+	if err != nil || charge != 600 {
+		t.Fatalf("full-unit charge=%d err=%v", charge, err)
 	}
 	if _, err := price.Charge(1_000_000, 1_000_000, 1_000, 1); !errors.Is(err, ErrMaximumExceeded) {
 		t.Fatalf("expected ErrMaximumExceeded, got %v", err)
@@ -69,21 +73,21 @@ func TestChargeRoundsUpAndNeverExceedsMaximum(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test and verify the missing type failure**
+- [x] **Step 2: Run the test and verify the missing type failure**
 
 Run: `go test ./protocol/v1 -run TestChargeRoundsUpAndNeverExceedsMaximum -v`
 
 Expected: FAIL because `Price` and `ErrMaximumExceeded` are undefined.
 
-- [ ] **Step 3: Implement checked integer billing in `protocol/v1/price.go`**
+- [x] **Step 3: Implement checked integer billing in `protocol/v1/price.go`**
 
 Use `math/bits.Mul64` to reject overflow. Compute each component with ceiling division: `(units*rate + denominator - 1) / denominator`, using denominators `1_000_000` for tokens and `1_000` for compute milliseconds. Sum with checked addition and reject a result above `maxWei`.
 
-- [ ] **Step 4: Add repository commands**
+- [x] **Step 4: Add repository commands**
 
 `Makefile` targets must run `go test ./...`, `go vet ./...`, `go build ./...`, `forge test --root contracts`, and a combined `make verify`. `docker-compose.yml` must run PostgreSQL 17 with a health check and a named volume; credentials come from documented local-only defaults and environment overrides.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `go test ./protocol/v1 -v && go vet ./... && go build ./...`
 
