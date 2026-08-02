@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.env.*
+*.log
+
+# Local provider state and credentials
+**/.myference-state/
+cli/platform/windows/legacy/myference.config.json
+
+# Build output
+bin/
+dist/
+coverage/
+
+# Local worktrees
+.worktrees/
