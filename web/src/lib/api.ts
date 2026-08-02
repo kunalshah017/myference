@@ -13,6 +13,7 @@ export type OperationBackend = { id: string; kind: string; model: string; enable
 export type OperationMachine = { id: string; name: string; revoked: boolean; backends: OperationBackend[] }
 export type OperationOffer = { offer_id: `0x${string}`; version: number; model_hash: `0x${string}`; capability_hash: `0x${string}`; input_per_million_wei: string; output_per_million_wei: string; compute_per_second_wei: string }
 export type AccountOperations = { chain_id: number; contract_address: `0x${string}`; explorer_url: string; confirmations: number; wallet_address: `0x${string}`; customer_balance_wei: string; provider_bond_wei: string; claimable_wei: string; provider_earnings_wei: string; bond_exit_available_at: number; sessions: OperationSession[]; machines: OperationMachine[]; offers: OperationOffer[] }
+export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 export class AuthAPI {
   private readonly baseURL: string
@@ -79,6 +80,27 @@ export class OperationsAPI {
   private readonly baseURL: string
   constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
   operations() { return requestJSON<AccountOperations>(`${this.baseURL}/api/account/operations`) }
+}
+
+export class InferenceAPI {
+  private readonly baseURL: string
+  constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
+  async chat(model: string, apiKey: string, messages: ChatMessage[]) {
+    const response = await fetch(`${this.baseURL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model, stream: false, messages }),
+    })
+    if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
+    const payload = await response.json() as { choices?: { message?: { content?: string } }[] }
+    const content = payload.choices?.[0]?.message?.content
+    if (!content) throw new Error('The provider returned no assistant message.')
+    return content
+  }
+}
+
+export function publicAPIBaseURL() {
+  return import.meta.env.VITE_MYFERENCE_API_URL || window.location.origin
 }
 
 async function requestJSON<T>(url: string): Promise<T> {
