@@ -111,8 +111,15 @@ func (h *httpHandler) walletVerify(w http.ResponseWriter, r *http.Request) {
 		h.write(w, nil, err, 0)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: browserSessionCookie, Value: session.Token, Path: "/", HttpOnly: true, Secure: h.config.SecureCookies, SameSite: http.SameSiteLaxMode, Expires: session.ExpiresAt})
+	http.SetCookie(w, &http.Cookie{Name: browserSessionCookie, Value: session.Token, Path: "/", HttpOnly: true, Secure: h.config.SecureCookies, SameSite: sessionSameSite(h.config.SecureCookies), Expires: session.ExpiresAt})
 	writeJSON(w, SessionView{AccountID: session.AccountID, WalletAddress: session.WalletAddress, ExpiresAt: session.ExpiresAt}, http.StatusOK)
+}
+
+func sessionSameSite(secure bool) http.SameSite {
+	if secure {
+		return http.SameSiteNoneMode
+	}
+	return http.SameSiteLaxMode
 }
 
 func (h *httpHandler) session(w http.ResponseWriter, r *http.Request) {
