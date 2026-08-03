@@ -52,5 +52,5 @@
 - [x] Run lint.
 - [x] Run the production build.
 - [x] Review the diff for fake data, unsupported claims, secrets, and accidental changes.
-- [ ] Commit and push `main` so Render deploys the static site.
-- [ ] Validate the deployed `/docs` route and key navigation links.
+- [x] Commit and push `main` so Render deploys the static site.
+- [x] Validate the deployed `/docs` route and key navigation links.
