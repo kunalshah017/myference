@@ -94,11 +94,7 @@ func (runner *NativeRunner) Snapshot(ctx context.Context, config Config, options
 	journal.StoppedServices = append([]string(nil), runningServices...)
 	journal.Ollama.Environment = originalOllamaEnvironment()
 	if options.Headless {
-		lidOutput, lidErr := runWindowsCommand(ctx, "powercfg.exe", "/query", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION")
-		if lidErr != nil {
-			return HostSnapshot{}, fmt.Errorf("read lid actions: %w", lidErr)
-		}
-		journal.ACLidAction, journal.DCLidAction, err = parseLidActions(string(lidOutput))
+		journal.ACLidAction, journal.DCLidAction, err = readLidActions(ctx, runWindowsCommand)
 		if err != nil {
 			return HostSnapshot{}, err
 		}
@@ -115,6 +111,14 @@ func (runner *NativeRunner) Snapshot(ctx context.Context, config Config, options
 	snapshot := HostSnapshot{OnACPower: onAC, Processes: processes, RunningServices: runningServices, Journal: journal}
 	runner.snapshot = snapshot
 	return snapshot, nil
+}
+
+func readLidActions(ctx context.Context, run func(context.Context, string, ...string) ([]byte, error)) (int, int, error) {
+	output, err := run(ctx, "powercfg.exe", "/qh", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION")
+	if err != nil {
+		return 0, 0, fmt.Errorf("read lid actions: %w", err)
+	}
+	return parseLidActions(string(output))
 }
 
 func (runner *NativeRunner) Apply(ctx context.Context, operation Operation) error {

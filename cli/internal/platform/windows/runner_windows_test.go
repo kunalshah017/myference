@@ -3,6 +3,8 @@
 package windows
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -40,5 +42,19 @@ func TestParseLidActionsAndShellPolicy(t *testing.T) {
 	had, value, err = parseShellPolicy("")
 	if err != nil || had || value != "" {
 		t.Fatalf("absent shell=%v %q err=%v", had, value, err)
+	}
+}
+
+func TestReadLidActionsIncludesHiddenPowerSettings(t *testing.T) {
+	run := func(_ context.Context, program string, args ...string) ([]byte, error) {
+		if program != "powercfg.exe" || !reflect.DeepEqual(args, []string{"/qh", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION"}) {
+			return nil, fmt.Errorf("unexpected command: %s %v", program, args)
+		}
+		return []byte("Current AC Power Setting Index: 0x00000001\r\nCurrent DC Power Setting Index: 0x00000001"), nil
+	}
+
+	ac, dc, err := readLidActions(context.Background(), run)
+	if err != nil || ac != 1 || dc != 1 {
+		t.Fatalf("readLidActions() = %d/%d, %v", ac, dc, err)
 	}
 }
