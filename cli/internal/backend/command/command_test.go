@@ -40,6 +40,12 @@ func TestContainerArgumentsIsolateHostAndNeverExposeLongLivedCredential(t *testi
 	}
 }
 
+func TestProxyBinaryNameTargetsLinuxDockerContainerOnEveryHost(t *testing.T) {
+	if got := proxyBinaryName(); got != "myference-agent-proxy" {
+		t.Fatalf("proxyBinaryName()=%q, want Linux container executable", got)
+	}
+}
+
 func TestCredentialProxyInjectsSecretWithoutReturningItToAgent(t *testing.T) {
 	seen := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

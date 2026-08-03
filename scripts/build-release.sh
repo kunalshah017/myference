@@ -25,7 +25,7 @@ mkdir -p "$stage/windows-amd64" "$stage/macos-amd64" "$stage/macos-arm64" "$stag
 build_cli windows amd64 "$stage/windows-amd64/myference.exe"
 build_cli darwin amd64 "$stage/macos-amd64/myference"
 build_cli darwin arm64 "$stage/macos-arm64/myference"
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/windows-amd64/myference-agent-proxy.exe" "$root/cli/cmd/myference-agent-proxy"
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/windows-amd64/myference-agent-proxy" "$root/cli/cmd/myference-agent-proxy"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/macos-amd64/myference-agent-proxy" "$root/cli/cmd/myference-agent-proxy"
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/macos-arm64/myference-agent-proxy" "$root/cli/cmd/myference-agent-proxy"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/server-linux-amd64/myference-server" "$root/server/cmd/myference-server"
