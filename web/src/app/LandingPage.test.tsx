@@ -7,6 +7,7 @@ it('explains the marketplace and links to the operational app', () => {
   expect(screen.getByRole('heading', { name: /unused compute,useful inference/i })).toBeVisible()
   expect(screen.getByRole('link', { name: /launch app/i })).toHaveAttribute('href', '/app')
   expect(screen.getByRole('link', { name: /docs/i })).toHaveAttribute('href', '/docs')
+  expect(screen.getByRole('link', { name: /see full documentation/i })).toHaveAttribute('href', '/docs')
   expect(screen.getByRole('img', { name: /openai/i })).toHaveAttribute('src', expect.stringContaining('img.logo.dev/openai.com'))
   expect(screen.getByRole('img', { name: /anthropic/i })).toBeVisible()
 })
