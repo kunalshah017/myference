@@ -25,7 +25,7 @@ func TestInferenceReservationRoutingAndReceiptAreDurableAndAtomic(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	for _, name := range []string{"000001_control_plane.sql", "000002_inference.sql", "000014_reservation_finality.sql"} {
+	for _, name := range []string{"000001_control_plane.sql", "000002_inference.sql", "000014_reservation_finality.sql", "000015_runtime_model_evidence.sql"} {
 		if err := s.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", name)); err != nil {
 			t.Fatal(err)
 		}
@@ -376,7 +376,7 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO inference_reservations(request_id,session_id,amount) VALUES($1,$2,60)`, requestID, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", capacity, 10143, contract); err != nil {
+	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", drifted, 10143, contract); err != nil {
 		t.Fatal(err)
 	}
 	var reconciledCapacity uint32
@@ -386,7 +386,7 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	if err := s.CompleteInference(ctx, ReceiptProposal{RequestID: requestID, SessionID: sessionID, MachineID: "reconcile-machine", OfferID: "local-qwen", Model: "qwen", PriceVersion: 1, InputTokens: 1, OutputTokens: 1, ComputeMilliseconds: 1, InputHash: [32]byte{1}, OutputHash: [32]byte{2}, CompletedAt: time.Unix(100, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", capacity, 10143, contract); err != nil {
+	if err := s.ReconcileProviderCapacity(ctx, "reconcile-machine", drifted, 10143, contract); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.QueryRowContext(ctx, `SELECT capacity FROM provider_routing_state WHERE machine_id='reconcile-machine' AND offer_id='local-qwen'`).Scan(&reconciledCapacity); err != nil || reconciledCapacity != 1 {
@@ -454,7 +454,7 @@ func TestWideProviderRatesReconcileIntoMarketplaceAndReservation(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_offers(chain_id,contract_address,provider,offer_id,version,model_hash,capability_hash,input_per_million,output_per_million,compute_per_second) VALUES (10143,$1,$2,$3,1,$4,$5,$6,$7,$8)`, contract, provider, offerHash, modelHash, capabilityHash, inputRate, outputRate, computeRate); err != nil {
 		t.Fatal(err)
 	}
-	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "openai-gpt-5.6-sol", Model: "gpt-5.6-sol", PriceVersion: 1, BackendKind: "openai", OfferHash: offerHash, ModelHash: modelHash, CapabilityHash: capabilityHash, Capabilities: []string{"stream", "text"}, EvidenceKind: "openai_model", EvidenceDigest: "gpt-5.6-sol", MeteringMode: "tokens_and_compute"}}}
+	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "openai-gpt-5.6-sol", Model: "gpt-5.6-sol", PriceVersion: 1, BackendKind: "openai", OfferHash: offerHash, ModelHash: modelHash, CapabilityHash: capabilityHash, Capabilities: []string{"stream", "text"}, EvidenceKind: "upstream_model", EvidenceDigest: "gpt-5.6-sol", MeteringMode: "tokens_and_compute"}}}
 	if err := s.ReconcileProviderCapacity(ctx, "wide-machine", capacity, 10143, contract); err != nil {
 		t.Fatal(err)
 	}
