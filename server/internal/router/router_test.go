@@ -62,9 +62,38 @@ func TestRetryStopsAfterFirstOutput(t *testing.T) {
 }
 
 func TestWorstCaseCostUsesRequestedTokensAndComputeDeadline(t *testing.T) {
-	cost, err := WorstCaseCost(Candidate{InputPerMillion: 1_000_000, OutputPerMillion: 2_000_000, ComputePerSecond: 3}, 4, 5, 30_000)
+	cost, err := WorstCaseCost(Candidate{InputPerMillion: "1000000", OutputPerMillion: "2000000", ComputePerSecond: "3"}, 4, 5, 30_000)
 	if err != nil || cost != 104 {
 		t.Fatalf("cost=%d err=%v", cost, err)
+	}
+}
+
+func TestWorstCaseCostAcceptsUint256RatesWhenFinalChargeFits(t *testing.T) {
+	candidate := Candidate{InputPerMillion: "292000000000000000000", OutputPerMillion: "0", ComputePerSecond: "0"}
+	cost, err := WorstCaseCost(candidate, 1, 1, 1)
+	if err != nil || cost != 292000000000000 {
+		t.Fatalf("cost=%d err=%v", cost, err)
+	}
+}
+
+func TestRateValidationRejectsNonCanonicalAndAboveUint256(t *testing.T) {
+	invalid := []string{
+		"",
+		"01",
+		"-1",
+		"+1",
+		"not-a-number",
+		"115792089237316195423570985008687907853269984665640564039457584007913129639936",
+	}
+	for _, rate := range invalid {
+		if ValidRate(rate) {
+			t.Fatalf("accepted invalid rate %q", rate)
+		}
+	}
+	for _, rate := range []string{"0", "292000000000000000000", "115792089237316195423570985008687907853269984665640564039457584007913129639935"} {
+		if !ValidRate(rate) {
+			t.Fatalf("rejected valid rate %q", rate)
+		}
 	}
 }
 
@@ -76,7 +105,7 @@ func TestSelectRejectsZeroCostRoutes(t *testing.T) {
 }
 
 func TestWorstCaseCostRejectsUint64Overflow(t *testing.T) {
-	if _, err := WorstCaseCost(Candidate{InputPerMillion: ^uint64(0)}, ^uint64(0), 1, 1); !errors.Is(err, ErrNoEligibleProvider) {
+	if _, err := WorstCaseCost(Candidate{InputPerMillion: "18446744073709551615", OutputPerMillion: "0", ComputePerSecond: "0"}, ^uint64(0), 1, 1); !errors.Is(err, ErrNoEligibleProvider) {
 		t.Fatalf("expected overflow rejection, got %v", err)
 	}
 }

@@ -30,17 +30,23 @@ type Candidate struct {
 	LatencyMilliseconds uint64
 	SuccessBasisPoints  uint16
 	Reputation          uint64
-	InputPerMillion     uint64
-	OutputPerMillion    uint64
-	ComputePerSecond    uint64
+	InputPerMillion     string
+	OutputPerMillion    string
+	ComputePerSecond    string
 }
 
 func WorstCaseCost(candidate Candidate, maximumInputTokens, maximumOutputTokens, maximumComputeMilliseconds uint64) (uint64, error) {
 	total := new(big.Int)
 	for _, item := range []struct {
-		units, rate, divisor uint64
+		units   uint64
+		rate    string
+		divisor uint64
 	}{{maximumInputTokens, candidate.InputPerMillion, 1_000_000}, {maximumOutputTokens, candidate.OutputPerMillion, 1_000_000}, {maximumComputeMilliseconds, candidate.ComputePerSecond, 1_000}} {
-		part := new(big.Int).Mul(new(big.Int).SetUint64(item.units), new(big.Int).SetUint64(item.rate))
+		rate, ok := parseRate(item.rate)
+		if !ok {
+			return 0, ErrNoEligibleProvider
+		}
+		part := new(big.Int).Mul(new(big.Int).SetUint64(item.units), rate)
 		part.Add(part, new(big.Int).SetUint64(item.divisor-1)).Div(part, new(big.Int).SetUint64(item.divisor))
 		total.Add(total, part)
 	}
@@ -48,6 +54,52 @@ func WorstCaseCost(candidate Candidate, maximumInputTokens, maximumOutputTokens,
 		return 0, ErrNoEligibleProvider
 	}
 	return total.Uint64(), nil
+}
+
+func ValidRate(value string) bool {
+	_, ok := parseRate(value)
+	return ok
+}
+
+func HasPricing(candidate Candidate) bool {
+	for _, value := range []string{candidate.InputPerMillion, candidate.OutputPerMillion, candidate.ComputePerSecond} {
+		rate, ok := parseRate(value)
+		if !ok {
+			return false
+		}
+		if rate.Sign() != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func SumRates(input, output, compute string) (string, error) {
+	total := new(big.Int)
+	for _, value := range []string{input, output, compute} {
+		rate, ok := parseRate(value)
+		if !ok {
+			return "", ErrNoEligibleProvider
+		}
+		total.Add(total, rate)
+	}
+	return total.String(), nil
+}
+
+func parseRate(value string) (*big.Int, bool) {
+	if value == "" || len(value) > 1 && value[0] == '0' {
+		return nil, false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return nil, false
+		}
+	}
+	rate, ok := new(big.Int).SetString(value, 10)
+	if !ok || rate.BitLen() > 256 {
+		return nil, false
+	}
+	return rate, true
 }
 
 func Select(request Request, candidates []Candidate) (Candidate, error) {
