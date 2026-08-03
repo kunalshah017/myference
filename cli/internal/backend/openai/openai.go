@@ -79,7 +79,7 @@ func (c *Client) Generate(ctx context.Context, input backend.Request, emit func(
 	if maximumOutputTokens == 0 {
 		maximumOutputTokens = 4096
 	}
-	body, _ := json.Marshal(map[string]any{"model": input.Model, "stream": true, "messages": []map[string]string{{"role": "user", "content": input.Prompt}}, "stream_options": map[string]bool{"include_usage": true}, "max_tokens": maximumOutputTokens})
+	body, _ := json.Marshal(map[string]any{"model": input.Model, "stream": true, "messages": []map[string]string{{"role": "user", "content": input.Prompt}}, "stream_options": map[string]bool{"include_usage": true}, "max_completion_tokens": maximumOutputTokens})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return backend.Usage{}, err

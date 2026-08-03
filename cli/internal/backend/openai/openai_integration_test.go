@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,36 @@ import (
 
 	"github.com/kunalshah017/myference/cli/internal/backend"
 )
+
+func TestClientUsesCompletionTokenLimitField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if _, present := payload["max_tokens"]; present {
+			http.Error(w, "legacy max_tokens field is not supported", http.StatusBadRequest)
+			return
+		}
+		if got := payload["max_completion_tokens"]; got != float64(17) {
+			http.Error(w, fmt.Sprintf("max_completion_tokens=%v", got), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "provider-secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Generate(t.Context(), backend.Request{Model: "remote-model", Prompt: "hello", MaximumOutputTokens: 17}, func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestClientUsesLocalSecretAndStreamsRealCompatibleEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
