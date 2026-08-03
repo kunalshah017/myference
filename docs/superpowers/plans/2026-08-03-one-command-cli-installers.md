@@ -42,4 +42,4 @@
 - [x] Retain manual release downloads and checksum instructions as the fallback path.
 - [x] Explain architecture detection, installation directories, PATH behavior, and the absence of code signing/notarization.
 - [x] Run web tests, lint, build, installer tests, and `git diff --check`.
-- [ ] Commit, push `main`, monitor GitHub Actions and Render, then verify both public installer URLs.
+- [x] Commit, push `main`, monitor GitHub Actions and Render, then verify both public installer URLs.
