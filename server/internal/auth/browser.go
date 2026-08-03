@@ -140,6 +140,21 @@ func (s *Service) AuthenticateBrowserSession(ctx context.Context, token string) 
 	return session, nil
 }
 
+func (s *Service) RevokeBrowserSession(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE browser_sessions SET revoked_at=$2 WHERE id=$1 AND revoked_at IS NULL`, id, s.now())
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return ErrInvalidCredential
+	}
+	return nil
+}
+
 func (s *Service) PendingDevice(ctx context.Context, userCode string) (PendingDevice, error) {
 	var pending PendingDevice
 	var approved, exchanged sql.NullTime

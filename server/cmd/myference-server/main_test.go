@@ -52,3 +52,28 @@ func TestListenAddressUsesRenderPortWhenConfigured(t *testing.T) {
 		t.Fatalf("explicit listen address = %q", got)
 	}
 }
+
+func TestWebOriginHandlesInferencePreflight(t *testing.T) {
+	called := false
+	handler := allowWebOrigin(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "https://app.myference.test")
+	request := httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil)
+	request.Header.Set("Origin", "https://app.myference.test")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	request.Header.Set("Access-Control-Request-Headers", "authorization,content-type,x-myference-max-spend")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if called {
+		t.Fatal("preflight reached the inference handler")
+	}
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("preflight status=%d", response.Code)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodPost) {
+		t.Fatalf("allowed methods=%q", got)
+	}
+	for _, header := range []string{"Authorization", "Content-Type", "X-Myference-Max-Spend"} {
+		if got := response.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), strings.ToLower(header)) {
+			t.Fatalf("allowed headers=%q missing %q", got, header)
+		}
+	}
+}

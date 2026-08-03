@@ -63,6 +63,7 @@ func NewHandler(service *Service, config HTTPConfig) http.Handler {
 	mux.HandleFunc("POST /auth/wallet/challenge", h.walletChallenge)
 	mux.HandleFunc("POST /auth/wallet/verify", h.walletVerify)
 	mux.HandleFunc("GET /auth/session", h.session)
+	mux.HandleFunc("DELETE /auth/session", h.withSession(h.sessionDelete))
 	mux.HandleFunc("POST /auth/device", h.deviceCreate)
 	mux.HandleFunc("POST /auth/device/token", h.deviceToken)
 	mux.HandleFunc("POST /auth/device/inspect", h.withSession(h.deviceInspect))
@@ -127,6 +128,15 @@ func (h *httpHandler) session(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		writeJSON(w, SessionView{AccountID: session.AccountID, WalletAddress: session.WalletAddress, ExpiresAt: session.ExpiresAt}, http.StatusOK)
 	}
+}
+
+func (h *httpHandler) sessionDelete(w http.ResponseWriter, r *http.Request, session BrowserSession) {
+	if err := h.service.RevokeBrowserSession(r.Context(), session.ID); err != nil {
+		h.write(w, nil, err, 0)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: browserSessionCookie, Value: "", Path: "/", HttpOnly: true, Secure: h.config.SecureCookies, SameSite: sessionSameSite(h.config.SecureCookies), MaxAge: -1, Expires: time.Unix(1, 0)})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *httpHandler) deviceCreate(w http.ResponseWriter, r *http.Request) {

@@ -71,6 +71,9 @@ nav a, footer a { font-size: 0.82rem; font-weight: 700; text-underline-offset: 0
 .network-actions { display: flex; justify-content: flex-end; align-items: center; gap: 1rem; }
 .wallet-control { position: relative; }
 .wallet-address { font-family: var(--font-data); font-size: 0.78rem; font-weight: 700; }
+.wallet-connected { display: flex; align-items: center; gap: 0.65rem; }
+.wallet-disconnect { min-height: 32px; padding: 0.35rem 0.6rem; color: var(--circuit-ink-soft); background: transparent; border-color: var(--line-strong); font-size: 0.7rem; }
+.wallet-disconnect:hover { color: var(--fault-coral); border-color: var(--fault-coral); background: transparent; }
 .inline-error { margin: 0.65rem 0 0; color: var(--fault-coral); font-size: 0.78rem; }
 .wallet-control .inline-error { position: absolute; top: calc(100% + 0.5rem); right: 0; width: min(320px, 70vw); padding: 0.5rem; background: var(--paper); border: 1px solid var(--fault-coral); }
 .network-state, .data-label {

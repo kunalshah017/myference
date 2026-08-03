@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import type { Address, EIP1193Provider } from 'viem'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { AuthAPI } from '../../lib/api'
 import { ApiKeys } from './ApiKeys'
 import { ConnectWallet } from './ConnectWallet'
@@ -17,6 +17,7 @@ let approvedCode = ''
 let authorizedSigner = ''
 let revokedKey = ''
 let createdEndpoints: string[] = []
+let loggedOut = false
 
 afterEach(cleanup)
 
@@ -48,6 +49,9 @@ beforeAll(async () => {
         send(201, { id: 'key-new', token: 'key-new.one-time-secret', scope: body })
       } else if (request.url?.startsWith('/auth/api-keys/') && request.method === 'DELETE') {
         revokedKey = request.url.split('/').at(-1) ?? ''
+        send(204)
+      } else if (request.url === '/auth/session' && request.method === 'DELETE') {
+        loggedOut = true
         send(204)
       } else {
         send(404, { error: 'not found' })
@@ -87,6 +91,17 @@ describe('account authentication', () => {
     await userEvent.click(screen.getByRole('button', { name: /connect wallet/i }))
     expect(await screen.findByText(/0x1111…1111/i)).toBeVisible()
     expect(verifyBody).toEqual({ challenge_id: 'challenge-1', signature: `0x${'11'.repeat(65)}` })
+  })
+
+  it('disconnects a restored wallet session from the server', async () => {
+    loggedOut = false
+    const onDisconnected = vi.fn()
+    render(<ConnectWallet api={new AuthAPI(baseURL)} provider={wallet()} session={{ account_id: 'acct-1', wallet_address: address, expires_at: '2026-08-02T20:00:00Z' }} onDisconnected={onDisconnected} />)
+    expect(screen.getByText(/0x1111…1111/i)).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: /disconnect wallet/i }))
+    expect(loggedOut).toBe(true)
+    expect(onDisconnected).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: /connect wallet/i })).toBeVisible()
   })
 
   it('shows the exact pending machine before approval', async () => {

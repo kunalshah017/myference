@@ -46,7 +46,7 @@ export function DashboardShell() {
       <a className="dashboard-docs" href="https://github.com/kunalshah017/myference"><Code2 size={16} aria-hidden="true" /> Documentation ↗</a>
     </aside>
     <div className="dashboard-main">
-      <header className="dashboard-topbar"><div><PanelLeft size={17} aria-hidden="true" /><span className="state-mark" aria-hidden="true" />{session ? 'Monad testnet connected' : 'Network not connected'}</div><ConnectWallet api={api} onConnected={setSession} /></header>
+      <header className="dashboard-topbar"><div><PanelLeft size={17} aria-hidden="true" /><span className="state-mark" aria-hidden="true" />{session ? 'Monad testnet connected' : 'Network not connected'}</div><ConnectWallet api={api} session={session} onConnected={setSession} onDisconnected={() => setSession(undefined)} /></header>
       <main className="dashboard-workspace">
         {view === 'overview' && (session ? <DashboardOverview onNavigate={setView} /> : <section><p className="eyebrow">Account workspace</p><h1>Workspace overview</h1><p className="dashboard-intro">Use hosted models and offer inference from the same wallet-bound account.</p>{disconnected('Connect a wallet to load balances, sessions, machines, and earnings.')}</section>)}
         {view === 'models' && <section><p className="eyebrow">Public inference market</p><h1>Models and prices</h1><ModelList api={marketplace} /></section>}

@@ -107,6 +107,8 @@ func TestWalletDeviceAndAPIKeyHTTPFlow(t *testing.T) {
 	if _, err := service.AuthorizeAPIKey(ctx, created.Token, "qwen2.5:0.5b", "/v1/chat/completions", 1); err != ErrInvalidCredential {
 		t.Fatalf("expected revoked key rejection, got %v", err)
 	}
+	requestJSON[map[string]any](t, client, http.MethodDelete, server.URL+"/auth/session", nil, nil, http.StatusNoContent)
+	getJSON[map[string]any](t, client, server.URL+"/auth/session", nil, http.StatusUnauthorized)
 }
 
 func TestWalletHTTPRejectsWrongOriginChainAndExpiredDevice(t *testing.T) {

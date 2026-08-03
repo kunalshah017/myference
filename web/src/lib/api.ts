@@ -32,6 +32,8 @@ export class AuthAPI {
 
   session() { return this.request<Session>('/auth/session') }
 
+  logout() { return this.request<void>('/auth/session', { method: 'DELETE' }) }
+
   verify(challengeId: string, signature: `0x${string}`) {
     return this.request<Session>('/auth/wallet/verify', { method: 'POST', body: { challenge_id: challengeId, signature } })
   }
