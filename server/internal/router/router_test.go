@@ -27,8 +27,14 @@ func TestSelectFiltersEveryEconomicAndRuntimeRequirement(t *testing.T) {
 	if selected.MachineID != "machine-good" {
 		t.Fatalf("selected %+v", selected)
 	}
-	if _, err := Select(Request{Model: "qwen", Capabilities: []string{"text", "stream"}, MaximumSpend: 100, SessionBalance: 89}, []Candidate{base}); !errors.Is(err, ErrNoEligibleProvider) {
+	if _, err := Select(Request{Model: "qwen", Capabilities: []string{"text", "stream"}, MaximumSpend: 100, SessionBalance: 89}, []Candidate{base}); !errors.Is(err, ErrInsufficientBudget) {
 		t.Fatalf("expected session-balance rejection, got %v", err)
+	}
+	if _, err := Select(Request{Model: "qwen", Capabilities: []string{"text", "stream"}, MaximumSpend: 100, SessionBalance: 0}, []Candidate{base}); !errors.Is(err, ErrInsufficientBudget) {
+		t.Fatalf("expected depleted-session rejection, got %v", err)
+	}
+	if _, err := Select(Request{Model: "qwen", Capabilities: []string{"text", "stream"}, MaximumSpend: 100, SessionBalance: 0}, nil); !errors.Is(err, ErrNoEligibleProvider) {
+		t.Fatalf("expected no-provider rejection before budget classification, got %v", err)
 	}
 }
 

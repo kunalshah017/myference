@@ -80,7 +80,7 @@ function DocsPage() {
   -H "Authorization: Bearer $MYFERENCE_API_KEY" \\
   -H "Content-Type: application/json" \\
   -H "X-Myference-Max-Spend: 1000000000000000" \\
-  -d '{"model":"YOUR_MODEL_ID","stream":true,"messages":[{"role":"user","content":"Say hello in one sentence."}]}'`}</CopyBlock>
+  -d '{"model":"YOUR_MODEL_ID","stream":true,"max_completion_tokens":256,"messages":[{"role":"user","content":"Say hello in one sentence."}]}'`}</CopyBlock>
           <CopyBlock label="JavaScript · OpenAI SDK">{`import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -92,6 +92,7 @@ const client = new OpenAI({
 const stream = await client.chat.completions.create({
   model: "YOUR_MODEL_ID",
   stream: true,
+  max_completion_tokens: 256,
   messages: [{ role: "user", content: "Say hello in one sentence." }],
 });
 for await (const event of stream) process.stdout.write(event.choices[0]?.delta?.content ?? "");`}</CopyBlock>
@@ -106,6 +107,7 @@ client = OpenAI(
 stream = client.chat.completions.create(
     model="YOUR_MODEL_ID",
     stream=True,
+    max_completion_tokens=256,
     messages=[{"role": "user", "content": "Say hello in one sentence."}],
 )
 for event in stream:

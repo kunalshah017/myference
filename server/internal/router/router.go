@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-var ErrNoEligibleProvider = errors.New("no eligible provider")
+var (
+	ErrNoEligibleProvider = errors.New("no eligible provider")
+	ErrInsufficientBudget = errors.New("request or session budget is below the required reservation")
+)
 
 type Request struct {
 	Model          string
@@ -103,20 +106,28 @@ func parseRate(value string) (*big.Int, bool) {
 }
 
 func Select(request Request, candidates []Candidate) (Candidate, error) {
-	if strings.TrimSpace(request.Model) == "" || request.MaximumSpend == 0 || request.SessionBalance == 0 {
+	if strings.TrimSpace(request.Model) == "" || request.MaximumSpend == 0 {
 		return Candidate{}, ErrNoEligibleProvider
 	}
 	eligible := make([]Candidate, 0, len(candidates))
+	budgetBlocked := false
 	for _, candidate := range candidates {
 		if request.PinMachineID != "" && candidate.MachineID != request.PinMachineID {
 			continue
 		}
-		if candidate.MachineID == "" || candidate.OfferID == "" || candidate.Model != request.Model || !candidate.ConfirmedBond || !candidate.Healthy || candidate.Capacity == 0 || candidate.MaximumCost == 0 || candidate.MaximumCost > request.MaximumSpend || candidate.MaximumCost > request.SessionBalance || !containsAll(candidate.Capabilities, request.Capabilities) {
+		if candidate.MachineID == "" || candidate.OfferID == "" || candidate.Model != request.Model || !candidate.ConfirmedBond || !candidate.Healthy || candidate.Capacity == 0 || candidate.MaximumCost == 0 || !containsAll(candidate.Capabilities, request.Capabilities) {
+			continue
+		}
+		if candidate.MaximumCost > request.MaximumSpend || candidate.MaximumCost > request.SessionBalance {
+			budgetBlocked = true
 			continue
 		}
 		eligible = append(eligible, candidate)
 	}
 	if len(eligible) == 0 {
+		if budgetBlocked {
+			return Candidate{}, ErrInsufficientBudget
+		}
 		return Candidate{}, ErrNoEligibleProvider
 	}
 	sort.Slice(eligible, func(i, j int) bool {

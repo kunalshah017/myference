@@ -133,7 +133,7 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	const maximumComputeMilliseconds uint64 = 120_000
 	for index := range candidates {
 		if !router.ValidRate(candidates[index].InputPerMillion) || !router.ValidRate(candidates[index].OutputPerMillion) || !router.ValidRate(candidates[index].ComputePerSecond) {
-			candidates[index].MaximumCost = ^uint64(0)
+			candidates[index].MaximumCost = 0
 			continue
 		}
 		if !router.HasPricing(candidates[index]) {
@@ -142,12 +142,16 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 		}
 		cost, costErr := router.WorstCaseCost(candidates[index], maximumInputTokens, maximumOutputTokens, maximumComputeMilliseconds)
 		if costErr != nil {
-			candidates[index].MaximumCost = ^uint64(0)
+			candidates[index].MaximumCost = 0
 		} else {
 			candidates[index].MaximumCost = cost
 		}
 	}
 	selected, err := router.Select(router.Request{Model: input.Model, Capabilities: requiredCapabilities, MaximumSpend: maximumSpend, SessionBalance: principal.SessionBalance, PinMachineID: request.Header.Get("X-Myference-Machine")}, candidates)
+	if errors.Is(err, router.ErrInsufficientBudget) {
+		http.Error(response, "request or session budget is below the required reservation", http.StatusPaymentRequired)
+		return
+	}
 	if err != nil || !h.dependencies.Hub.Connected(selected.MachineID) {
 		http.Error(response, "no eligible provider", http.StatusServiceUnavailable)
 		return

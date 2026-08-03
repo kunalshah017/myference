@@ -25,6 +25,54 @@ func TestRandomRequestIDIsDirectBytes32(t *testing.T) {
 	}
 }
 
+func TestOpenAIReturnsPaymentRequiredWhenProviderExceedsBudget(t *testing.T) {
+	handler := NewOpenAI(Dependencies{
+		Hub: relay.NewHub(func(context.Context, string) (string, error) { return "", nil }, relay.Options{}),
+		Authorize: func(context.Context, string, string, string, uint64) (Principal, error) {
+			return Principal{AccountID: "account", SessionID: "session", SessionBalance: 100}, nil
+		},
+		Candidates: func(context.Context, string) ([]router.Candidate, error) {
+			return []router.Candidate{{MachineID: "machine", OfferID: "offer", Model: "qwen", Capabilities: []string{"text", "stream"}, ConfirmedBond: true, Healthy: true, Capacity: 1, InputPerMillion: "1000000", OutputPerMillion: "100000000", ComputePerSecond: "1"}}, nil
+		},
+		Reserve:    func(context.Context, Reservation) error { return nil },
+		Transition: func(context.Context, string, string) error { return nil },
+		Abort:      func(context.Context, string, string) error { return nil },
+		Persist:    func(context.Context, Proposal) error { return nil },
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen","stream":true,"max_completion_tokens":1,"messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer api-token")
+	request.Header.Set("X-Myference-Max-Spend", "100")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusPaymentRequired || !strings.Contains(response.Body.String(), "request or session budget") {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
+func TestOpenAIReturnsUnavailableForInvalidProviderPricing(t *testing.T) {
+	handler := NewOpenAI(Dependencies{
+		Hub: relay.NewHub(func(context.Context, string) (string, error) { return "", nil }, relay.Options{}),
+		Authorize: func(context.Context, string, string, string, uint64) (Principal, error) {
+			return Principal{AccountID: "account", SessionID: "session", SessionBalance: 100}, nil
+		},
+		Candidates: func(context.Context, string) ([]router.Candidate, error) {
+			return []router.Candidate{{MachineID: "machine", OfferID: "offer", Model: "qwen", Capabilities: []string{"text", "stream"}, ConfirmedBond: true, Healthy: true, Capacity: 1, InputPerMillion: "invalid", OutputPerMillion: "1", ComputePerSecond: "1"}}, nil
+		},
+		Reserve:    func(context.Context, Reservation) error { return nil },
+		Transition: func(context.Context, string, string) error { return nil },
+		Abort:      func(context.Context, string, string) error { return nil },
+		Persist:    func(context.Context, Proposal) error { return nil },
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen","stream":true,"max_completion_tokens":1,"messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer api-token")
+	request.Header.Set("X-Myference-Max-Spend", "100")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "no eligible provider") {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
 func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	hub := relay.NewHub(func(context.Context, string) (string, error) { return "machine-1", nil }, relay.Options{HeartbeatTimeout: time.Second})
 	relayServer := httptest.NewTLSServer(hub)
