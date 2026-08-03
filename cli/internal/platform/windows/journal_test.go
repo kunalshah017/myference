@@ -36,6 +36,24 @@ func TestJournalSaveLoadRecordsRequiredRecoveryState(t *testing.T) {
 	}
 }
 
+func TestJournalSaveLoadPreservesAbsentShellPolicy(t *testing.T) {
+	store := NewJournalStore(t.TempDir())
+	want := recoveryJournalFixture()
+	want.HadShellPolicy = false
+	want.ShellPolicy = ""
+
+	if err := store.Save(want); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Load() = %+v, want absent shell policy %+v", got, want)
+	}
+}
+
 func TestJournalSaveRefusesReplacementOfActiveRecovery(t *testing.T) {
 	store := NewJournalStore(t.TempDir())
 	first := recoveryJournalFixture()
@@ -173,6 +191,7 @@ func recoveryJournalFixture() RecoveryJournal {
 		ActivePowerScheme: "11111111-1111-1111-1111-111111111111",
 		ACLidAction:       0,
 		DCLidAction:       1,
+		HadShellPolicy:    true,
 		ShellPolicy:       "explorer.exe",
 		StoppedProcesses:  []string{`C:\\Program Files\\Discord\\Discord.exe`},
 		StoppedServices:   []string{"Spooler"},

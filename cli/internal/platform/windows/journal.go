@@ -30,6 +30,7 @@ type RecoveryJournal struct {
 	ActivePowerScheme  string                `json:"activePowerScheme"`
 	ACLidAction        int                   `json:"acLidAction"`
 	DCLidAction        int                   `json:"dcLidAction"`
+	HadShellPolicy     bool                  `json:"hadShellPolicy"`
 	ShellPolicy        string                `json:"shellPolicy"`
 	StoppedProcesses   []string              `json:"stoppedProcesses"`
 	StoppedServices    []string              `json:"stoppedServices"`
@@ -226,9 +227,6 @@ func (store JournalStore) path() string {
 func (journal RecoveryJournal) validate() error {
 	if strings.TrimSpace(journal.ActivePowerScheme) == "" {
 		return errors.New("active power scheme is required")
-	}
-	if strings.TrimSpace(journal.ShellPolicy) == "" {
-		return errors.New("shell policy is required")
 	}
 	for _, taskName := range journal.InstalledTaskNames {
 		if !isMyferenceTask(taskName) {
