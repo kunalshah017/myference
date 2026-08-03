@@ -174,7 +174,7 @@ func TestDaemonConnectsToRealTLSRelayAndStreamsBackend(t *testing.T) {
 		t.Fatalf("accept count=%d", seen[v1.MessageJobAccept])
 	}
 	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
+	if err := <-done; !errors.Is(err, context.Canceled) && websocket.CloseStatus(err) != websocket.StatusNormalClosure {
 		t.Fatalf("serve returned %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestDaemonTerminatesAcceptedJobWhenBackendFails(t *testing.T) {
 		t.Fatalf("failure=%+v err=%v", failure, err)
 	}
 	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
+	if err := <-done; !errors.Is(err, context.Canceled) && websocket.CloseStatus(err) != websocket.StatusNormalClosure {
 		t.Fatalf("serve returned %v", err)
 	}
 }

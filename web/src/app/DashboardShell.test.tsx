@@ -9,6 +9,7 @@ it('lets one account switch from consuming to hosting inference', async () => {
   render(<QueryClientProvider client={new QueryClient()}><DashboardShell /></QueryClientProvider>)
 
   expect(screen.getByRole('heading', { name: /workspace overview/i })).toBeVisible()
+  expect(screen.getByRole('link', { name: /documentation/i })).toHaveAttribute('href', '/docs')
   await user.click(screen.getByRole('button', { name: /host inference/i }))
   expect(screen.getByRole('heading', { name: /host inference/i })).toBeVisible()
   expect(screen.getByText(/connect a wallet to manage provider machines/i)).toBeVisible()

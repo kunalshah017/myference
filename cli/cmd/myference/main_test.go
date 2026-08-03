@@ -192,6 +192,19 @@ func TestRelayURLUsesOutboundWebSocketEndpoint(t *testing.T) {
 	}
 }
 
+func TestProductionDefaultsUseBrandedDomains(t *testing.T) {
+	if defaultServerURL != "https://api.myference.xyz" || defaultWebURL != "https://myference.xyz" {
+		t.Fatalf("server=%q web=%q", defaultServerURL, defaultWebURL)
+	}
+}
+
+func TestHostLoginArgumentsPreserveNoBrowser(t *testing.T) {
+	got := hostLoginArgs("https://api.myference.xyz", "/tmp/myference.json", true)
+	if !slices.Contains(got, "--no-browser") {
+		t.Fatalf("headless host login arguments=%v", got)
+	}
+}
+
 func TestServeWithReconnectSurvivesRelayRestart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

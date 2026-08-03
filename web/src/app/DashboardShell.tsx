@@ -43,7 +43,7 @@ export function DashboardShell({ initialView = 'overview' }: { initialView?: Das
       <a className="wordmark" href="/" aria-label="Myference home"><span aria-hidden="true">M/</span> Myference</a>
       <div className="dashboard-nav-group"><p>Use inference</p>{navigation.filter((item) => item.group === 'use').map((item) => { const Icon = icons[item.view]; return <button type="button" key={item.view} aria-current={view === item.view ? 'page' : undefined} onClick={() => setView(item.view)}><Icon size={17} aria-hidden="true" />{item.label}</button> })}</div>
       <div className="dashboard-nav-group"><p>Provide inference</p>{navigation.filter((item) => item.group === 'host').map((item) => { const Icon = icons[item.view]; return <button type="button" key={item.view} aria-current={view === item.view ? 'page' : undefined} onClick={() => setView(item.view)}><Icon size={17} aria-hidden="true" />{item.label}</button> })}</div>
-      <a className="dashboard-docs" href="https://github.com/kunalshah017/myference"><Code2 size={16} aria-hidden="true" /> Documentation ↗</a>
+      <a className="dashboard-docs" href="/docs"><Code2 size={16} aria-hidden="true" /> Documentation</a>
     </aside>
     <div className="dashboard-main">
       <header className="dashboard-topbar"><div><PanelLeft size={17} aria-hidden="true" /><span className="state-mark" aria-hidden="true" />{session ? 'Monad testnet connected' : 'Network not connected'}</div><ConnectWallet api={api} session={session} onConnected={setSession} onDisconnected={() => setSession(undefined)} /></header>

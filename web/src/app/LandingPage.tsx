@@ -22,7 +22,7 @@ function RoutingDiagram() {
 
 function LandingPage() {
   return <div className="landing-page">
-    <header className="landing-header"><a className="wordmark" href="/" aria-label="Myference home"><span>M/</span> Myference</a><nav aria-label="Landing navigation"><a href="#network">Network</a><a href="#how-it-works">How it works</a><a href="#pricing">Pricing</a></nav><a className="landing-primary compact" href="/app">Launch app <ArrowRight size={16} /></a></header>
+    <header className="landing-header"><a className="wordmark" href="/" aria-label="Myference home"><span>M/</span> Myference</a><nav aria-label="Landing navigation"><a href="#network">Network</a><a href="#how-it-works">How it works</a><a href="#pricing">Pricing</a><a href="/docs">Docs</a></nav><a className="landing-primary compact" href="/app">Launch app <ArrowRight size={16} /></a></header>
     <main>
       <section className="landing-hero"><div className="landing-hero-copy"><p className="eyebrow">AI inference on Monad</p><h1>Unused compute,<br /><span>useful inference.</span></h1><p>Use or sell AI inference through one network.</p><div className="landing-actions"><a className="landing-primary" href="/app"><Cpu size={18} /> Browse models</a><a className="landing-secondary" href="#how-it-works">How it works <ArrowRight size={17} /></a></div></div><RoutingDiagram /></section>
       <section className="provider-strip" aria-labelledby="provider-strip-title"><p id="provider-strip-title">SUPPORTED ECOSYSTEM</p><div>{providers.map(([name, domain]) => <figure key={name}><img alt={`${name} logo`} src={`https://img.logo.dev/${domain}?token=${LOGO_TOKEN}&format=webp&retina=true`} /><figcaption>{name}</figcaption></figure>)}</div></section>
@@ -31,7 +31,7 @@ function LandingPage() {
       <section id="pricing" className="landing-pricing"><div><p className="eyebrow">Pricing</p><h2>Providers set prices.<br />You set limits.</h2><p>Pay only for verified usage.</p></div><ul><li><Check /> Live model pricing</li><li><Check /> Native MON escrow</li><li><Check /> Spend limits</li><li><Check /> Signed receipts</li></ul><a className="landing-primary" href="/app"><CircleDollarSign size={18} /> View pricing</a></section>
       <section className="landing-cta"><div><KeyRound size={28} /><p className="eyebrow">One endpoint</p><h2>Start building.</h2><code>POST /v1/chat/completions</code></div><a className="landing-primary" href="/app">Create API key <ArrowRight size={17} /></a></section>
     </main>
-    <footer className="landing-footer"><a className="wordmark" href="/"><span>M/</span> Myference</a><span>REAL INFERENCE / PROVABLE SETTLEMENT</span><a href="https://github.com/kunalshah017/myference">Source on GitHub ↗</a></footer>
+    <footer className="landing-footer"><a className="wordmark" href="/"><span>M/</span> Myference</a><span>REAL INFERENCE / PROVABLE SETTLEMENT</span><div><a href="/docs">Documentation</a><a href="https://github.com/kunalshah017/myference">Source on GitHub ↗</a></div></footer>
   </div>
 }
 

@@ -27,7 +27,7 @@ See the [marketplace design](docs/superpowers/specs/2026-08-02-myference-marketp
 Download the binary for the machine, connect it to a wallet-bound account in the browser, configure one or more independently controlled backends, and start the outbound provider:
 
 ```text
-myference login --server https://api.example.com
+myference login --server https://api.myference.xyz
 myference backend add --kind ollama --name local-qwen --model qwen2.5:0.5b
 myference backend add --kind openai --name cloud-model --model provider-model --url https://provider.example --secret "$PROVIDER_KEY"
 myference backend add --kind codex --name codex-agent --model codex --image ghcr.io/example/codex-agent@sha256:... --secret "$OPENAI_API_KEY"
@@ -59,7 +59,7 @@ MYFERENCE_RPC_URL=https://testnet-rpc.monad.xyz
 MYFERENCE_CONTRACT_ADDRESS=0x...
 MYFERENCE_SETTLEMENT_PRIVATE_KEY=...  # deployment secret manager, never source control
 MYFERENCE_CHAIN_START_BLOCK=...
-MYFERENCE_WEB_ORIGIN=https://app.example.com
+MYFERENCE_WEB_ORIGIN=https://myference.xyz
 MYFERENCE_EXPLORER_URL=https://testnet.monadexplorer.com
 ```
 

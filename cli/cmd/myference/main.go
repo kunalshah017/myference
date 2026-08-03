@@ -38,6 +38,8 @@ const (
 	machineCredentialService = "myference.machine"
 	signerCredentialService  = "myference.signer"
 	backendCredentialService = "myference.backend"
+	defaultServerURL         = "https://api.myference.xyz"
+	defaultWebURL            = "https://myference.xyz"
 )
 
 var version = "dev"
@@ -114,17 +116,17 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("host", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	path := flags.String("config", defaultConfigPath(), "configuration path")
-	serverURL := flags.String("server", "https://myference-api.onrender.com", "Myference server URL used when login is required")
+	serverURL := flags.String("server", defaultServerURL, "Myference server URL used when login is required")
 	endpoint := flags.String("ollama-url", "http://127.0.0.1:11434", "local Ollama URL")
 	modelName := flags.String("model", "", "installed model to serve; defaults to the first model")
-	webURL := flags.String("web", "https://myference-web.onrender.com", "Myference web URL")
+	webURL := flags.String("web", defaultWebURL, "Myference web URL")
 	setupOnly := flags.Bool("setup-only", false, "configure the backend without starting the foreground server")
 	noBrowser := flags.Bool("no-browser", false, "do not open the provider workspace")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if _, err := config.Load(*path); errors.Is(err, os.ErrNotExist) {
-		if err := runLogin(ctx, []string{"--server", *serverURL, "--config", *path}, output, defaultLoginDependencies()); err != nil {
+		if err := runLogin(ctx, hostLoginArgs(*serverURL, *path, *noBrowser), output, defaultLoginDependencies()); err != nil {
 			return fmt.Errorf("connect this machine: %w", err)
 		}
 	} else if err != nil {
@@ -149,6 +151,14 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	serveContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	return runServe(serveContext, *path, output)
+}
+
+func hostLoginArgs(serverURL, path string, noBrowser bool) []string {
+	args := []string{"--server", serverURL, "--config", path}
+	if noBrowser {
+		args = append(args, "--no-browser")
+	}
+	return args
 }
 
 func configureLocalHost(ctx context.Context, path, endpoint, requestedModel string, client *http.Client) (backend.Model, error) {
@@ -271,7 +281,7 @@ func defaultLoginDependencies() loginDependencies {
 func runLogin(ctx context.Context, args []string, output io.Writer, dependencies loginDependencies) error {
 	flags := flag.NewFlagSet("login", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	serverURL := flags.String("server", "https://api.myference.network", "Myference server URL")
+	serverURL := flags.String("server", defaultServerURL, "Myference server URL")
 	machineName := flags.String("name", "", "machine name")
 	path := flags.String("config", defaultConfigPath(), "configuration path")
 	noBrowser := flags.Bool("no-browser", false, "print the verification URL without opening it")
