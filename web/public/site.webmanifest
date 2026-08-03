@@ -1,0 +1,23 @@
+{
+  "name": "Myference",
+  "short_name": "Myference",
+  "description": "Distributed AI inference with native MON settlement.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fbfaff",
+  "theme_color": "#171522",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

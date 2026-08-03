@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Myference">
+  <rect width="64" height="64" rx="14" fill="#171522"/>
+  <path d="M13 43V20h7l7.5 12L35 20h7v23h-7V31l-7.5 11.5L20 31v12z" fill="#fbfaff"/>
+  <path d="M44.5 44.5 54 19.5" stroke="#6e5ae6" stroke-width="6" stroke-linecap="square"/>
+</svg>

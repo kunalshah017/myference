@@ -41,6 +41,8 @@ jobs:
       - run: npm test -- --run
       - run: npm run lint
       - run: sh ../scripts/test-installers.sh
+      - run: node ../scripts/inline-og-logos.mjs /tmp/myference-og-image-inline.svg
+      - run: node ../scripts/test-brand-assets.mjs
       - run: npm run build
 
   windows-installer:

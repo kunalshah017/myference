@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Myference — unused compute, useful inference</title>
+  <desc id="description">OpenAI, Anthropic, Ollama, and Kimi inference routed through Myference and settled on Monad.</desc>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#d7d3e2" opacity=".5"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="#fbfaff"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect x="40" y="40" width="1120" height="550" fill="#fbfaff" stroke="#171522" stroke-width="2"/>
+
+  <g id="safe-area" transform="translate(96 72)">
+    <g>
+      <rect width="52" height="52" rx="11" fill="#171522"/>
+      <path d="M10 36V17h6l6.5 10L29 17h6v19h-6v-9l-6.5 10L16 27v9z" fill="#fbfaff"/>
+      <path d="m38 38 8-22" stroke="#6e5ae6" stroke-width="5"/>
+      <text x="68" y="36" fill="#171522" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700">MYFERENCE</text>
+    </g>
+
+    <g fill="#171522" font-family="Arial, Helvetica, sans-serif" font-size="62" font-weight="800" letter-spacing="-2">
+      <text x="0" y="230">Unused compute,</text>
+      <text x="0" y="300">useful inference.</text>
+    </g>
+
+    <g id="provider-icons" transform="translate(648 58)">
+      <g fill="none" stroke="#d7d3e2" stroke-width="2">
+        <path d="M35 70 170 194M125 70l45 124M215 70l-45 124M305 70 170 194"/>
+        <path d="M170 246v65" stroke="#6e5ae6" stroke-width="3"/>
+      </g>
+
+      <g fill="#fbfaff" stroke="#171522" stroke-width="2">
+        <rect width="70" height="70"/>
+        <rect x="90" width="70" height="70"/>
+        <rect x="180" width="70" height="70"/>
+        <rect x="270" width="70" height="70"/>
+      </g>
+      <image href="brand/providers/openai.png" x="11" y="11" width="48" height="48" preserveAspectRatio="xMidYMid meet"/>
+      <image href="brand/providers/anthropic.png" x="101" y="11" width="48" height="48" preserveAspectRatio="xMidYMid meet"/>
+      <image href="brand/providers/ollama.png" x="191" y="11" width="48" height="48" preserveAspectRatio="xMidYMid meet"/>
+      <image href="brand/providers/kimi.png" x="281" y="11" width="48" height="48" preserveAspectRatio="xMidYMid meet"/>
+
+      <rect x="118" y="142" width="104" height="104" fill="#6e5ae6" stroke="#171522" stroke-width="2"/>
+      <path d="M138 215v-42h12l12 20 12-20h12v42h-12v-21l-12 20-12-20v21z" fill="#fbfaff"/>
+      <path d="m191 220 16-52" stroke="#fbfaff" stroke-width="8"/>
+
+      <g id="monad-settlement">
+        <rect x="135" y="311" width="70" height="70" fill="#fbfaff" stroke="#171522" stroke-width="2"/>
+        <image href="brand/providers/monad.png" x="146" y="322" width="48" height="48" preserveAspectRatio="xMidYMid meet"/>
+      </g>
+    </g>
+  </g>
+</svg>

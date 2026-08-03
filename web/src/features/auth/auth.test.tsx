@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createServer, type Server } from 'node:http'
 import type { Address, EIP1193Provider } from 'viem'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { AuthAPI } from '../../lib/api'
@@ -107,7 +107,7 @@ describe('account authentication', () => {
     expect(screen.getByText(/0x1111…1111/i)).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: /disconnect wallet/i }))
     expect(loggedOut).toBe(true)
-    expect(onDisconnected).toHaveBeenCalledOnce()
+    await waitFor(() => expect(onDisconnected).toHaveBeenCalledOnce())
     expect(screen.getByRole('button', { name: /connect wallet/i })).toBeVisible()
   })
 
