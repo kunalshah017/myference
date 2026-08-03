@@ -504,12 +504,7 @@ func watchBackendConfig(ctx context.Context, path string, daemon *provider.Daemo
 			last = info.ModTime()
 			cfg, err := config.Load(path)
 			if err == nil {
-				var offers []v1.OfferCapacity
-				var backends map[string]backend.Backend
-				offers, backends, err = discoverBackends(ctx, cfg, credential.Load)
-				if err == nil {
-					err = daemon.UpdateBackends(offers, backends)
-				}
+				err = reloadBackends(ctx, cfg, daemon)
 			}
 			if err != nil {
 				_, _ = fmt.Fprintf(output, "backend reload failed: %v\n", err)
@@ -518,6 +513,20 @@ func watchBackendConfig(ctx context.Context, path string, daemon *provider.Daemo
 			}
 		}
 	}
+}
+
+func reloadBackends(ctx context.Context, cfg config.Config, daemon *provider.Daemon) error {
+	if daemon == nil {
+		return errors.New("provider daemon is required")
+	}
+	if err := preparePlatformBackends(ctx, cfg); err != nil {
+		return fmt.Errorf("prepare changed backends: %w", err)
+	}
+	offers, backends, err := discoverBackends(ctx, cfg, credential.Load)
+	if err != nil {
+		return err
+	}
+	return daemon.UpdateBackends(offers, backends)
 }
 
 func relayURL(serverURL string) (string, error) {
