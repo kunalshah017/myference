@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"math/big"
 	"net/http"
 	"strings"
@@ -69,6 +70,8 @@ func (h *referencePriceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			h.mu.Lock()
 			h.cached = fetched
 			h.mu.Unlock()
+		} else {
+			log.Printf("reference price refresh failed: %v", err)
 		}
 		h.mu.Lock()
 		h.fetchedAt, h.refreshing = now, false
@@ -88,6 +91,8 @@ func (h *referencePriceHandler) fetch(r *http.Request, now time.Time) (reference
 	if err != nil {
 		return referencePrice{}, err
 	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", "Myference/0.1 (+https://github.com/kunalshah017/myference)")
 	response, err := h.config.HTTPClient.Do(request)
 	if err != nil {
 		return referencePrice{}, err
