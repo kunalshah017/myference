@@ -31,7 +31,7 @@ it('shows deposit as pending until finality then refreshes indexed balances', as
   let deposited = 0n
   const writer = { deposit: async (value: bigint): Promise<SubmittedTransaction> => { deposited = value; return { hash: '0xabc', confirm: () => pending } } } as MarketWriter
   render(wrapper(<Billing api={api()} writer={writer} />))
-  expect(await screen.findByText(/1000 wei available/i)).toBeVisible()
+  expect(await screen.findByText(/0\.000000000000001 MON/i)).toBeVisible()
   await userEvent.type(screen.getByLabelText(/deposit MON/i), '0.5')
   await userEvent.click(screen.getByRole('button', { name: /deposit to escrow/i }))
   expect(await screen.findByText(/0xabc.*pending/i)).toBeVisible()

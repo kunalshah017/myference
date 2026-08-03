@@ -20,13 +20,13 @@ afterEach(cleanup)
 it('renders confirmed customer token usage and cost', async () => {
   renderPanel(<UsageAnalytics api={api} />)
   expect(await screen.findByText('120')).toBeVisible()
-  expect(screen.getAllByText('20 wei')[0]).toBeVisible()
+  expect(screen.getAllByText('0.00000000000000002 MON')[0]).toBeVisible()
   expect(screen.getByText('request-1')).toBeVisible()
 })
 
 it('renders provider revenue and slash history', async () => {
   renderPanel(<ProviderAnalytics api={api} />)
-  expect((await screen.findAllByText('57 wei'))[0]).toBeVisible()
-  expect(screen.getAllByText('5 wei')[0]).toBeVisible()
+  expect((await screen.findAllByText('0.000000000000000057 MON'))[0]).toBeVisible()
+  expect(screen.getAllByText('0.000000000000000005 MON')[0]).toBeVisible()
   expect(screen.getByText('0xslash')).toBeVisible()
 })

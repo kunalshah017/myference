@@ -40,7 +40,7 @@ it('renders only live API inventory with all-inclusive integer prices and provid
   inventory = [{ model: 'qwen2.5:0.5b', available_providers: 1, total_capacity: 2, minimum_input_per_million_wei: '10', minimum_output_per_million_wei: '20', minimum_compute_per_second_wei: '30', stale: false }]
   renderModels()
   await userEvent.click(await screen.findByRole('button', { name: /qwen2.5:0.5b/i }))
-  expect((await screen.findAllByText(/10 wei.*1m input/i)).length).toBeGreaterThan(0)
+  expect((await screen.findAllByText('0.00000000000000001 MON')).length).toBeGreaterThan(0)
   expect(await screen.findByText(/price version 3/i)).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: /use provider machine-live/i }))
   expect(screen.getByText(/pinned to machine-live/i)).toBeVisible()

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { formatUnits } from 'viem'
+import { Money } from '../../components/Money'
 import { OperationsAPI } from '../../lib/api'
 import { parseMON } from '../../lib/amount'
 import { injectedProvider } from '../../lib/chain'
@@ -22,7 +22,7 @@ export function ProviderConsole({ api=new OperationsAPI(),writer:supplied }:{api
       <section className="provider-card collateral-card" aria-labelledby="collateral-title">
         <div className="provider-card-heading">
           <div><p className="eyebrow">Collateral</p><h3 id="collateral-title">Provider collateral</h3></div>
-          <div className="provider-balance"><span>Bonded</span><strong>{formatUnits(BigInt(operations.data.provider_bond_wei),18)} MON</strong><code>{operations.data.provider_bond_wei} wei</code></div>
+          <div className="provider-balance"><span>Bonded</span><strong><Money wei={operations.data.provider_bond_wei} technical/></strong></div>
         </div>
         <p className="provider-card-copy">Collateral backs requests served by your machines. It remains yours unless a proven violation is slashed.</p>
         <form className="collateral-form" onSubmit={deposit}>

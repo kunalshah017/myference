@@ -1,4 +1,5 @@
 export type Session = { account_id: string; wallet_address: `0x${string}`; expires_at: string }
+export type ReferencePrice = { symbol: 'MON'; usd_per_mon: string; source: string; updated_at: string }
 export type WalletChallenge = { id: string; nonce: string; message: string; expires_at: string }
 export type PendingDevice = { machine_name: string; signer_address: `0x${string}`; expires_at: string }
 export type APIKeyScope = { models: string[]; endpoints: string[]; max_spend_wei: string }
@@ -82,6 +83,12 @@ export class MarketplaceAPI {
   models() { return requestJSON<MarketModel[]>(`${this.baseURL}/api/models`) }
   model(name: string) { return requestJSON<MarketModelDetail>(`${this.baseURL}/api/models/${encodeURIComponent(name)}`) }
   activity() { return requestJSON<ActivityRecord[]>(`${this.baseURL}/api/activity`) }
+}
+
+export class ReferencePriceAPI {
+  private readonly baseURL: string
+  constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
+  price() { return requestJSON<ReferencePrice>(`${this.baseURL}/api/reference-price`) }
 }
 
 export class OperationsAPI {

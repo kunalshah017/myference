@@ -32,7 +32,7 @@ it('shows real machines, immutable offer versions, collateral, and earnings', as
   expect(screen.getByLabelText(/compute time/i)).toHaveAccessibleDescription(/each second/i)
   expect(screen.getByText(/new immutable on-chain price version/i)).toBeVisible()
   expect(screen.getByText(/version 4/i)).toBeVisible()
-  expect(screen.getByText(/95 wei earned/i)).toBeVisible()
+  expect(screen.getByText(/0\.000000000000000095 MON/i)).toBeVisible()
   await userEvent.type(screen.getByLabelText(/bond amount/i), '2')
   await userEvent.click(screen.getByRole('button', { name: /deposit collateral/i }))
   expect(bond).toBe(2_000_000_000_000_000_000n)
