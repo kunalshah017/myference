@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"slices"
 	"strings"
@@ -46,6 +47,8 @@ func runPlatformCommand(command string, args []string, output io.Writer) error {
 			return runWindowsStatus(context.Background(), windowsCommand.Args, output)
 		case "dashboard":
 			return runWindowsDashboard(context.Background(), windowsCommand.Args, output)
+		case "headless":
+			return runWindowsHeadless(context.Background(), windowsCommand.Args, output)
 		default:
 			return fmt.Errorf("windows %s is not implemented", windowsCommand.Action)
 		}
@@ -134,11 +137,32 @@ func runWindowsDashboard(ctx context.Context, args []string, output io.Writer) e
 	configPath := flags.String("config", defaultConfigPath(), "provider configuration path")
 	refresh := flags.Duration("refresh", time.Second, "dashboard refresh interval")
 	once := flags.Bool("once", false, "render one snapshot and exit")
+	waitForStatus := flags.Duration("wait", 0, "wait for provider startup")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if *refresh < 250*time.Millisecond || *refresh > time.Minute {
 		return errors.New("dashboard refresh must be between 250ms and 1m")
+	}
+	if *waitForStatus < 0 || *waitForStatus > 5*time.Minute {
+		return errors.New("dashboard wait must be between 0 and 5m")
+	}
+	if *waitForStatus > 0 {
+		deadline := time.Now().Add(*waitForStatus)
+		for {
+			_, loadErr := provider.LoadStatusFile(providerStatusPath(*configPath))
+			if loadErr == nil {
+				break
+			}
+			if !errors.Is(loadErr, os.ErrNotExist) || time.Now().After(deadline) {
+				return loadErr
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
 	}
 	render := func(clear bool) error {
 		status, err := provider.LoadStatusFile(providerStatusPath(*configPath))
@@ -193,7 +217,73 @@ func startPlatformProviderSession(ctx context.Context, _ config.Config, _ io.Wri
 	if err != nil {
 		return nil, err
 	}
-	return platform.StartProviderSession(ctx, platform.DefaultConfig(), platform.TuningOptions{}, store, platform.NewNativeRunner())
+	runner := platform.NewNativeRunner()
+	if mode, _ := ctx.Value(platformSessionModeKey{}).(string); mode == "headless" {
+		return platform.StartHeadlessProviderSession(ctx, platform.DefaultConfig(), platform.TuningOptions{}, store, runner)
+	}
+	return platform.StartProviderSession(ctx, platform.DefaultConfig(), platform.TuningOptions{}, store, runner)
+}
+
+func runWindowsHeadless(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: myference windows headless <install|start|status|restore>")
+	}
+	action := args[0]
+	flags := flag.NewFlagSet("windows headless "+action, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", defaultConfigPath(), "provider configuration path")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	store, err := platform.DefaultJournalStore()
+	if err != nil {
+		return err
+	}
+	runner := platform.NewNativeRunner()
+	switch action {
+	case "install":
+		service, err := platform.DiscoverService(*configPath)
+		if err != nil {
+			return err
+		}
+		if err := platform.InstallHeadless(ctx, platform.HeadlessOptions{Executable: service.Executable, ConfigPath: service.ConfigPath, Installer: service.Installer}, store, runner); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(output, "Headless mode installed. Run `myference windows headless start` to sign out and launch it.")
+		return err
+	case "start":
+		active, err := platform.HeadlessStatus(store)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return errors.New("headless mode is not installed; run `myference windows headless install` first")
+		}
+		return runner.LaunchHeadless(ctx, true)
+	case "status":
+		active, err := platform.HeadlessStatus(store)
+		if err != nil {
+			return err
+		}
+		state := "inactive"
+		if active {
+			state = "installed"
+		}
+		_, err = fmt.Fprintf(output, "Windows headless mode %s\n", state)
+		return err
+	case "restore":
+		return runWindowsRestore(ctx, nil, output)
+	case "run":
+		active, err := platform.HeadlessStatus(store)
+		if err != nil || !active {
+			return errors.New("headless provider recovery state is unavailable")
+		}
+		runContext, cancel := signal.NotifyContext(context.WithValue(ctx, platformSessionModeKey{}, "headless"), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return runServe(runContext, *configPath, output)
+	default:
+		return fmt.Errorf("unknown Windows headless action %q", action)
+	}
 }
 
 func runWindowsFocus(ctx context.Context, args []string, output io.Writer) error {

@@ -42,6 +42,8 @@ const (
 	defaultWebURL            = "https://myference.xyz"
 )
 
+type platformSessionModeKey struct{}
+
 var version = "dev"
 var commit = "unknown"
 

@@ -26,3 +26,19 @@ func TestParseProcessSnapshots(t *testing.T) {
 		t.Fatalf("processes=%+v want=%+v", got, want)
 	}
 }
+
+func TestParseLidActionsAndShellPolicy(t *testing.T) {
+	input := "Current AC Power Setting Index: 0x00000000\r\nCurrent DC Power Setting Index: 0x00000001"
+	ac, dc, err := parseLidActions(input)
+	if err != nil || ac != 0 || dc != 1 {
+		t.Fatalf("lid=%d/%d err=%v", ac, dc, err)
+	}
+	had, value, err := parseShellPolicy("    Shell    REG_SZ    explorer.exe\r\n")
+	if err != nil || !had || value != "explorer.exe" {
+		t.Fatalf("shell=%v %q err=%v", had, value, err)
+	}
+	had, value, err = parseShellPolicy("")
+	if err != nil || had || value != "" {
+		t.Fatalf("absent shell=%v %q err=%v", had, value, err)
+	}
+}

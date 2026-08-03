@@ -149,6 +149,32 @@ func TestFocusOverlayUsesActiveProviderJournalAndRestoresOnlyFocus(t *testing.T)
 	}
 }
 
+func TestHeadlessProviderAttachesToExistingJournalAndRestoresIt(t *testing.T) {
+	store := NewJournalStore(t.TempDir())
+	journal := recoveryJournalFixture()
+	journal.SessionKind = "headless"
+	journal.InstalledTaskNames = []string{HeadlessProviderTask}
+	journal.AppliedStages = []string{"headless:tasks", "headless:shell"}
+	if err := store.Save(journal); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingTuningRunner{store: &store, snapshot: HostSnapshot{OnACPower: true, Journal: recoveryJournalFixture()}}
+	cleanup, err := StartHeadlessProviderSession(context.Background(), DefaultConfig(), TuningOptions{}, store, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := store.Load()
+	if err != nil || active.SessionKind != "headless" || len(active.AppliedStages) != 6 {
+		t.Fatalf("active=%+v err=%v", active, err)
+	}
+	if err := cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("journal after cleanup=%v", err)
+	}
+}
+
 func operationKinds(operations []Operation) []OperationKind {
 	result := make([]OperationKind, len(operations))
 	for i := range operations {

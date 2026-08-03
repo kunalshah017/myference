@@ -31,6 +31,7 @@ const (
 )
 
 var powerSchemePattern = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+var lidActionPattern = regexp.MustCompile(`(?im)Current (AC|DC) Power Setting Index:\s*0x([0-9a-f]+)`)
 
 type NativeRunner struct {
 	snapshot   HostSnapshot
@@ -74,7 +75,11 @@ func (runner *NativeRunner) Snapshot(ctx context.Context, config Config, options
 			}
 		}
 	}
-	journal := RecoveryJournal{SessionKind: "provider", OwnerPID: os.Getpid(), ActivePowerScheme: powerScheme}
+	sessionKind := "provider"
+	if options.Headless {
+		sessionKind = "headless"
+	}
+	journal := RecoveryJournal{SessionKind: sessionKind, OwnerPID: os.Getpid(), ActivePowerScheme: powerScheme}
 	for _, process := range processes {
 		name := trimExecutableSuffix(process.Name)
 		focusTarget := options.Focus && containsFold(config.StopProcesses, name)
@@ -88,6 +93,25 @@ func (runner *NativeRunner) Snapshot(ctx context.Context, config Config, options
 	}
 	journal.StoppedServices = append([]string(nil), runningServices...)
 	journal.Ollama.Environment = originalOllamaEnvironment()
+	if options.Headless {
+		lidOutput, lidErr := runWindowsCommand(ctx, "powercfg.exe", "/query", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION")
+		if lidErr != nil {
+			return HostSnapshot{}, fmt.Errorf("read lid actions: %w", lidErr)
+		}
+		journal.ACLidAction, journal.DCLidAction, err = parseLidActions(string(lidOutput))
+		if err != nil {
+			return HostSnapshot{}, err
+		}
+		command := exec.CommandContext(ctx, "reg.exe", "query", `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon`, "/v", "Shell")
+		shellOutput, shellErr := command.CombinedOutput()
+		if shellErr != nil && !strings.Contains(strings.ToLower(string(shellOutput)), "unable to find") {
+			return HostSnapshot{}, fmt.Errorf("read shell policy: %w", shellErr)
+		}
+		journal.HadShellPolicy, journal.ShellPolicy, err = parseShellPolicy(string(shellOutput))
+		if err != nil {
+			return HostSnapshot{}, err
+		}
+	}
 	snapshot := HostSnapshot{OnACPower: onAC, Processes: processes, RunningServices: runningServices, Journal: journal}
 	runner.snapshot = snapshot
 	return snapshot, nil
@@ -107,6 +131,9 @@ func (runner *NativeRunner) Apply(ctx context.Context, operation Operation) erro
 		return runner.restartOllama(ctx, runner.snapshot.Journal.Ollama.Executable, environmentValues(operation.Environment), "")
 	case OperationProcessPriority:
 		return setRunningOllamaPriority(ctx, operation.Priority)
+	case OperationInstallHeadlessTasks, OperationHeadlessShell, OperationACLidAction, OperationDCLidAction:
+		_, err := runWindowsCommand(ctx, operation.Program, operation.Args...)
+		return err
 	default:
 		return fmt.Errorf("unsupported Windows operation %q", operation.Kind)
 	}
@@ -140,9 +167,51 @@ func (runner *NativeRunner) Restore(ctx context.Context, journal RecoveryJournal
 				return fmt.Errorf("restore power scheme: %w", err)
 			}
 			restoredPower = true
+		case stage == "headless:lid:dc":
+			if _, err := runWindowsCommand(ctx, "powercfg.exe", "/setdcvalueindex", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION", strconv.Itoa(journal.DCLidAction)); err != nil {
+				return err
+			}
+		case stage == "headless:lid:ac":
+			if _, err := runWindowsCommand(ctx, "powercfg.exe", "/setacvalueindex", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION", strconv.Itoa(journal.ACLidAction)); err != nil {
+				return err
+			}
+		case stage == "headless:shell":
+			args := []string{"delete", `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon`, "/v", "Shell", "/f"}
+			if journal.HadShellPolicy {
+				args = []string{"add", `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon`, "/v", "Shell", "/t", "REG_SZ", "/d", journal.ShellPolicy, "/f"}
+			}
+			if _, err := runWindowsCommand(ctx, "reg.exe", args...); err != nil {
+				return err
+			}
+			if command := exec.Command("explorer.exe"); command.Start() == nil {
+				_ = command.Process.Release()
+			}
+		case stage == "headless:tasks":
+			for _, task := range journal.InstalledTaskNames {
+				_, _ = runWindowsCommand(ctx, "schtasks.exe", "/Delete", "/TN", task, "/F")
+			}
 		}
 	}
 	return nil
+}
+
+func (runner *NativeRunner) Elevated(ctx context.Context) bool {
+	result, _, _ := syscall.NewLazyDLL("shell32.dll").NewProc("IsUserAnAdmin").Call()
+	return result != 0
+}
+
+func (runner *NativeRunner) SnapshotHeadless(ctx context.Context) (RecoveryJournal, error) {
+	snapshot, err := runner.Snapshot(ctx, DefaultConfig(), SnapshotOptions{Headless: true})
+	return snapshot.Journal, err
+}
+
+func (runner *NativeRunner) LaunchHeadless(ctx context.Context, signOut bool) error {
+	if signOut {
+		_, err := runWindowsCommand(ctx, "shutdown.exe", "/l")
+		return err
+	}
+	_, err := runWindowsCommand(ctx, "schtasks.exe", "/Run", "/TN", HeadlessProviderTask)
+	return err
 }
 
 func (runner *NativeRunner) startKeepAwake() error {
@@ -225,6 +294,37 @@ func parseActivePowerScheme(output string) (string, error) {
 		return "", errors.New("active power scheme GUID was not reported by powercfg")
 	}
 	return strings.ToLower(match), nil
+}
+
+func parseLidActions(output string) (int, int, error) {
+	values := map[string]int{}
+	for _, match := range lidActionPattern.FindAllStringSubmatch(output, -1) {
+		value, err := strconv.ParseInt(match[2], 16, 32)
+		if err != nil {
+			return 0, 0, err
+		}
+		values[strings.ToUpper(match[1])] = int(value)
+	}
+	ac, acOK := values["AC"]
+	dc, dcOK := values["DC"]
+	if !acOK || !dcOK {
+		return 0, 0, errors.New("powercfg did not report both AC and DC lid actions")
+	}
+	return ac, dc, nil
+}
+
+func parseShellPolicy(output string) (bool, string, error) {
+	output = strings.TrimSpace(output)
+	if output == "" || strings.Contains(strings.ToLower(output), "unable to find") {
+		return false, "", nil
+	}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && strings.EqualFold(fields[0], "Shell") && strings.EqualFold(fields[1], "REG_SZ") {
+			return true, strings.Join(fields[2:], " "), nil
+		}
+	}
+	return false, "", errors.New("registry output did not contain a valid Shell policy")
 }
 
 func parseProcessSnapshots(input io.Reader) ([]ProcessSnapshot, error) {

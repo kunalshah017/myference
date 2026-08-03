@@ -199,17 +199,13 @@ func TestProductionDefaultsUseBrandedDomains(t *testing.T) {
 }
 
 func TestWindowsCommandsReachTheNativeDispatchBoundary(t *testing.T) {
-	for _, action := range []string{"headless"} {
-		t.Run(action, func(t *testing.T) {
-			err := run([]string{"windows", action}, &bytes.Buffer{})
-			if err == nil || !strings.Contains(err.Error(), "not implemented") {
-				t.Fatalf("run(windows %s) error = %v, want native dispatch boundary", action, err)
-			}
-		})
-	}
 	err := run([]string{"windows", "focus"}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "focus <start|status|restore>") {
 		t.Fatalf("run(windows focus) error = %v, want focus usage", err)
+	}
+	err = run([]string{"windows", "headless"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "headless <install|start|status|restore>") {
+		t.Fatalf("run(windows headless) error = %v, want headless usage", err)
 	}
 }
 
