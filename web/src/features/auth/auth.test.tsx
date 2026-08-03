@@ -5,10 +5,13 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { AuthAPI } from '../../lib/api'
+import { captureEvent } from '../../lib/analytics'
 import { ApiKeys } from './ApiKeys'
 import { ConnectWallet } from './ConnectWallet'
 import { DeviceApproval } from './DeviceApproval'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+vi.mock('../../lib/analytics', () => ({ captureEvent: vi.fn() }))
 
 const address = '0x1111111111111111111111111111111111111111' as Address
 let server: Server
@@ -20,7 +23,7 @@ let revokedKey = ''
 let createdEndpoints: string[] = []
 let loggedOut = false
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 beforeAll(async () => {
   server = createServer((request, response) => {
@@ -94,10 +97,11 @@ describe('account authentication', () => {
   })
 
   it('signs the nonce-bound challenge and establishes the server session', async () => {
-    render(<ConnectWallet api={new AuthAPI(baseURL)} provider={wallet()} />)
+    render(<ConnectWallet api={new AuthAPI(baseURL)} provider={wallet()} analyticsSurface="onboarding" />)
     await userEvent.click(screen.getByRole('button', { name: /connect wallet/i }))
     expect(await screen.findByText(/0x1111…1111/i)).toBeVisible()
     expect(verifyBody).toEqual({ challenge_id: 'challenge-1', signature: `0x${'11'.repeat(65)}` })
+    expect(captureEvent).toHaveBeenCalledWith('wallet_connected', { surface: 'onboarding' })
   })
 
   it('disconnects a restored wallet session from the server', async () => {

@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import type { EIP1193Provider } from 'viem'
 import { AuthAPI, type Session } from '../../lib/api'
+import { captureEvent } from '../../lib/analytics'
 import { authenticateWallet, injectedProvider } from '../../lib/chain'
 
-export function ConnectWallet({ api = new AuthAPI(), provider = injectedProvider(), session: restoredSession, onConnected, onDisconnected }: { api?: AuthAPI; provider?: EIP1193Provider; session?: Session; onConnected?: (session: Session) => void; onDisconnected?: () => void }) {
+export function ConnectWallet({ api = new AuthAPI(), provider = injectedProvider(), session: restoredSession, analyticsSurface, onConnected, onDisconnected }: { api?: AuthAPI; provider?: EIP1193Provider; session?: Session; analyticsSurface?: 'onboarding' | 'dashboard'; onConnected?: (session: Session) => void; onDisconnected?: () => void }) {
   const [session, setSession] = useState<Session>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -20,6 +21,7 @@ export function ConnectWallet({ api = new AuthAPI(), provider = injectedProvider
       })
       const established = await api.verify(challengeId, signed.signature)
       setSession(established)
+      if (analyticsSurface) captureEvent('wallet_connected', { surface: analyticsSurface })
       onConnected?.(established)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Wallet connection failed.')

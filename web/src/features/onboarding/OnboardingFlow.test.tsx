@@ -4,9 +4,12 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { APIError, type AccountAnalytics, type AccountOperations, type AnalyticsAPI, type AuthAPI, type InferenceAPI, type MarketplaceAPI, type OperationsAPI, type ReferencePriceAPI, type Session } from '../../lib/api'
+import { captureEvent } from '../../lib/analytics'
 import { OnboardingFlow } from './OnboardingFlow'
 
-afterEach(() => { cleanup(); vi.restoreAllMocks() })
+vi.mock('../../lib/analytics', () => ({ captureEvent: vi.fn() }))
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks() })
 
 const session: Session = { account_id: 'acct-1', wallet_address: '0x1111111111111111111111111111111111111111', expires_at: '2026-08-04T00:00:00Z' }
 const operations: AccountOperations = {
@@ -120,6 +123,7 @@ it('uses the same output-token ceiling for the starter estimate and live request
   expect(deps.inferenceAPI.chat).toHaveBeenCalledWith('recommended', 'mf_secret', expect.any(String), expect.any(Array), 1_000)
   expect(await screen.findByText('A live provider response.')).toBeVisible()
   expect(completed).toHaveBeenCalledWith('consumer')
+  expect(captureEvent).toHaveBeenCalledWith('onboarding_completed', { role: 'consumer' })
   await userEvent.selectOptions(screen.getByRole('combobox', { name: /model/i }), 'costly')
   expect(await screen.findByRole('button', { name: /create replacement key/i })).toBeVisible()
 })

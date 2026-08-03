@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { AuthAPI } from '../lib/api'
+import { captureEvent } from '../lib/analytics'
 import { DashboardShell } from './DashboardShell'
 
-afterEach(() => { cleanup(); localStorage.clear() })
+vi.mock('../lib/analytics', () => ({ captureEvent: vi.fn() }))
+
+afterEach(() => { cleanup(); localStorage.clear(); vi.clearAllMocks() })
 
 const authAPI = { session: async () => undefined } as AuthAPI
 
@@ -19,6 +22,8 @@ it('lets one account switch from consuming to hosting inference', async () => {
   await user.click(screen.getByRole('button', { name: /host inference/i }))
   expect(screen.getByRole('heading', { name: /host inference/i })).toBeVisible()
   expect(screen.getByText(/connect a wallet to manage provider machines/i)).toBeVisible()
+  expect(captureEvent).toHaveBeenCalledWith('onboarding_skipped', { role: 'consumer' })
+  expect(captureEvent).toHaveBeenCalledWith('dashboard_viewed', { view: 'hosting' })
 })
 
 it('starts first-time visitors in onboarding and resumes from the dashboard reminder', async () => {
@@ -31,12 +36,14 @@ it('starts first-time visitors in onboarding and resumes from the dashboard remi
   expect(localStorage.getItem('myference:onboarding-skipped')).toBe('true')
   await user.click(screen.getByRole('button', { name: /continue setup/i }))
   expect(screen.getByRole('heading', { name: /connect your account/i })).toBeVisible()
+  expect(captureEvent).toHaveBeenCalledWith('onboarding_resumed', { role: 'consumer' })
 })
 
 it('remembers the provider path when onboarding is skipped', async () => {
   const user = userEvent.setup()
   render(<QueryClientProvider client={new QueryClient()}><DashboardShell authAPI={authAPI} /></QueryClientProvider>)
   await user.click(await screen.findByRole('button', { name: /host your ai inference/i }))
+  expect(captureEvent).toHaveBeenCalledWith('onboarding_role_selected', { role: 'provider' })
   await user.click(screen.getByRole('button', { name: /skip for now/i }))
   expect(localStorage.getItem('myference:onboarding-role')).toBe('provider')
   expect(screen.getByText(/connect a machine, bond collateral, and publish a live offer/i)).toBeVisible()

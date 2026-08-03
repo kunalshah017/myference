@@ -10,6 +10,7 @@ import { parseMON } from '../../lib/amount'
 import { injectedProvider } from '../../lib/chain'
 import { hashLabel, ViemMarketWriter, type MarketWriter, type SubmittedTransaction } from '../../lib/marketContract'
 import { AnalyticsAPI, APIError, AuthAPI, InferenceAPI, MarketplaceAPI, OperationsAPI, ReferencePriceAPI, type APIKey, type MarketModel, type Session } from '../../lib/api'
+import { captureEvent } from '../../lib/analytics'
 import { deriveConsumerProgress, deriveProviderProgress, rankLiveModels, recommendedStarterSpend, type OnboardingProgress, type OnboardingRole } from './onboarding'
 
 type Props = {
@@ -114,11 +115,12 @@ export function OnboardingFlow({ session, initialRole, authAPI: suppliedAuth, op
   useEffect(() => {
     if (role && progress.complete && completed.current !== role) {
       completed.current = role
+      captureEvent('onboarding_completed', { role })
       onComplete?.(role)
     }
   }, [onComplete, progress.complete, role])
 
-  const choose = (next: OnboardingRole) => { setRole(next); onRoleChange?.(next); setError(''); setStatus('') }
+  const choose = (next: OnboardingRole) => { setRole(next); captureEvent('onboarding_role_selected', { role: next }); onRoleChange?.(next); setError(''); setStatus('') }
   if (!role) return <div className="onboarding-screen"><a className="wordmark" href="/" aria-label="Myference home"><span>M/</span> Myference</a><RoleChoice choose={choose} skip={onSkip} /></div>
 
   const marketWriter = suppliedWriter ?? (operations.data ? new ViemMarketWriter(operations.data, injectedProvider()) : undefined)
@@ -164,7 +166,7 @@ export function OnboardingFlow({ session, initialRole, authAPI: suppliedAuth, op
     <div className="onboarding-layout">
       <RouteMap role={role} progress={progress} />
       <main className="onboarding-content" aria-live="polite">
-        {!accountSession ? <section className="onboarding-step"><p className="eyebrow">Step 1</p><h1>Connect your account</h1><p>{expired ? 'Your browser session expired. Sign again to continue from your on-chain state.' : 'Your wallet signs a login message. No MON moves until you approve a separate transaction.'}</p><ConnectWallet api={authAPI} onConnected={onConnected} /></section>
+        {!accountSession ? <section className="onboarding-step"><p className="eyebrow">Step 1</p><h1>Connect your account</h1><p>{expired ? 'Your browser session expired. Sign again to continue from your on-chain state.' : 'Your wallet signs a login message. No MON moves until you approve a separate transaction.'}</p><ConnectWallet api={authAPI} analyticsSurface="onboarding" onConnected={onConnected} /></section>
         : loading ? <div className="dashboard-empty" role="status"><strong>Reading your account state…</strong><p>Checking Monad Testnet and the Myference indexer.</p></div>
         : operations.isError ? <section className="onboarding-step"><p className="eyebrow">Account state</p><h1>Try the indexer again</h1><p role="alert">Your account state could not be loaded. No transaction was sent.</p><button type="button" onClick={() => void operations.refetch()}><RefreshCw size={16} aria-hidden="true" /> Retry account state</button></section>
         : role === 'consumer' ? <ConsumerSteps models={models} selectedModel={selectedModel} modelName={modelName} setModelName={setModelName} inventoryError={inventory.isError} refreshInventory={() => void inventory.refetch()} operationsError={operations.isError} operations={operations.data} keys={keys.data ?? []} keySecret={keySecret} recommended={recommended} usdPerMON={price.data?.usd_per_mon} depositAmount={depositAmount} setDepositAmount={setDepositAmount} deposit={deposit} sessionAllowance={sessionAllowance} setSessionAllowance={setSessionAllowance} openSession={openSession} keyMaximum={keyMaximum} setKeyMaximum={setKeyMaximum} createKey={createKey} prompt={prompt} setPrompt={setPrompt} infer={infer} answer={answer} progress={consumerProgress} finish={onSkip} />
