@@ -27,6 +27,24 @@ func TestConfigRejectsProtectedServices(t *testing.T) {
 	}
 }
 
+func TestConfigProtectsWindowsUpdateServices(t *testing.T) {
+	for _, service := range []string{"UsoSvc", "DoSvc", "wuauserv", "WaaSMedicSvc"} {
+		t.Run(service, func(t *testing.T) {
+			config := DefaultConfig()
+			for _, configured := range config.StopServices {
+				if strings.EqualFold(configured, service) {
+					t.Fatalf("default config must not stop protected service %q", service)
+				}
+			}
+
+			config.StopServices = []string{service}
+			if err := config.Validate(); err == nil {
+				t.Fatalf("Validate() accepted protected service %q", service)
+			}
+		})
+	}
+}
+
 func TestConfigRequiresACPowerUnlessExplicitlyAllowed(t *testing.T) {
 	config := DefaultConfig()
 

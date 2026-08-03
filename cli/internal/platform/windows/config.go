@@ -41,7 +41,7 @@ func DefaultConfig() Config {
 			"OneDrive", "ms-teams", "Teams", "Discord", "Spotify", "steam", "EpicGamesLauncher", "Dropbox", "Creative Cloud", "NVIDIA Broadcast",
 		},
 		StopServices: []string{
-			"AdobeUpdateService", "DiagTrack", "DoSvc", "Everything", "MapsBroker", "PhoneSvc", "PCManager Service Store", "Spooler", "SysMain", "UsoSvc", "WSearch", "WSLService", "VMAuthdService", "VMnetDHCP", "VMUSBArbService", "VMware NAT Service",
+			"AdobeUpdateService", "DiagTrack", "Everything", "MapsBroker", "PhoneSvc", "PCManager Service Store", "Spooler", "SysMain", "WSearch", "WSLService", "VMAuthdService", "VMnetDHCP", "VMUSBArbService", "VMware NAT Service",
 		},
 	}
 }
@@ -103,8 +103,8 @@ func (config Config) ValidatePower(onACPower, allowBattery bool) error {
 func isProtectedService(name string) bool {
 	protected := map[string]struct{}{
 		"bfe": {}, "bits": {}, "cryptsvc": {}, "dhcp": {}, "dnscache": {}, "eventlog": {},
-		"mpssvc": {}, "nlasvc": {}, "rpcss": {}, "samss": {}, "schedule": {}, "securityhealthservice": {},
-		"windefend": {}, "wuauserv": {},
+		"dosvc": {}, "mpssvc": {}, "nlasvc": {}, "rpcss": {}, "samss": {}, "schedule": {}, "sedsvc": {},
+		"securityhealthservice": {}, "trustedinstaller": {}, "usosvc": {}, "waasmedicsvc": {}, "windefend": {}, "wuauserv": {},
 	}
 	_, found := protected[strings.ToLower(strings.TrimSpace(name))]
 	return found
