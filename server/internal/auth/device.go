@@ -195,8 +195,8 @@ func (s *Service) RevokeMachine(ctx context.Context, machineID string) error {
 }
 
 func (s *Service) CreateAPIKey(ctx context.Context, accountID string, scope APIKeyScope) (APIKey, error) {
-	if len(scope.Models) == 0 || len(scope.Endpoints) == 0 || scope.MaxSpendWei == 0 {
-		return APIKey{}, errors.New("model, endpoint, and spend scopes are required")
+	if len(scope.Endpoints) == 0 || scope.MaxSpendWei == 0 {
+		return APIKey{}, errors.New("endpoint and spend scopes are required")
 	}
 	id, err := randomID("key")
 	if err != nil {
@@ -225,10 +225,14 @@ func (s *Service) AuthorizeAPIKey(ctx context.Context, token, model, endpoint st
 	if err := json.Unmarshal(scopeJSON, &principal.Scope); err != nil {
 		return APIKeyPrincipal{}, fmt.Errorf("decode API key scope: %w", err)
 	}
-	if !contains(principal.Scope.Models, model) || !contains(principal.Scope.Endpoints, endpoint) || spend > principal.Scope.MaxSpendWei {
+	if !allowsModel(principal.Scope.Models, model) || !contains(principal.Scope.Endpoints, endpoint) || spend > principal.Scope.MaxSpendWei {
 		return APIKeyPrincipal{}, ErrScopeDenied
 	}
 	return principal, nil
+}
+
+func allowsModel(models []string, model string) bool {
+	return len(models) == 0 || contains(models, model)
 }
 
 func (s *Service) RevokeAPIKey(ctx context.Context, keyID string) error {

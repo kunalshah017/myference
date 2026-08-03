@@ -94,6 +94,34 @@ func TestAPIKeysEnforceModelEndpointAndSpendScopes(t *testing.T) {
 	}
 }
 
+func TestEmptyModelScopeAllowsEveryModel(t *testing.T) {
+	for _, model := range []string{"qwen3:8b", "claude-sonnet", "a-model-published-later"} {
+		if !allowsModel(nil, model) {
+			t.Fatalf("empty model scope must allow %q", model)
+		}
+	}
+	if allowsModel([]string{"qwen3:8b"}, "claude-sonnet") {
+		t.Fatal("non-empty model scope must remain an exact allowlist")
+	}
+}
+
+func TestAPIKeysMayBeCreatedWithoutAModelRestriction(t *testing.T) {
+	ctx, service, accountID := newIntegrationService(t)
+	key, err := service.CreateAPIKey(ctx, accountID, APIKeyScope{
+		Models:      []string{},
+		Endpoints:   []string{"/v1/chat/completions", "/v1/messages"},
+		MaxSpendWei: 1_000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []string{"qwen3:8b", "claude-sonnet"} {
+		if _, err := service.AuthorizeAPIKey(ctx, key.Token, model, "/v1/chat/completions", 1_000); err != nil {
+			t.Fatalf("unrestricted key denied %q: %v", model, err)
+		}
+	}
+}
+
 func newIntegrationService(t *testing.T) (context.Context, *Service, string) {
 	t.Helper()
 	databaseURL := os.Getenv("MYFERENCE_TEST_DATABASE_URL")

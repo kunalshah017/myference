@@ -29,7 +29,7 @@ it('opens the machine approval workspace from the device verification link', asy
 
   expect(await screen.findByRole('heading', { name: /connect your application/i })).toBeVisible()
   expect(screen.getByRole('button', { name: /api access/i })).toHaveAttribute('aria-current', 'page')
-  expect(screen.getByText(/connect a wallet to create scoped api keys and approve provider devices/i)).toBeVisible()
+  expect(screen.getByText(/connect a wallet to create api keys and approve provider devices/i)).toBeVisible()
 })
 
 it('serves complete public documentation for using and hosting inference', () => {

@@ -59,6 +59,17 @@ describe('consumer progress', () => {
     expect(progress.steps.map((step) => step.complete)).toEqual([true, true, true, true, true, true])
     expect(progress.complete).toBe(true)
   })
+
+  it('accepts an unrestricted key for any selected model', () => {
+    const progress = deriveConsumerProgress({
+      connected: true,
+      selectedModel: models[1],
+      operations,
+      apiKeys: [{ id: 'all-models', scope: { models: [], endpoints: ['/v1/chat/completions', '/v1/messages'], max_spend_wei: '10000' } }],
+      analytics,
+    })
+    expect(progress.steps.find((step) => step.id === 'key')?.complete).toBe(true)
+  })
 })
 
 describe('provider progress', () => {

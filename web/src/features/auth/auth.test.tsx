@@ -4,7 +4,7 @@ import type { Address, EIP1193Provider } from 'viem'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { AuthAPI } from '../../lib/api'
+import { AuthAPI, MarketplaceAPI } from '../../lib/api'
 import { captureEvent } from '../../lib/analytics'
 import { ApiKeys } from './ApiKeys'
 import { ConnectWallet } from './ConnectWallet'
@@ -21,6 +21,7 @@ let approvedCode = ''
 let authorizedSigner = ''
 let revokedKey = ''
 let createdEndpoints: string[] = []
+let createdModels: string[] = []
 let loggedOut = false
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
@@ -50,7 +51,15 @@ beforeAll(async () => {
         send(200, [{ id: 'key-existing', scope: { models: ['qwen'], endpoints: ['/v1/chat/completions'], max_spend_wei: 500 }, created_at: '2026-08-02T17:00:00Z' }])
       } else if (request.url === '/auth/api-keys' && request.method === 'POST') {
         createdEndpoints = body.endpoints
+        createdModels = body.models
         send(201, { id: 'key-new', token: 'key-new.one-time-secret', scope: body })
+      } else if (request.url === '/api/models') {
+        send(200, [
+          { model: 'qwen2.5:0.5b', available_providers: 1, total_capacity: 1, minimum_input_per_million_wei: '1', minimum_output_per_million_wei: '1', minimum_compute_per_second_wei: '1', stale: false },
+          { model: 'claude-sonnet', available_providers: 1, total_capacity: 1, minimum_input_per_million_wei: '1', minimum_output_per_million_wei: '1', minimum_compute_per_second_wei: '1', stale: false },
+          { model: 'stale-model', available_providers: 1, total_capacity: 1, minimum_input_per_million_wei: '1', minimum_output_per_million_wei: '1', minimum_compute_per_second_wei: '1', stale: true },
+          { model: 'offline-model', available_providers: 0, total_capacity: 0, minimum_input_per_million_wei: '1', minimum_output_per_million_wei: '1', minimum_compute_per_second_wei: '1', stale: false },
+        ])
       } else if (request.url?.startsWith('/auth/api-keys/') && request.method === 'DELETE') {
         revokedKey = request.url.split('/').at(-1) ?? ''
         send(204)
@@ -126,17 +135,34 @@ describe('account authentication', () => {
     expect(authorizedSigner).toBe('0x0000000000000000000000000000000000001234')
   })
 
-  it('reveals a new API key once, displays scopes, and revokes it', async () => {
-    render(<QueryClientProvider client={new QueryClient()}><ApiKeys api={new AuthAPI(baseURL)} /></QueryClientProvider>)
+  it('creates an all-model API key by default, reveals it once, and revokes it', async () => {
+    createdModels = ['not-reset']
+    render(<QueryClientProvider client={new QueryClient()}><ApiKeys api={new AuthAPI(baseURL)} marketplaceApi={new MarketplaceAPI(baseURL)} /></QueryClientProvider>)
     expect(await screen.findByText('qwen')).toBeVisible()
-    await userEvent.type(screen.getByLabelText(/model/i), 'qwen2.5:0.5b')
     await userEvent.type(screen.getByLabelText(/maximum spend/i), '0.000000000000001')
     await userEvent.click(screen.getByRole('button', { name: /create api key/i }))
     expect(await screen.findByText('key-new.one-time-secret')).toBeVisible()
+    expect(createdModels).toEqual([])
     expect(createdEndpoints).toEqual(['/v1/chat/completions', '/v1/messages'])
+    expect(screen.getByText('All models')).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: /i saved this key/i }))
     expect(screen.queryByText('key-new.one-time-secret')).not.toBeInTheDocument()
     await act(async () => { await userEvent.click(screen.getByRole('button', { name: /revoke key-existing/i })) })
     expect(revokedKey).toBe('key-existing')
+  })
+
+  it('optionally restricts a key using models fetched from the live catalog', async () => {
+    createdModels = []
+    render(<QueryClientProvider client={new QueryClient()}><ApiKeys api={new AuthAPI(baseURL)} marketplaceApi={new MarketplaceAPI(baseURL)} /></QueryClientProvider>)
+    await userEvent.click(screen.getByRole('checkbox', { name: /restrict to selected models/i }))
+    expect(await screen.findByRole('checkbox', { name: 'qwen2.5:0.5b' })).toBeVisible()
+    expect(screen.queryByRole('checkbox', { name: 'stale-model' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'offline-model' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('checkbox', { name: 'qwen2.5:0.5b' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'claude-sonnet' }))
+    await userEvent.type(screen.getByLabelText(/maximum spend/i), '0.000000000000001')
+    await userEvent.click(screen.getByRole('button', { name: /create api key/i }))
+    await screen.findByText('key-new.one-time-secret')
+    expect(createdModels).toEqual(['qwen2.5:0.5b', 'claude-sonnet'])
   })
 })

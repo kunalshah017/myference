@@ -66,7 +66,7 @@ function DocsPage() {
             <Step number="02" title="Deposit native MON"><p>Open <strong>Funds</strong>, enter a MON amount, and confirm <strong>Deposit to escrow</strong> in your wallet. Keep a little MON outside escrow for gas.</p></Step>
             <Step number="03" title="Open a bounded session"><p>Set an allowance and duration under <strong>Bounded spending sessions</strong>. Requests can spend only from finalized session allowance, never from your wallet directly.</p></Step>
             <Step number="04" title="Choose a live model"><p>Open <strong>Models</strong> to compare providers, token rates, compute rates, health, and evidence. Stale inventory is marked unavailable and is never selected for a request.</p></Step>
-            <Step number="05" title="Create a scoped API key"><p>Open <strong>API access</strong>. Enter the exact model ID and a maximum spend in MON. The key is restricted to that model, the supported endpoints, and the limit. Copy it when shown—it is displayed once.</p></Step>
+            <Step number="05" title="Create an API key"><p>Open <strong>API access</strong> and set a maximum spend in MON. New keys work with every model by default. For a least-privilege project key, enable the optional model restriction and choose from the live catalog. Copy the secret when shown—it is displayed once.</p></Step>
             <Step number="06" title="Send a real request"><p>Use the in-browser <strong>Playground</strong>, or call either compatibility API below. Myference currently requires streaming requests.</p></Step>
             <Step number="07" title="Review and exit"><p>Use <strong>Usage</strong> to follow reservation, provider streaming, signatures, submission, and final settlement. Revoke unused keys, request session close, finalize it after the displayed delay, then withdraw or claim available MON.</p></Step>
           </ol>
@@ -110,7 +110,7 @@ stream = client.chat.completions.create(
 )
 for event in stream:
     print(event.choices[0].delta.content or "", end="")`}</CopyBlock>
-          <div className="docs-callout info"><Code2 size={19} /><div><strong>Choose the exact live model ID</strong><p>Copy it from Models or Playground. The same ID must be included in the API key's model scope.</p></div></div>
+          <div className="docs-callout info"><Code2 size={19} /><div><strong>Choose the exact live model ID</strong><p>Copy it from Models or Playground. Default keys can call any model; restricted keys can call only the models selected from the live catalog when the key was created.</p></div></div>
         </section>
 
         <section id="anthropic" className="docs-section">
@@ -199,7 +199,7 @@ myference capacity`}</CopyBlock>
             <li><Check /> A digest proves the runtime artifact being advertised, not response quality or that two differently packaged models have identical weights.</li>
             <li><Check /> Agent workspaces reject absolute/traversal paths, invalid base64, more than 64 files, or more than 512 KiB decoded content.</li>
             <li><Check /> The public API exposes model responses only; command execution remains private to the disposable, read-only container and has no Docker socket or host-home mount.</li>
-            <li><Check /> API keys are scoped, shown once, and revocable. Keep them server-side and never commit them.</li>
+            <li><Check /> API keys are shown once and revocable. Model restrictions are optional; endpoint and maximum-spend limits still constrain every key.</li>
           </ul>
         </section>
 
@@ -219,7 +219,7 @@ myference capacity`}</CopyBlock>
 
         <section id="reference" className="docs-section">
           <p className="eyebrow">Quick reference</p><h2>Commands and endpoints.</h2>
-          <div className="docs-reference-grid"><article><h3>CLI</h3><code>myference host</code><code>myference login</code><code>myference backend add|list|start|stop|version</code><code>myference capacity</code><code>myference status --json</code><code>myference serve</code><code>myference service install|start|stop|status|uninstall</code></article><article><h3>Public API</h3><code>POST /v1/chat/completions</code><code>POST /v1/messages</code><p>Both require <code>stream: true</code>, a scoped API key, and <code>X-Myference-Max-Spend</code> in wei MON.</p></article></div>
+          <div className="docs-reference-grid"><article><h3>CLI</h3><code>myference host</code><code>myference login</code><code>myference backend add|list|start|stop|version</code><code>myference capacity</code><code>myference status --json</code><code>myference serve</code><code>myference service install|start|stop|status|uninstall</code></article><article><h3>Public API</h3><code>POST /v1/chat/completions</code><code>POST /v1/messages</code><p>Both require <code>stream: true</code>, an API key, and <code>X-Myference-Max-Spend</code> in wei MON.</p></article></div>
           <div className="docs-final-actions"><a className="landing-primary" href="/app"><KeyRound size={17} /> Create an API key</a><a className="landing-secondary" href="/host"><Server size={17} /> Open provider workspace</a><a href="https://github.com/kunalshah017/myference">Read the source <ExternalLink size={15} /></a></div>
         </section>
       </main>

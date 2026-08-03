@@ -40,7 +40,7 @@ export function ChatPlayground({ api: supplied, marketplace: suppliedMarketplace
       {error && <p role="alert" className="inline-error">{error}</p>}
     </form>
     <section className="chat-transcript" aria-label="Chat transcript">
-      {conversation.length === 0 ? <div className="dashboard-empty"><strong>No messages yet</strong><p>Choose a live model, enter a scoped API key, and send a test prompt.</p></div> : conversation.map((item, index) => <article key={`${item.role}-${index}`} data-role={item.role}><span>{item.role}</span><p>{item.content}</p></article>)}
+      {conversation.length === 0 ? <div className="dashboard-empty"><strong>No messages yet</strong><p>Choose a live model, enter an API key, and send a test prompt.</p></div> : conversation.map((item, index) => <article key={`${item.role}-${index}`} data-role={item.role}><span>{item.role}</span><p>{item.content}</p></article>)}
     </section>
   </div>
 }

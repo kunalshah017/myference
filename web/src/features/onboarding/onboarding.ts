@@ -44,7 +44,7 @@ export function deriveConsumerProgress({ connected, selectedModel, operations, a
   now?: number
 }) {
   const requiredSpend = selectedModel ? recommendedStarterSpend(selectedModel) : 0n
-  const scopedKey = selectedModel && apiKeys.some((key) => key.scope.models.includes(selectedModel.model) && ['/v1/chat/completions', '/v1/messages'].every((endpoint) => key.scope.endpoints.includes(endpoint)) && BigInt(key.scope.max_spend_wei) >= requiredSpend)
+  const scopedKey = selectedModel && apiKeys.some((key) => (key.scope.models.length === 0 || key.scope.models.includes(selectedModel.model)) && ['/v1/chat/completions', '/v1/messages'].every((endpoint) => key.scope.endpoints.includes(endpoint)) && BigInt(key.scope.max_spend_wei) >= requiredSpend)
   return progress([
     { id: 'wallet', label: 'Connect account', complete: connected },
     { id: 'model', label: 'Choose inference', complete: Boolean(selectedModel) },

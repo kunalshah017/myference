@@ -119,6 +119,7 @@ it('uses the same output-token ceiling for the starter estimate and live request
   render(<QueryClientProvider client={new QueryClient()}><OnboardingFlow {...deps} session={session} initialRole="consumer" onComplete={completed} /></QueryClientProvider>)
 
   await userEvent.click(await screen.findByRole('button', { name: /create api key/i }))
+  expect(issued[0]?.scope.models).toEqual([])
   await userEvent.click(await screen.findByRole('button', { name: /send live request/i }))
   expect(deps.inferenceAPI.chat).toHaveBeenCalledWith('recommended', 'mf_secret', expect.any(String), expect.any(Array), 1_000)
   expect(await screen.findByText('A live provider response.')).toBeVisible()
