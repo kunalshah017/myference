@@ -10,7 +10,7 @@ export type MarketOffer = { machine_id: string; provider_address: `0x${string}`;
 export type MarketModelDetail = { model: string; offers: MarketOffer[] }
 export type ActivityRecord = { request_id: string; session_id: string; account_id: string; state: string; machine_id: string; offer_id: string; model: string; price_version: number; updated_at: string; transaction_hash?: string }
 export type OperationSession = { session_id: `0x${string}`; allowance_wei: string; spent_wei: string; expires_at: number; close_available_at: number; finalized: boolean }
-export type OperationBackend = { id: string; offer_id?: string; kind: string; model: string; enabled: boolean; healthy: boolean; capacity: number }
+export type OperationBackend = { id: string; offer_hashes: `0x${string}`[]; kind: string; model: string; enabled: boolean; healthy: boolean; capacity: number }
 export type OperationMachine = { id: string; name: string; revoked: boolean; backends: OperationBackend[] }
 export type OperationOffer = { offer_id: `0x${string}`; version: number; model_hash: `0x${string}`; capability_hash: `0x${string}`; input_per_million_wei: string; output_per_million_wei: string; compute_per_second_wei: string }
 export type AccountOperations = { chain_id: number; contract_address: `0x${string}`; explorer_url: string; confirmations: number; wallet_address: `0x${string}`; customer_balance_wei: string; provider_bond_wei: string; claimable_wei: string; provider_earnings_wei: string; bond_exit_available_at: number; sessions: OperationSession[]; machines: OperationMachine[]; offers: OperationOffer[] }
@@ -21,6 +21,21 @@ export type UsageRecord = { request_id: string; model: string; input_tokens: num
 export type ProviderSettlement = { request_id: string; model: string; input_tokens: number; output_tokens: number; compute_milliseconds: number; revenue_wei: string; transaction_hash: string; completed_at: string }
 export type SlashRecord = { request_id: string; amount_wei: string; block_number: number; transaction_hash: string; indexed_at: string }
 export type AccountAnalytics = { customer: AnalyticsTotals; provider: AnalyticsTotals; daily: AnalyticsDay[]; usage: UsageRecord[]; settlements: ProviderSettlement[]; slashes: SlashRecord[] }
+
+export class APIError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'APIError'
+    this.status = status
+  }
+}
+
+async function responseError(response: Response) {
+  const message = (await response.text()).trim()
+  return new APIError(response.status, message || `Request failed (${response.status})`)
+}
 
 export class AuthAPI {
   private readonly baseURL: string
@@ -68,10 +83,7 @@ export class AuthAPI {
       headers: options.body === undefined ? undefined : { 'content-type': 'application/json' },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     })
-    if (!response.ok) {
-      const message = (await response.text()).trim()
-      throw new Error(message || `Request failed (${response.status})`)
-    }
+    if (!response.ok) throw await responseError(response)
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>
   }
@@ -100,13 +112,13 @@ export class OperationsAPI {
 export class InferenceAPI {
   private readonly baseURL: string
   constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
-  async chat(model: string, apiKey: string, maximumSpend: string, messages: ChatMessage[]) {
+  async chat(model: string, apiKey: string, maximumSpend: string, messages: ChatMessage[], maximumOutputTokens?: number) {
     const response = await fetch(`${this.baseURL}/v1/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'X-Myference-Max-Spend': maximumSpend },
-      body: JSON.stringify({ model, stream: true, messages }),
+      body: JSON.stringify({ model, stream: true, messages, ...(maximumOutputTokens ? { max_completion_tokens: maximumOutputTokens } : {}) }),
     })
-    if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
+    if (!response.ok) throw await responseError(response)
     let content = ''
     for (const line of (await response.text()).split(/\r?\n/)) {
       if (!line.startsWith('data: ')) continue
@@ -133,6 +145,6 @@ export function publicAPIBaseURL() {
 
 async function requestJSON<T>(url: string): Promise<T> {
   const response = await fetch(url, { credentials: 'include' })
-  if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
+  if (!response.ok) throw await responseError(response)
   return response.json() as Promise<T>
 }

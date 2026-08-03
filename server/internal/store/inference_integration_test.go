@@ -234,6 +234,9 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	if err := s.CreateMachine(ctx, Machine{ID: "reconcile-machine", AccountID: "reconcile-account", Name: "unused-mac"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO backends(id,machine_id,kind,model,enabled) VALUES ('discovered-qwen','reconcile-machine','ollama','qwen',true)`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE machines SET signer_address='0x3333333333333333333333333333333333333333' WHERE id='reconcile-machine'`); err != nil {
 		t.Fatal(err)
 	}
@@ -345,9 +348,19 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 			t.Fatalf("marketplace mixed second provider rates: %+v", item)
 		}
 	}
+	discoveredOperations, err := s.AccountOperations(ctx, "reconcile-account", 10143, contract, "https://testnet.monadexplorer.com", 1)
+	if err != nil || len(discoveredOperations.Machines) != 1 || len(discoveredOperations.Machines[0].Backends) != 1 || discoveredOperations.Machines[0].Backends[0].ID != "discovered-qwen" {
+		t.Fatalf("discovered backend operations=%+v err=%v", discoveredOperations.Machines, err)
+	}
+	if len(discoveredOperations.Machines[0].Backends[0].OfferHashes) != 1 || discoveredOperations.Machines[0].Backends[0].OfferHashes[0] != offerHash {
+		t.Fatalf("discovered backend active offer hashes=%+v", discoveredOperations.Machines[0].Backends[0].OfferHashes)
+	}
 	operations, err := s.AccountOperations(ctx, "second-provider", 10143, contract, "https://testnet.monadexplorer.com", 1)
 	if err != nil || len(operations.Machines) != 1 || len(operations.Machines[0].Backends) != 1 || !operations.Machines[0].Backends[0].Healthy || operations.Machines[0].Backends[0].Capacity != 1 {
 		t.Fatalf("second provider operations=%+v err=%v", operations.Machines, err)
+	}
+	if len(operations.Machines[0].Backends[0].OfferHashes) != 1 || operations.Machines[0].Backends[0].OfferHashes[0] != offerHash {
+		t.Fatalf("second provider active offer hashes=%+v", operations.Machines[0].Backends[0].OfferHashes)
 	}
 	requestID := "0x" + strings.Repeat("12", 32)
 	sessionID := "0x" + strings.Repeat("34", 32)

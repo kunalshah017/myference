@@ -14,7 +14,7 @@ it('shows real machines, immutable offer versions, collateral, and earnings', as
   const operations: AccountOperations = {
     chain_id: 10143, contract_address: '0x4444444444444444444444444444444444444444', explorer_url: 'https://testnet.monadexplorer.com', confirmations: 2,
     wallet_address: '0x1111111111111111111111111111111111111111', customer_balance_wei: '0', provider_bond_wei: '2000', claimable_wei: '3000', provider_earnings_wei: '95', bond_exit_available_at: 0,
-    sessions: [], machines: [{ id: 'machine-1', name: 'studio-node', revoked: false, backends: [{ id: 'backend:machine-1:local-qwen', kind: 'ollama', model: 'qwen', enabled: true, healthy: true, capacity: 2 }] }],
+    sessions: [], machines: [{ id: 'machine-1', name: 'studio-node', revoked: false, backends: [{ id: 'backend:machine-1:local-qwen', offer_hashes: [], kind: 'ollama', model: 'qwen', enabled: true, healthy: true, capacity: 2 }] }],
     offers: [{ offer_id: '0xoffer', version: 4, model_hash: '0xmodel', capability_hash: '0xcap', input_per_million_wei: '10', output_per_million_wei: '20', compute_per_second_wei: '30' }],
   }
   const api = { operations: async () => operations } as OperationsAPI
@@ -49,7 +49,7 @@ it('selects a backend discovered after the provider screen opens', async () => {
   const writer = { publishOffer: async () => ({ hash: '0x1', confirm: async () => undefined }) } as unknown as MarketWriter
   const submit = async (action:()=>Promise<SubmittedTransaction>) => { const transaction=await action(); return transaction.confirm() }
   const view = render(<QueryClientProvider client={client}><Offers offers={[]} backends={[]} writer={writer} submit={submit} /></QueryClientProvider>)
-  const discovered: OperationBackend[] = [{ id: 'backend:machine-1:local', kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }]
+  const discovered: OperationBackend[] = [{ id: 'backend:machine-1:local', offer_hashes: [], kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }]
   view.rerender(<QueryClientProvider client={client}><Offers offers={[]} backends={discovered} writer={writer} submit={submit} /></QueryClientProvider>)
   expect(screen.getByRole('combobox', { name: /backend and model/i })).toHaveValue('backend:machine-1:local')
 	await userEvent.type(screen.getByLabelText(/input tokens/i), '0.1')
@@ -60,7 +60,7 @@ it('selects a backend discovered after the provider screen opens', async () => {
 
 it('does not activate an unconfirmed offer version', async () => {
   const client = new QueryClient()
-  const backend: OperationBackend[] = [{ id: 'backend:machine-1:local', kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }]
+  const backend: OperationBackend[] = [{ id: 'backend:machine-1:local', offer_hashes: [], kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }]
   render(<QueryClientProvider client={client}><Offers offers={[]} backends={backend} writer={{ publishOffer: async () => ({ hash: '0x1', confirm: async () => undefined }) } as unknown as MarketWriter} submit={async()=>undefined} /></QueryClientProvider>)
   await userEvent.type(screen.getByLabelText(/input tokens/i), '0.1')
   await userEvent.type(screen.getByLabelText(/output tokens/i), '0.1')
@@ -74,7 +74,7 @@ it('never converts wallet values with an expired USD quote', async () => {
   const operations: AccountOperations = {
     chain_id: 10143, contract_address: '0x4444444444444444444444444444444444444444', explorer_url: '', confirmations: 2,
     wallet_address: '0x1111111111111111111111111111111111111111', customer_balance_wei: '0', provider_bond_wei: '0', claimable_wei: '0', provider_earnings_wei: '0', bond_exit_available_at: 0, sessions: [],
-    machines: [{ id: 'machine-1', name: 'node', revoked: false, backends: [{ id: 'backend:machine-1:local', kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }] }], offers: [],
+    machines: [{ id: 'machine-1', name: 'node', revoked: false, backends: [{ id: 'backend:machine-1:local', offer_hashes: [], kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }] }], offers: [],
   }
   const api = { operations: async () => operations } as OperationsAPI
   const client = new QueryClient()

@@ -39,12 +39,13 @@ type OperationMachine struct {
 }
 
 type OperationBackend struct {
-	ID       string `json:"id"`
-	Kind     string `json:"kind"`
-	Model    string `json:"model"`
-	Enabled  bool   `json:"enabled"`
-	Healthy  bool   `json:"healthy"`
-	Capacity uint32 `json:"capacity"`
+	ID          string   `json:"id"`
+	OfferHashes []string `json:"offer_hashes"`
+	Kind        string   `json:"kind"`
+	Model       string   `json:"model"`
+	Enabled     bool     `json:"enabled"`
+	Healthy     bool     `json:"healthy"`
+	Capacity    uint32   `json:"capacity"`
 }
 
 type OperationOffer struct {
@@ -84,7 +85,7 @@ func (s *Store) AccountOperations(ctx context.Context, accountID string, chainID
 		return AccountOperations{}, err
 	}
 
-	machineRows, err := s.db.QueryContext(ctx, `SELECT m.id,m.name,m.revoked_at IS NOT NULL,b.id,b.kind,b.model,b.enabled,COALESCE(prs.healthy,false),COALESCE(prs.capacity,0) FROM machines m LEFT JOIN backends b ON b.machine_id=m.id LEFT JOIN LATERAL (SELECT bool_or(healthy) AS healthy,COALESCE(sum(capacity),0) AS capacity FROM provider_routing_state WHERE machine_id=m.id AND model=b.model AND backend_kind=b.kind) prs ON true WHERE m.account_id=$1 ORDER BY m.created_at,b.id`, accountID)
+	machineRows, err := s.db.QueryContext(ctx, `SELECT m.id,m.name,m.revoked_at IS NOT NULL,b.id,b.kind,b.model,b.enabled,COALESCE(prs.healthy,false),COALESCE(prs.capacity,0),COALESCE(prs.offer_hashes,'') FROM machines m LEFT JOIN backends b ON b.machine_id=m.id LEFT JOIN LATERAL (SELECT bool_or(healthy) AS healthy,COALESCE(sum(capacity),0) AS capacity,string_agg(DISTINCT offer_hash,',' ORDER BY offer_hash) FILTER (WHERE confirmed_bond AND healthy AND capacity>0) AS offer_hashes FROM provider_routing_state WHERE machine_id=m.id AND model=b.model AND backend_kind=b.kind) prs ON true WHERE m.account_id=$1 ORDER BY m.created_at,b.id`, accountID)
 	if err != nil {
 		return AccountOperations{}, err
 	}
@@ -95,7 +96,8 @@ func (s *Store) AccountOperations(ctx context.Context, accountID string, chainID
 		var backendID, kind, model sql.NullString
 		var enabled, healthy sql.NullBool
 		var capacity sql.NullInt64
-		if err := machineRows.Scan(&machineID, &name, &revoked, &backendID, &kind, &model, &enabled, &healthy, &capacity); err != nil {
+		var offerHashes string
+		if err := machineRows.Scan(&machineID, &name, &revoked, &backendID, &kind, &model, &enabled, &healthy, &capacity, &offerHashes); err != nil {
 			machineRows.Close()
 			return AccountOperations{}, err
 		}
@@ -106,7 +108,11 @@ func (s *Store) AccountOperations(ctx context.Context, accountID string, chainID
 			view.Machines = append(view.Machines, OperationMachine{ID: machineID, Name: name, Revoked: revoked, Backends: []OperationBackend{}})
 		}
 		if backendID.Valid {
-			view.Machines[index].Backends = append(view.Machines[index].Backends, OperationBackend{ID: backendID.String, Kind: kind.String, Model: model.String, Enabled: enabled.Bool, Healthy: healthy.Bool, Capacity: uint32(capacity.Int64)})
+			activeOffers := []string{}
+			if offerHashes != "" {
+				activeOffers = strings.Split(offerHashes, ",")
+			}
+			view.Machines[index].Backends = append(view.Machines[index].Backends, OperationBackend{ID: backendID.String, OfferHashes: activeOffers, Kind: kind.String, Model: model.String, Enabled: enabled.Bool, Healthy: healthy.Bool, Capacity: uint32(capacity.Int64)})
 		}
 	}
 	if err := machineRows.Close(); err != nil {

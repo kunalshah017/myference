@@ -6,7 +6,6 @@ import { ReferencePriceAPI, type OperationBackend, type OperationOffer } from '.
 import type { MarketWriter, SubmittedTransaction, TransactionConfirmation } from '../../lib/marketContract'
 
 function offerID(backend: OperationBackend): string {
-  if (backend.offer_id) return backend.offer_id
   const marker = backend.id.indexOf(':', 'backend:'.length)
   return backend.id.startsWith('backend:') && marker >= 0 ? backend.id.slice(marker + 1) : backend.id
 }

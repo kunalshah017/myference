@@ -12,6 +12,8 @@ import { ModelList } from '../features/marketplace/ModelList'
 import { ProviderConsole } from '../features/provider/ProviderConsole'
 import { ChatPlayground } from '../features/playground/ChatPlayground'
 import { AuthAPI, MarketplaceAPI, type Session } from '../lib/api'
+import { OnboardingFlow, OnboardingReminder } from '../features/onboarding/OnboardingFlow'
+import type { OnboardingRole } from '../features/onboarding/onboarding'
 import { DashboardOverview } from './DashboardOverview'
 
 type DashboardView = 'overview' | 'models' | 'playground' | 'funds' | 'api' | 'usage' | 'hosting' | 'earnings'
@@ -29,13 +31,42 @@ const navigation: { view: DashboardView; label: string; group: 'use' | 'host' }[
 
 const icons = { overview: Home, models: Cpu, playground: Bot, funds: CircleDollarSign, api: KeyRound, usage: ActivityIcon, hosting: Server, earnings: Banknote }
 
-export function DashboardShell({ initialView = 'overview' }: { initialView?: DashboardView }) {
-  const api = useMemo(() => new AuthAPI(), [])
+function storedRole(): OnboardingRole | undefined {
+  const value = localStorage.getItem('myference:onboarding-role')
+  return value === 'consumer' || value === 'provider' ? value : undefined
+}
+
+export function DashboardShell({ initialView = 'overview', authAPI }: { initialView?: DashboardView; authAPI?: AuthAPI }) {
+  const api = useMemo(() => authAPI ?? new AuthAPI(), [authAPI])
   const marketplace = useMemo(() => new MarketplaceAPI(), [])
   const [session, setSession] = useState<Session>()
+  const [sessionLoaded, setSessionLoaded] = useState(false)
   const [view, setView] = useState<DashboardView>(initialView)
   const [routeState, setRouteState] = useState('')
-  useEffect(() => { void api.session().then(setSession).catch(() => undefined) }, [api])
+  const [role, setRole] = useState<OnboardingRole | undefined>(storedRole)
+  const [skipped, setSkipped] = useState(() => localStorage.getItem('myference:onboarding-skipped') === 'true' || initialView !== 'overview')
+  const [onboardingOpen, setOnboardingOpen] = useState(() => localStorage.getItem('myference:onboarding-skipped') !== 'true' && initialView === 'overview')
+  const [completed, setCompleted] = useState(false)
+  useEffect(() => { void api.session().then(setSession).catch(() => undefined).finally(() => setSessionLoaded(true)) }, [api])
+
+  const changeRole = (next: OnboardingRole) => { setRole(next); setCompleted(false); localStorage.setItem('myference:onboarding-role', next) }
+  const skipOnboarding = () => {
+    const selected = role ?? 'consumer'
+    changeRole(selected)
+    localStorage.setItem('myference:onboarding-skipped', 'true')
+    setSkipped(true)
+    setOnboardingOpen(false)
+  }
+  const markOnboardingComplete = (finishedRole: OnboardingRole) => {
+    changeRole(finishedRole)
+    setCompleted(true)
+    setSkipped(true)
+    localStorage.setItem('myference:onboarding-skipped', 'true')
+  }
+  const finishOnboarding = (finishedRole: OnboardingRole) => { markOnboardingComplete(finishedRole); setOnboardingOpen(false) }
+
+  if (!sessionLoaded) return <div className="onboarding-screen"><div className="dashboard-empty" role="status"><strong>Loading Myference…</strong></div></div>
+  if (onboardingOpen) return <OnboardingFlow session={session} initialRole={role} authAPI={api} onConnected={setSession} onSkip={skipOnboarding} onComplete={markOnboardingComplete} onRoleChange={changeRole} onSessionExpired={() => setSession(undefined)} />
 
   const disconnected = (message: string) => <div className="dashboard-empty"><strong>Wallet connection required</strong><p>{message}</p></div>
   return <div className="dashboard-shell">
@@ -48,6 +79,7 @@ export function DashboardShell({ initialView = 'overview' }: { initialView?: Das
     <div className="dashboard-main">
       <header className="dashboard-topbar"><div><PanelLeft size={17} aria-hidden="true" /><span className="state-mark" aria-hidden="true" />{session ? 'Monad testnet connected' : 'Network not connected'}</div><ConnectWallet api={api} session={session} onConnected={setSession} onDisconnected={() => setSession(undefined)} /></header>
       <main className="dashboard-workspace">
+        {skipped && !completed && <OnboardingReminder role={role ?? 'consumer'} session={session} onContinue={() => setOnboardingOpen(true)} onSwitch={() => changeRole((role ?? 'consumer') === 'consumer' ? 'provider' : 'consumer')} onComplete={finishOnboarding} onSessionExpired={() => setSession(undefined)} />}
         {view === 'overview' && (session ? <DashboardOverview onNavigate={setView} /> : <section><p className="eyebrow">Account workspace</p><h1>Workspace overview</h1><p className="dashboard-intro">Use hosted models and offer inference from the same wallet-bound account.</p>{disconnected('Connect a wallet to load balances, sessions, machines, and earnings.')}</section>)}
         {view === 'models' && <section><p className="eyebrow">Public inference market</p><h1>Models and prices</h1><ModelList api={marketplace} /></section>}
         {view === 'playground' && <section><p className="eyebrow">Browser test client</p><h1>Model playground</h1><p className="dashboard-intro">Send a real request through the OpenAI-compatible endpoint.</p><ChatPlayground /></section>}
