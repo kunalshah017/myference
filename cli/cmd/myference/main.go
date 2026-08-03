@@ -54,7 +54,7 @@ func main() {
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference login | host | backend <add|list|start|stop> | capacity | status | serve | service <install|start|stop|status|uninstall> | windows <doctor|status|models|test|optimize|dashboard|headless|restore>")
+		return errors.New("usage: myference login | host | backend <add|list|start|stop|version> | capacity | status | serve | service <install|start|stop|status|uninstall> | windows <doctor|status|models|test|dashboard|focus|headless|restore>")
 	}
 	switch args[0] {
 	case "login":

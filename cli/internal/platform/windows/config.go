@@ -10,7 +10,6 @@ import (
 // Config defines the Windows host controls that can be applied by Myference.
 // It deliberately excludes LAN listeners, firewall settings, and endpoint discovery.
 type Config struct {
-	PreloadModel         string   `json:"preloadModel"`
 	KeepAlive            string   `json:"keepAlive"`
 	ContextLength        int      `json:"contextLength"`
 	MaxLoadedModels      int      `json:"maxLoadedModels"`
@@ -120,10 +119,10 @@ type Command struct {
 // ParseCommand accepts only the native Windows command namespace.
 func ParseCommand(args []string) (Command, error) {
 	if len(args) == 0 {
-		return Command{}, fmt.Errorf("usage: myference windows <doctor|status|models|test|optimize|dashboard|headless|restore>")
+		return Command{}, fmt.Errorf("usage: myference windows <doctor|status|models|test|dashboard|focus|headless|restore>")
 	}
 	switch args[0] {
-	case "doctor", "status", "models", "test", "optimize", "dashboard", "headless", "restore":
+	case "doctor", "status", "models", "test", "dashboard", "focus", "headless", "restore":
 		return Command{Action: args[0], Args: append([]string(nil), args[1:]...)}, nil
 	default:
 		return Command{}, fmt.Errorf("unknown Windows action %q", args[0])

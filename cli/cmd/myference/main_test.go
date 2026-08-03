@@ -199,7 +199,7 @@ func TestProductionDefaultsUseBrandedDomains(t *testing.T) {
 }
 
 func TestWindowsCommandsReachTheNativeDispatchBoundary(t *testing.T) {
-	for _, action := range []string{"status", "optimize", "dashboard", "headless", "restore"} {
+	for _, action := range []string{"status", "dashboard", "focus", "headless", "restore"} {
 		t.Run(action, func(t *testing.T) {
 			err := run([]string{"windows", action}, &bytes.Buffer{})
 			if err == nil || !strings.Contains(err.Error(), "not implemented") {
