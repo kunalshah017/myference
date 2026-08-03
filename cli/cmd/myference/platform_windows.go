@@ -99,6 +99,12 @@ func runPlatformCommand(command string, args []string, output io.Writer) error {
 }
 
 var collectWindowsHostTelemetry = platform.CollectHostTelemetry
+var collectWindowsDockerStatus = func(ctx context.Context, images []string) platform.DockerStatus {
+	return platform.DiscoverDockerRuntime().Status(ctx, images)
+}
+var prepareWindowsDocker = func(ctx context.Context, images []string, timeout time.Duration) error {
+	return platform.DiscoverDockerRuntime().Prepare(ctx, images, timeout)
+}
 
 func runWindowsStatus(ctx context.Context, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("windows status", flag.ContinueOnError)
@@ -266,11 +272,14 @@ func runWindowsHeadless(ctx context.Context, args []string, output io.Writer) er
 		if err != nil {
 			return err
 		}
-		state := "inactive"
-		if active {
-			state = "installed"
+		dockerStatus := platform.DockerStatus{}
+		if cfg, loadErr := config.Load(*configPath); loadErr == nil {
+			images := commandAgentImages(cfg)
+			if len(images) > 0 {
+				dockerStatus = collectWindowsDockerStatus(ctx, images)
+			}
 		}
-		_, err = fmt.Fprintf(output, "Windows headless mode %s\n", state)
+		_, err = io.WriteString(output, platform.RenderHeadlessStatus(active, dockerStatus))
 		return err
 	case "restore":
 		return runWindowsRestore(ctx, nil, output)
@@ -424,6 +433,7 @@ func collectWindowsDoctorState(ctx context.Context, configPath, endpoint string)
 	cfg, err := config.Load(configPath)
 	state.ConfigReadable = err == nil
 	if err == nil {
+		images := commandAgentImages(cfg)
 		for _, backend := range cfg.Backends {
 			if !backend.Enabled {
 				continue
@@ -435,9 +445,14 @@ func collectWindowsDoctorState(ctx context.Context, configPath, endpoint string)
 				state.DockerRequired = true
 			}
 		}
-	}
-	if state.DockerRequired {
-		state.DockerPath, _ = exec.LookPath("docker.exe")
+		if len(images) > 0 {
+			docker := collectWindowsDockerStatus(ctx, images)
+			state.DockerPath = docker.DockerPath
+			state.DockerEngineReady = docker.EngineReady
+			state.DockerEngineOS = docker.EngineOS
+			state.DockerMissingImages = docker.MissingImages
+			state.DockerError = docker.Error
+		}
 	}
 	client, clientErr := platform.NewOllamaHostClient(endpoint, &http.Client{Timeout: 5 * time.Second})
 	if clientErr == nil {
@@ -451,6 +466,12 @@ func preparePlatformBackends(ctx context.Context, cfg config.Config) error {
 }
 
 func prepareWindowsBackends(ctx context.Context, cfg config.Config, hostConfig platform.Config, httpClient *http.Client) error {
+	images := commandAgentImages(cfg)
+	if len(images) > 0 {
+		if err := prepareWindowsDocker(ctx, images, 2*time.Minute); err != nil {
+			return fmt.Errorf("prepare Docker command agents: %w", err)
+		}
+	}
 	for _, backend := range cfg.Backends {
 		if !backend.Enabled || backend.Kind != "ollama" {
 			continue
@@ -472,6 +493,18 @@ func prepareWindowsBackends(ctx context.Context, cfg config.Config, hostConfig p
 		}
 	}
 	return nil
+}
+
+func commandAgentImages(cfg config.Config) []string {
+	images := make([]string, 0, len(cfg.Backends))
+	seen := map[string]bool{}
+	for _, backend := range cfg.Backends {
+		if backend.Enabled && slices.Contains([]string{"codex", "claude", "kimi"}, backend.Kind) && !seen[backend.Image] {
+			images = append(images, backend.Image)
+			seen[backend.Image] = true
+		}
+	}
+	return images
 }
 
 func windowsVersion() string {

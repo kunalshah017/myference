@@ -143,6 +143,42 @@ func TestPrepareWindowsBackendsSkipsStoppedBackend(t *testing.T) {
 	}
 }
 
+func TestCommandAgentImagesReturnsUniqueEnabledPinnedImages(t *testing.T) {
+	imageA := "ghcr.io/example/codex@sha256:" + strings.Repeat("a", 64)
+	imageB := "ghcr.io/example/claude@sha256:" + strings.Repeat("b", 64)
+	cfg := config.Config{Backends: []config.Backend{
+		{Name: "codex", Kind: "codex", Image: imageA, Enabled: true},
+		{Name: "codex-copy", Kind: "codex", Image: imageA, Enabled: true},
+		{Name: "claude", Kind: "claude", Image: imageB, Enabled: true},
+		{Name: "stopped", Kind: "kimi", Image: "ignored", Enabled: false},
+		{Name: "ollama", Kind: "ollama", Enabled: true},
+	}}
+	if got, want := commandAgentImages(cfg), []string{imageA, imageB}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("commandAgentImages()=%v, want %v", got, want)
+	}
+}
+
+func TestPrepareWindowsBackendsPreparesCommandImagesBeforeOllama(t *testing.T) {
+	image := "ghcr.io/example/codex@sha256:" + strings.Repeat("d", 64)
+	original := prepareWindowsDocker
+	var prepared []string
+	prepareWindowsDocker = func(_ context.Context, images []string, timeout time.Duration) error {
+		prepared = append([]string(nil), images...)
+		if timeout != 2*time.Minute {
+			t.Fatalf("timeout=%s", timeout)
+		}
+		return nil
+	}
+	t.Cleanup(func() { prepareWindowsDocker = original })
+	cfg := config.Config{Backends: []config.Backend{{Name: "codex", Kind: "codex", Image: image, Enabled: true}}}
+	if err := prepareWindowsBackends(context.Background(), cfg, platform.DefaultConfig(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(prepared, []string{image}) {
+		t.Fatalf("prepared=%v", prepared)
+	}
+}
+
 func TestReloadBackendsRetainsLastGoodCapacityWhenPreparationFails(t *testing.T) {
 	oldOffer := v1.OfferCapacity{OfferID: "old", Model: "old-model", PriceVersion: 1, BackendKind: "ollama", OfferHash: "0x" + strings.Repeat("1", 64), ModelHash: "0x" + strings.Repeat("2", 64), CapabilityHash: "0x" + strings.Repeat("3", 64), Capabilities: []string{"stream", "text"}, EvidenceKind: "ollama_digest", EvidenceDigest: "sha256:old", MeteringMode: "tokens_and_compute"}
 	daemon := provider.NewDaemon(provider.Config{Offers: []v1.OfferCapacity{oldOffer}}, map[string]backend.Backend{"old": windowsTestBackend{}})

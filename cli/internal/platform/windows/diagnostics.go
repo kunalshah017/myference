@@ -14,6 +14,10 @@ type DoctorState struct {
 	InstalledModels          []string
 	DockerRequired           bool
 	DockerPath               string
+	DockerEngineReady        bool
+	DockerEngineOS           string
+	DockerMissingImages      []string
+	DockerError              string
 	CredentialStoreAvailable bool
 	OnACPowerKnown           bool
 	OnACPower                bool
@@ -30,13 +34,13 @@ type DoctorFinding struct {
 
 func DoctorFindings(state DoctorState) []DoctorFinding {
 	modelInstalled := state.ConfiguredModel != "" && slices.Contains(state.InstalledModels, state.ConfiguredModel)
-	dockerOK := !state.DockerRequired || state.DockerPath != ""
+	dockerOK := !state.DockerRequired || (state.DockerPath != "" && state.DockerEngineReady && state.DockerEngineOS == "linux" && len(state.DockerMissingImages) == 0 && state.DockerError == "")
 	powerOK := state.OnACPowerKnown && state.OnACPower
 	return []DoctorFinding{
 		finding("Windows", state.WindowsVersion != "", valueOr(state.WindowsVersion, "Windows version unavailable"), "Run this command on a supported Windows host"),
 		finding("Ollama", state.OllamaPath != "", valueOr(state.OllamaPath, "Ollama executable not found"), "Install Ollama and ensure ollama.exe is on PATH"),
 		finding("Model", modelInstalled, modelMessage(state, modelInstalled), modelAction(state)),
-		finding("Docker", dockerOK, dockerMessage(state, dockerOK), "Install Docker Desktop or disable command-agent backends"),
+		finding("Docker", dockerOK, dockerMessage(state, dockerOK), dockerAction(state)),
 		finding("Credentials", state.CredentialStoreAvailable, boolMessage(state.CredentialStoreAvailable, "Windows Credential Manager is available", "credential storage is unavailable"), "Enable Windows Credential Manager and sign in with `myference login`"),
 		finding("Power", powerOK, powerMessage(state), "Connect AC power or explicitly use --allow-battery"),
 		finding("Service", state.ServiceInstalled, boolMessage(state.ServiceInstalled, "Myference Provider task is installed", "provider service is not installed"), "Run `myference service install`"),
@@ -102,9 +106,55 @@ func dockerMessage(state DoctorState, ok bool) string {
 		return "Docker is not required by enabled backends"
 	}
 	if ok {
-		return state.DockerPath
+		return fmt.Sprintf("Docker Linux engine is ready at %s", state.DockerPath)
 	}
-	return "Docker is required by an enabled command-agent backend but was not found"
+	if state.DockerError != "" {
+		return state.DockerError
+	}
+	if state.DockerPath == "" {
+		return "Docker is required by an enabled command-agent backend but was not found"
+	}
+	if !state.DockerEngineReady {
+		return "Docker Desktop is installed but its engine is not ready"
+	}
+	if state.DockerEngineOS != "linux" {
+		return fmt.Sprintf("Docker Desktop is using %q containers instead of Linux containers", state.DockerEngineOS)
+	}
+	return "missing digest-pinned command-agent image(s): " + strings.Join(state.DockerMissingImages, ", ")
+}
+
+func dockerAction(state DoctorState) string {
+	if !state.DockerRequired {
+		return ""
+	}
+	if state.DockerPath == "" {
+		return "Install Docker Desktop or disable command-agent backends"
+	}
+	if state.DockerEngineReady && state.DockerEngineOS != "linux" {
+		return "Switch Docker Desktop to Linux containers"
+	}
+	return "Run `myference serve`; it starts Docker Desktop and pulls missing digest-pinned images"
+}
+
+func RenderHeadlessStatus(active bool, docker DockerStatus) string {
+	state := "inactive"
+	if active {
+		state = "installed"
+	}
+	var output strings.Builder
+	fmt.Fprintf(&output, "Windows headless mode %s\n", state)
+	if docker.DockerPath == "" && docker.Error == "" && !docker.EngineReady && len(docker.MissingImages) == 0 {
+		return output.String()
+	}
+	if docker.EngineReady {
+		fmt.Fprintf(&output, "Docker engine ready (%s)\n", docker.EngineOS)
+	} else if docker.Error != "" {
+		fmt.Fprintf(&output, "Docker not ready: %s\n", docker.Error)
+	}
+	if len(docker.MissingImages) > 0 {
+		fmt.Fprintf(&output, "Missing command-agent images: %s\n", strings.Join(docker.MissingImages, ", "))
+	}
+	return output.String()
 }
 
 func powerMessage(state DoctorState) string {
