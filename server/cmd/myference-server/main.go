@@ -109,6 +109,7 @@ func run() error {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
 	}, api.AnalyticsConfig{ChainID: 10143, ContractAddress: chainConfiguration.ContractAddress})
+	referencePrice := api.NewReferencePrice(api.ReferencePriceConfig{})
 	events, err := realtime.Open(ctx, databaseURL, func(ctx context.Context, ticket string) (string, error) {
 		return authService.ConsumeStreamTicket(ctx, ticket)
 	})
@@ -116,7 +117,7 @@ func run() error {
 		return err
 	}
 	defer events.Close()
-	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, events), webOrigin)
+	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, referencePrice, events), webOrigin)
 	server := &http.Server{Addr: listenAddress(os.Getenv), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
@@ -146,7 +147,7 @@ func run() error {
 	}
 }
 
-func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, analyticsHandler, eventsHandler http.Handler) http.Handler {
+func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, analyticsHandler, referencePriceHandler, eventsHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	mux.Handle("/relay", relayHandler)
@@ -155,6 +156,7 @@ func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, 
 	mux.Handle("/auth/", authHandler)
 	mux.Handle("/api/account/operations", operationsHandler)
 	mux.Handle("/api/account/analytics", analyticsHandler)
+	mux.Handle("/api/reference-price", referencePriceHandler)
 	mux.Handle("/api/", marketplaceHandler)
 	mux.Handle("/events", eventsHandler)
 	return mux
