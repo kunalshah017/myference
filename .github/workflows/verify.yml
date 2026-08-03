@@ -82,7 +82,7 @@ jobs:
       - name: Parse PowerShell installer
         shell: pwsh
         run: |
-          foreach ($file in @('web/public/install.ps1', 'packaging/windows/install.ps1', 'scripts/windows-acceptance.ps1')) {
+          foreach ($file in @('web/public/install.ps1', 'packaging/windows/install.ps1', 'scripts/test-service-installer-windows.ps1', 'scripts/windows-acceptance.ps1')) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
@@ -92,6 +92,7 @@ jobs:
         shell: pwsh
         run: |
           & ./scripts/test-installer-windows.ps1
+          & ./scripts/test-service-installer-windows.ps1
       - name: Non-destructive Windows acceptance
         shell: pwsh
         run: ./scripts/windows-acceptance.ps1 -NonDestructive
