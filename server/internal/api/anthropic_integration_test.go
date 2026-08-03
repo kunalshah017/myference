@@ -28,6 +28,7 @@ func TestAnthropicMessagesStreamsNativeEventsThroughRealRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer provider.Close(websocket.StatusNormalClosure, "")
+	requireRelayConnection(t, hub, "machine-1")
 	writeProvider(t, provider, "hello", v1.MessageHello, &v1.Hello{MachineID: "machine-1"})
 	persisted := make(chan Proposal, 1)
 	workspaces := make(chan []v1.WorkspaceFile, 1)

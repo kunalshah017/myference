@@ -36,6 +36,7 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer provider.Close(websocket.StatusNormalClosure, "")
+	requireRelayConnection(t, hub, "machine-1")
 	writeProvider(t, provider, "hello", v1.MessageHello, &v1.Hello{MachineID: "machine-1"})
 	writeProvider(t, provider, "capacity", v1.MessageCapacity, &v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "offer-1", Model: "qwen", PriceVersion: 3}}})
 
@@ -188,5 +189,16 @@ func writeProvider(t *testing.T, connection *websocket.Conn, id, messageType str
 	payload, _ := json.Marshal(envelope)
 	if err := connection.Write(context.Background(), websocket.MessageText, payload); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func requireRelayConnection(t *testing.T, hub *relay.Hub, machineID string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for !hub.Connected(machineID) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !hub.Connected(machineID) {
+		t.Fatalf("relay did not register machine %q", machineID)
 	}
 }
