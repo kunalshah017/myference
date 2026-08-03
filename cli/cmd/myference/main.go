@@ -54,7 +54,7 @@ func main() {
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference login | host | backend <add|list|start|stop> | capacity | status | serve | service <install|start|stop|status|uninstall>")
+		return errors.New("usage: myference login | host | backend <add|list|start|stop> | capacity | status | serve | service <install|start|stop|status|uninstall> | windows <doctor|status|models|test|optimize|dashboard|headless|restore>")
 	}
 	switch args[0] {
 	case "login":
@@ -105,6 +105,8 @@ func run(args []string, output io.Writer) error {
 		return err
 	case "service":
 		return runPlatformCommand("service", args[1:], output)
+	case "windows":
+		return runPlatformCommand("windows", args[1:], output)
 	case "stop", "legacy-start", "legacy-stop", "legacy-status":
 		return runPlatformCommand(args[0], args[1:], output)
 	default:

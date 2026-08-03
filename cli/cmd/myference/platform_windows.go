@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os/exec"
 
@@ -13,6 +14,14 @@ import (
 )
 
 func runPlatformCommand(command string, args []string, _ io.Writer) error {
+	if command == "windows" {
+		windowsCommand, err := platform.ParseCommand(args)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("windows %s is not implemented", windowsCommand.Action)
+	}
+
 	if command == "service" {
 		if len(args) == 0 {
 			return errors.New("usage: myference service <install|start|stop|status|uninstall>")

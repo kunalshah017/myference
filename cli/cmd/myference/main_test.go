@@ -198,6 +198,24 @@ func TestProductionDefaultsUseBrandedDomains(t *testing.T) {
 	}
 }
 
+func TestWindowsCommandsReachTheNativeDispatchBoundary(t *testing.T) {
+	for _, action := range []string{"doctor", "status", "models", "test", "optimize", "dashboard", "headless", "restore"} {
+		t.Run(action, func(t *testing.T) {
+			err := run([]string{"windows", action}, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), "not implemented") {
+				t.Fatalf("run(windows %s) error = %v, want native dispatch boundary", action, err)
+			}
+		})
+	}
+}
+
+func TestWindowsCommandRejectsLANAction(t *testing.T) {
+	err := run([]string{"windows", "lan-check"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "unknown Windows action") {
+		t.Fatalf("run(windows lan-check) error = %v, want unknown Windows action", err)
+	}
+}
+
 func TestHostLoginArgumentsPreserveNoBrowser(t *testing.T) {
 	got := hostLoginArgs("https://api.myference.xyz", "/tmp/myference.json", true)
 	if !slices.Contains(got, "--no-browser") {
