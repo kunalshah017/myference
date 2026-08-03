@@ -1,125 +1,188 @@
-# Windows Native Host Management Implementation Plan
+# Provider-Owned Windows Host Management Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Port the non-LAN Windows legacy machine-management features into the current Go CLI and safely delete the legacy CLI after real Windows verification.
+**Goal:** Make the existing multi-backend provider daemon own safe Windows host preparation and recovery while preserving on-demand `backend add|start|stop` behavior and removing obsolete legacy gateway code only after real acceptance.
 
-**Architecture:** Add a journaled Windows host manager behind `myference windows`, reuse the current provider and service commands, and keep every privileged mutation explicit and reversible. Pure planning and parsing code is separated from Windows command execution so most behavior is deterministic under tests, while a Windows Actions job and physical-machine checklist cover platform integration.
+**Architecture:** The shared `config.Config.Backends` list remains the only source of backend/model truth. One `serve` process advertises every enabled backend as a separate offer, prepares enabled local Ollama models before initial or live capacity publication, applies one journaled Windows tuning session around the daemon, and restores it on shutdown. Windows-only doctor, status, dashboard, focus, headless, and emergency recovery commands are adapters around that same provider lifecycle; none create a LAN listener or separate provider service.
 
-**Tech Stack:** Go standard library, Windows PowerShell/CIM/Scheduled Tasks/powercfg, Ollama loopback API, GitHub Actions Windows runner.
+**Tech Stack:** Go standard library, current provider WebSocket protocol, loopback Ollama HTTP API, Windows power/process/CIM/Scheduled Tasks APIs, PowerShell 5+ only for fixed non-interpolated Windows queries and installer tasks, GitHub Actions Windows runner.
+
+## Global Constraints
+
+- One `serve` process owns every enabled backend on the laptop; Windows must not create one service per backend.
+- `backend add|list|start|stop|version` and the shared provider config remain cross-platform and authoritative.
+- An enabled backend is never advertised until discovery and platform preparation succeed; a failed live reload retains the last good daemon capacity.
+- Windows host policy contains no backend name, model, credential, price, LAN, firewall, endpoint-discovery, or listener fields.
+- Provider tuning is applied once per `serve` session and restored on every graceful exit path.
+- Focus never stops an unconfigured process/service and never stops Explorer; only explicit headless mode may replace Explorer.
+- No command disables Defender, Windows Update, networking, drivers, authentication, logging, scheduling, or security services.
+- All privileged mutations are journaled before execution, use explicit executable/argument arrays, roll back in reverse order, and preserve the journal after failed mandatory recovery.
+- `myference windows restore` is idempotent and removes only Myference-owned tasks/state.
+- No new HTTP/TCP listener is opened for Windows management, telemetry, or dashboard data.
+- The public one-command installer remains `irm https://myference.xyz/install.ps1 | iex` and must install every runtime asset needed by Windows service/headless management beside the CLI.
+- Legacy removal is forbidden until automated Windows CI passes and the real-machine acceptance document is fully checked off.
 
 ---
 
-### Task 1: Lock the command and safety contract
+### Task 1: Align the Windows command and host-policy contract
 
 **Files:**
-- Create: `cli/internal/platform/windowshost/config.go`
-- Create: `cli/internal/platform/windowshost/config_test.go`
-- Modify: `cli/cmd/myference/platform_windows.go`
+- Modify: `cli/internal/platform/windows/config.go`
+- Modify: `cli/internal/platform/windows/config_test.go`
 - Modify: `cli/cmd/myference/main.go`
+- Modify: `cli/cmd/myference/main_test.go`
+- Modify: `cli/cmd/myference/platform_windows.go`
 
-- [ ] Write failing table tests for the `windows` actions, default safe configuration, protected-service rejection, AC-power policy, and rejection of LAN/firewall fields.
-- [ ] Run `go test ./cli/internal/platform/windowshost ./cli/cmd/myference` and confirm failures for missing `windowshost.Config` and dispatch.
-- [ ] Implement a typed config with `PreloadModel`, `KeepAlive`, `ContextLength`, `MaxLoadedModels`, `NumParallel`, `FlashAttention`, `KVCacheType`, `PerformancePowerPlan`, `ProcessPriority`, `RequireACPower`, `StopProcesses`, and `StopServices`.
-- [ ] Add `myference windows <doctor|status|models|test|optimize|dashboard|headless|restore>` dispatch without changing `host`, `serve`, or `service`.
-- [ ] Run the focused tests and commit with `feat: define native Windows host controls`.
+**Interfaces:**
+- Consumes: `config.Config.Backends` and existing `runBackend` enable/disable behavior.
+- Produces: `windows.Config`, `windows.ParseCommand([]string)`, and public actions `doctor|status|models|test|dashboard|focus|headless|restore`.
 
-### Task 2: Add the atomic recovery journal
+- [ ] Add failing tests proving Windows policy has no singular `PreloadModel`, backend/model ownership, LAN, or firewall fields; `ParseCommand` accepts `focus` and rejects `optimize`, `exclusive`, and legacy LAN actions.
+- [ ] Run `go test ./cli/internal/platform/windows ./cli/cmd/myference -run 'Config|ParseCommand|WindowsCommand' -count=1` and confirm the new contract fails against the current code.
+- [ ] Remove `PreloadModel` and the public `optimize` action, keep machine-level context/concurrency/power/priority and focus allowlists, and update CLI usage strings.
+- [ ] Run the focused tests and `go test ./... -count=1`.
+- [ ] Commit with `refactor: align Windows controls with provider lifecycle`.
 
-**Files:**
-- Create: `cli/internal/platform/windowshost/journal.go`
-- Create: `cli/internal/platform/windowshost/journal_test.go`
-
-- [ ] Write failing tests that save/load a journal, refuse replacement of an active journal, preserve the last good file across a failed write, and make completed recovery idempotent.
-- [ ] Run `go test ./cli/internal/platform/windowshost -run Journal` and verify the expected failures.
-- [ ] Implement atomic temp-file, sync, rename persistence with mode `0600`; record power scheme, AC/DC lid actions, shell value, stopped process executable paths, stopped services, task names, and applied stages.
-- [ ] Implement stage completion and recovery completion methods that remove state only after all mandatory restoration succeeds.
-- [ ] Run focused and package tests; commit with `feat: journal reversible Windows changes`.
-
-### Task 3: Implement diagnostics, models, and preload
+### Task 2: Extend the atomic journal for provider sessions and focus overlays
 
 **Files:**
-- Create: `cli/internal/platform/windowshost/diagnostics.go`
-- Create: `cli/internal/platform/windowshost/diagnostics_test.go`
-- Create: `cli/internal/platform/windowshost/ollama.go`
-- Create: `cli/internal/platform/windowshost/ollama_test.go`
+- Modify: `cli/internal/platform/windows/journal.go`
+- Modify: `cli/internal/platform/windows/journal_test.go`
+- Modify: `cli/internal/platform/windows/journal_rename_windows.go`
+- Modify: `cli/internal/platform/windows/journal_rename_other.go`
 
-- [ ] Write failing tests for doctor findings, `ollama ps` model parsing, automatic installed-model selection, explicit missing-model failure, and the exact preload request (`stream:false`, configured `keep_alive`, `num_ctx`).
-- [ ] Run focused tests and verify failures are caused by missing implementations.
-- [ ] Implement command discovery and loopback Ollama calls with bounded timeouts; never bind a listener or create a firewall rule.
-- [ ] Print actionable doctor results and make preload failure prevent provider readiness.
-- [ ] Run focused tests; commit with `feat: add Windows provider diagnostics and preload`.
+**Interfaces:**
+- Consumes: `RecoveryJournal`, `JournalStore.Save`, `CompleteStage`, and `CompleteRecovery`.
+- Produces: `JournalStore.Update(func(*RecoveryJournal) error) error`, `RemoveStages(prefixes ...string)`, `SessionKind`, `OwnerPID`, shell-presence state, nullable original Ollama environment values, stopped process paths/services, and installed Myference task names.
 
-### Task 4: Implement optimization and focus mode
+- [ ] Add failing real-filesystem tests for atomic update, failed-update preservation, provider-session ownership, focus data appended without replacing the active provider journal, prefix stage removal, nullable environment round-trip, and repeated recovery.
+- [ ] Run `go test ./cli/internal/platform/windows -run Journal -count=1` and confirm failures are caused by missing update/overlay behavior.
+- [ ] Implement atomic update with temp file, sync, Windows write-through replacement, strict Myference task validation, and state removal only after mandatory restoration succeeds.
+- [ ] Run journal tests, the Windows package, and `git diff --check`.
+- [ ] Commit with `feat: journal provider sessions and focus overlays`.
 
-**Files:**
-- Create: `cli/internal/platform/windowshost/optimize.go`
-- Create: `cli/internal/platform/windowshost/optimize_test.go`
-- Create: `cli/internal/platform/windowshost/runner_windows.go`
-
-- [ ] Write failing command-planning tests for power plan, keep-awake, Ollama environment, priority, focus allowlists, exclusive Explorer handling, and reverse-order rollback.
-- [ ] Add tests proving protected services and unconfigured processes are never stopped.
-- [ ] Implement a Windows runner using explicit argument arrays—never interpolated shell text—for `powercfg`, process priority, optional process/service stops, and restart from recorded paths.
-- [ ] Implement keep-awake with the Windows execution-state API or a narrowly scoped PowerShell process owned by the journal.
-- [ ] Apply each mutation only after its original value is recorded; rollback on any subsequent failure.
-- [ ] Run `GOOS=windows GOARCH=amd64 go test ./cli/internal/platform/windowshost` on Windows and cross-build on macOS; commit with `feat: add reversible Windows optimization`.
-
-### Task 5: Integrate provider lifecycle and telemetry dashboard
+### Task 3: Prepare multiple enabled backends before capacity publication
 
 **Files:**
-- Create: `cli/internal/platform/windowshost/telemetry.go`
-- Create: `cli/internal/platform/windowshost/telemetry_test.go`
-- Create: `cli/internal/platform/windowshost/dashboard.go`
+- Modify: `cli/internal/platform/windows/ollama.go`
+- Modify: `cli/internal/platform/windows/ollama_test.go`
+- Modify: `cli/cmd/myference/main.go`
+- Modify: `cli/cmd/myference/main_test.go`
+- Modify: `cli/cmd/myference/platform_windows.go`
+- Modify: `cli/cmd/myference/platform_windows_test.go`
+- Modify: `cli/cmd/myference/platform_darwin.go`
+- Modify: `cli/cmd/myference/platform_other.go`
+
+**Interfaces:**
+- Consumes: enabled `config.Backend` entries and `provider.Daemon.UpdateBackends`.
+- Produces: `preparePlatformBackends(context.Context, config.Config) error`, `reloadBackends(context.Context, config.Config, *provider.Daemon) error`, `OllamaHostClient.InstalledModels`, `Preload`, and `GenerateTest`.
+
+- [ ] Add failing loopback integration tests with two enabled Ollama offers proving both configured models are checked/prepared; add a live-reload test proving preparation runs before `UpdateBackends` and a failed preparation leaves the previous capacity unchanged.
+- [ ] Add failing tests proving stopped backends are skipped and OpenAI/command-agent backends retain existing discovery behavior.
+- [ ] Run `go test ./cli/cmd/myference ./cli/internal/platform/windows -run 'Prepare|Reload|Ollama|Backend' -count=1` and confirm expected failures.
+- [ ] Refactor initial startup and `watchBackendConfig` through the same prepare-then-discover-then-update function; never advertise a failed new backend.
+- [ ] Run focused tests, `go test ./... -count=1`, and Windows/macOS CLI builds.
+- [ ] Commit with `feat: prepare live multi-backend capacity`.
+
+### Task 4: Own Windows tuning for the lifetime of `serve`
+
+**Files:**
+- Create: `cli/internal/platform/windows/tuning.go`
+- Create: `cli/internal/platform/windows/tuning_test.go`
+- Create: `cli/internal/platform/windows/focus.go`
+- Create: `cli/internal/platform/windows/focus_test.go`
+- Create: `cli/internal/platform/windows/runner_windows.go`
+- Modify: `cli/cmd/myference/main.go`
+- Modify: `cli/cmd/myference/platform_windows.go`
+- Modify: `cli/cmd/myference/platform_darwin.go`
+- Modify: `cli/cmd/myference/platform_other.go`
+
+**Interfaces:**
+- Consumes: Task 2 journal and Task 3 backend preparation.
+- Produces: `startPlatformProviderSession(context.Context, config.Config, io.Writer) (func() error, error)`, `StartProviderTuning`, `RestoreProviderTuning`, `StartFocus`, `RestoreFocus`, and a Windows runner using explicit argument arrays.
+
+- [ ] Add failing planning tests for High Performance, native keep-awake, Ollama environment/concurrency, priority, AC policy, protected services, allowlist-only focus, no Explorer operation, and reverse rollback.
+- [ ] Add failing orchestration tests proving the journal exists before the first mutation, a later failure restores earlier stages, graceful cleanup restores once, and an existing crash journal blocks a new session with an actionable `windows restore` message.
+- [ ] Implement the native runner: `powercfg.exe` argument arrays, fixed CIM process discovery, native execution-state and priority APIs, `sc.exe`/`taskkill.exe` arrays, recorded executable restart, and nullable environment restoration.
+- [ ] Wrap `runServe` with platform session start/cleanup; macOS and other platforms return a no-op cleanup. Implement `windows focus start|status|restore` as an overlay on an active provider journal.
+- [ ] Run `go test ./cli/internal/platform/windows ./cli/cmd/myference -count=1`, full tests, vet, and Windows/macOS builds.
+- [ ] Commit with `feat: own Windows tuning with provider sessions`.
+
+### Task 5: Add live provider telemetry, status, and dashboard
+
+**Files:**
 - Modify: `cli/internal/provider/daemon.go`
+- Modify: `cli/internal/provider/daemon_test.go`
+- Create: `cli/internal/platform/windows/telemetry.go`
+- Create: `cli/internal/platform/windows/telemetry_test.go`
+- Create: `cli/internal/platform/windows/dashboard.go`
+- Create: `cli/internal/platform/windows/dashboard_test.go`
+- Modify: `cli/cmd/myference/main.go`
 - Modify: `cli/cmd/myference/platform_windows.go`
 
-- [ ] Write failing parsers for CPU/RAM, battery, `nvidia-smi`, `ollama ps`, service state, and provider status JSON.
-- [ ] Add a failing dashboard rendering test for uptime, requests, tokens, compute, model, GPU, AC/battery, and backend health.
-- [ ] Expose provider counters through the existing status path without opening a new HTTP listener.
-- [ ] Implement a terminal dashboard with periodic refresh and `Q` exit; `Q` closes only the viewer unless the dashboard owns the foreground optimized session.
-- [ ] Run focused tests and commit with `feat: add Windows host telemetry dashboard`.
+**Interfaces:**
+- Produces: `provider.StatusSnapshot` with connection, start time, requests, input/output tokens, compute milliseconds, and per-offer health; atomic `<config>.status.json`; Windows host telemetry parsers; `windows status [--json]`; and `windows dashboard` polling the status file without a listener.
 
-### Task 6: Implement headless shell mode and emergency recovery
+- [ ] Add failing daemon tests for concurrent counters, backend reload health, and immutable status snapshots.
+- [ ] Add failing parser/render tests for CPU/RAM, battery, NVIDIA CSV, loaded Ollama models, scheduled provider state, provider status JSON, and dashboard fields for all enabled offers.
+- [ ] Increment counters only from measured completed work, atomically write the local status snapshot, and remove stale status on shutdown.
+- [ ] Implement status/dashboard polling with bounded refresh and `Q` closing only the viewer.
+- [ ] Run focused tests, full tests, race tests for provider/platform packages, and builds.
+- [ ] Commit with `feat: expose multi-backend Windows telemetry`.
+
+### Task 6: Add provider-owned headless mode and universal recovery
 
 **Files:**
-- Create: `cli/internal/platform/windowshost/headless.go`
-- Create: `cli/internal/platform/windowshost/headless_test.go`
+- Create: `cli/internal/platform/windows/headless.go`
+- Create: `cli/internal/platform/windows/headless_test.go`
+- Modify: `cli/internal/platform/windows/runner_windows.go`
+- Modify: `cli/cmd/myference/platform_windows.go`
 - Modify: `packaging/windows/install.ps1`
-- Modify: `cli/cmd/myference/platform_windows.go`
 
-- [ ] Write failing tests for task definitions, shell/lid journal entries, active-session refusal, restore ordering, and repeat restore.
-- [ ] Generate Myference-owned elevated start/restore Scheduled Tasks using absolute executable and config paths.
-- [ ] Record the existing current-user shell and lid actions before replacing them; refuse headless activation if either value cannot be read.
-- [ ] Start the current outbound `serve` provider in the headless task, not the removed LAN gateway.
-- [ ] Restore provider, lid actions, shell, optimization state, and tasks; expose the same path through `myference windows restore` for emergency use.
-- [ ] Run package tests and a Windows cross-build; commit with `feat: add recoverable Windows headless mode`.
+**Interfaces:**
+- Produces: `windows headless install|start|status|restore`, Myference-owned Scheduled Task definitions using absolute executable/config paths, and `windows restore` ordering focus → provider process → lid → shell → tuning → tasks.
 
-### Task 7: Add Windows CI and physical acceptance script
+- [ ] Add failing tests for absolute task actions calling `serve --config`, shell presence/value, AC/DC lid state, active-session refusal, Myference-only task deletion, reverse restore, missing optional app warnings, mandatory shell/power failure retention, and repeat restore.
+- [ ] Implement preflight/elevation checks before mutation; never change shell or lid state when their originals cannot be read and journaled.
+- [ ] Ensure headless runs the same shared multi-backend `serve` provider and never references the legacy gateway.
+- [ ] Update the colocated Windows lifecycle script with fixed parameterized Scheduled Task operations; keep all user paths as arguments, not interpolated command text.
+- [ ] Run package tests, full tests, vet, Windows build, and macOS cross-build.
+- [ ] Commit with `feat: run the multi-backend provider headlessly`.
+
+### Task 7: Ship and verify the complete Windows installation path
 
 **Files:**
+- Modify: `scripts/build-release.sh`
+- Modify: `web/public/install.ps1`
 - Modify: `.github/workflows/verify.yml`
 - Create: `scripts/windows-acceptance.ps1`
 - Create: `docs/windows-acceptance.md`
+- Modify: `README.md`
 
-- [ ] Add a Windows Actions job running `go test ./...`, `go vet ./...`, and `go build ./cli/cmd/myference`.
-- [ ] Add a non-destructive acceptance script that captures current power/lid/shell/task state, exercises doctor/status/models/test, and compares state after restore.
-- [ ] Document manual focus, keep-awake, priority, preload, sign-out/login headless, dashboard, provider reconnect, and emergency Task Manager recovery checks.
-- [ ] Run the Windows Actions job and the physical acceptance checklist; save no machine-specific values or secrets.
-- [ ] Commit with `ci: verify native Windows host management`.
+**Interfaces:**
+- The release archive contains `myference.exe`, `myference-agent-proxy.exe`, and `install-windows.ps1`; the public installer checksum-verifies and atomically installs all three under `%LOCALAPPDATA%\Programs\Myference`.
 
-### Task 8: Remove the legacy CLI after parity passes
+- [ ] Add failing release/installer fixture tests proving every required asset is archived, checksum-verified, installed together, and preserved on failed update.
+- [ ] Add a Windows Actions job running `go test ./...`, `go vet ./...`, CLI/proxy builds, PowerShell parser checks, installer fixtures, and non-destructive acceptance.
+- [ ] Add acceptance automation that captures power, lid, shell, tasks, and provider status; configures two fixture backends; exercises backend start/stop and verifies offer changes; runs doctor/models/test/status/restore; and proves host state matches afterward.
+- [ ] Document manual keep-awake, priority, focus, graceful stop, forced crash recovery, dashboard, headless sign-out/login, provider reconnect, and Task Manager emergency restore checks without machine-specific values or secrets.
+- [ ] Run all local Go checks, installer tests, PowerShell parsing, Windows release build, macOS release builds, and `git diff --check`.
+- [ ] Commit with `ci: verify provider-owned Windows management`.
+
+### Task 8: Remove the legacy CLI only after acceptance passes
 
 **Files:**
-- Delete: `cli/platform/windows/legacy/`
-- Delete: `cli/internal/platform/windows/lifecycle.go`
-- Modify: `cli/cmd/myference/main.go`
-- Modify: `cli/cmd/myference/platform_windows.go`
-- Modify: `README.md`
-- Modify: `scripts/build-release.sh`
+- Delete after gate: `cli/platform/windows/legacy/`
+- Delete after gate: `cli/internal/platform/windows/lifecycle.go`
+- Modify after gate: `cli/cmd/myference/main.go`
+- Modify after gate: `cli/cmd/myference/platform_windows.go`
+- Modify after gate: `README.md`
+- Modify after gate: `scripts/build-release.sh`
 
-- [ ] Check off every item in `docs/windows-acceptance.md` on a real Windows machine.
-- [ ] Write failing tests that reject removed `legacy-start`, `legacy-status`, and `legacy-stop` commands while confirming every new `windows` command remains registered.
-- [ ] Delete the legacy scripts, dashboard binary/source, compatibility lifecycle wrapper, and legacy command aliases.
-- [ ] Remove legacy packaging and documentation references; document only current outbound provider and Windows host controls.
-- [ ] Run `go test ./...`, `go vet ./...`, Windows and macOS release builds, and `git diff --check`.
-- [ ] Commit with `refactor: remove migrated Windows legacy CLI` and push `main`.
+**Gate:** Every checkbox in `docs/windows-acceptance.md` is completed on a real Windows machine and the Windows Actions job is green for the exact commit.
+
+- [ ] Add failing tests rejecting `legacy-start`, `legacy-status`, `legacy-stop`, LAN, firewall, and removed `optimize` commands while accepting all final Windows commands and the existing multi-backend controls.
+- [ ] Delete legacy scripts/dashboard/gateway code, compatibility lifecycle aliases, legacy packaging, and documentation references only after the gate is evidenced.
+- [ ] Run `go test ./... -count=1`, `go vet ./...`, provider/platform race tests, Windows AMD64 release build, macOS AMD64/ARM64 release builds, installer fixtures, PowerShell parser validation, and `git diff --check`.
+- [ ] Commit with `refactor: remove accepted Windows legacy CLI`.
