@@ -51,4 +51,4 @@
 - [x] Add favicon, Apple icon, manifest, canonical, theme color, Open Graph, and Twitter declarations.
 - [x] Add brand-asset verification to the web CI job.
 - [x] Run asset checks, web tests, lint, and production build; confirm Vite copies every asset.
-- [ ] Commit and push `main`, monitor GitHub Actions and Render, then verify public assets and metadata.
+- [x] Commit and push `main`, monitor GitHub Actions and Render, then verify public assets and metadata.
