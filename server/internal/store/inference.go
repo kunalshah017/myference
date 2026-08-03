@@ -25,6 +25,7 @@ var (
 
 type RoutingState struct {
 	MachineID, OfferID, Model, BackendKind              string
+	EvidenceKind, EvidenceDigest, MeteringMode          string
 	Capabilities                                        []string
 	PriceVersion, MaximumCost, LatencyMilliseconds      uint64
 	ConfirmedBond, Healthy                              bool
@@ -52,9 +53,10 @@ type ReceiptProposal struct {
 func (s *Store) UpsertRoutingState(ctx context.Context, state RoutingState) error {
 	capabilities := append([]string(nil), state.Capabilities...)
 	sort.Strings(capabilities)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_routing_state (machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second,latency_milliseconds,success_basis_points,reputation)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-		ON CONFLICT (machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,price_version=EXCLUDED.price_version,confirmed_bond=EXCLUDED.confirmed_bond,healthy=EXCLUDED.healthy,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,latency_milliseconds=EXCLUDED.latency_milliseconds,success_basis_points=EXCLUDED.success_basis_points,reputation=EXCLUDED.reputation,updated_at=now()`, state.MachineID, state.OfferID, state.Model, state.BackendKind, capabilities, crypto.Keccak256Hash([]byte(state.OfferID)).Hex(), crypto.Keccak256Hash([]byte(state.Model)).Hex(), crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex(), state.PriceVersion, state.ConfirmedBond, state.Healthy, state.Capacity, decimal(state.MaximumCost), decimal(state.InputPerMillion), decimal(state.OutputPerMillion), decimal(state.ComputePerSecond), state.LatencyMilliseconds, state.SuccessBasisPoints, state.Reputation)
+	evidenceKind, evidenceDigest, meteringMode := normalizedEvidence(state.EvidenceKind, state.EvidenceDigest, state.MeteringMode, state.Model)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_routing_state (machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,evidence_kind,evidence_digest,metering_mode,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second,latency_milliseconds,success_basis_points,reputation)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+		ON CONFLICT (machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,evidence_kind=EXCLUDED.evidence_kind,evidence_digest=EXCLUDED.evidence_digest,metering_mode=EXCLUDED.metering_mode,price_version=EXCLUDED.price_version,confirmed_bond=EXCLUDED.confirmed_bond,healthy=EXCLUDED.healthy,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,latency_milliseconds=EXCLUDED.latency_milliseconds,success_basis_points=EXCLUDED.success_basis_points,reputation=EXCLUDED.reputation,updated_at=now()`, state.MachineID, state.OfferID, state.Model, state.BackendKind, capabilities, crypto.Keccak256Hash([]byte(state.OfferID)).Hex(), crypto.Keccak256Hash([]byte(state.Model)).Hex(), crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex(), evidenceKind, evidenceDigest, meteringMode, state.PriceVersion, state.ConfirmedBond, state.Healthy, state.Capacity, decimal(state.MaximumCost), decimal(state.InputPerMillion), decimal(state.OutputPerMillion), decimal(state.ComputePerSecond), state.LatencyMilliseconds, state.SuccessBasisPoints, state.Reputation)
 	return err
 }
 
@@ -143,9 +145,18 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 		if crypto.Keccak256Hash([]byte(offered.OfferID)).Hex() != offered.OfferHash || crypto.Keccak256Hash([]byte(offered.Model)).Hex() != offered.ModelHash || crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex() != offered.CapabilityHash {
 			return ErrIneligibleRoute
 		}
+		evidenceKind, evidenceDigest, meteringMode := normalizedEvidence(offered.EvidenceKind, offered.EvidenceDigest, offered.MeteringMode, offered.Model)
+		var previousDigest string
+		err := tx.QueryRowContext(ctx, `SELECT evidence_digest FROM provider_routing_state WHERE machine_id=$1 AND offer_id=$2`, machineID, offered.OfferID).Scan(&previousDigest)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if previousDigest != "" && previousDigest != offered.Model && previousDigest != evidenceDigest {
+			return ErrIneligibleRoute
+		}
 		var input, output, compute, bond string
 		var exit uint64
-		err := tx.QueryRowContext(ctx, `SELECT o.input_per_million::text,o.output_per_million::text,o.compute_per_second::text,a.provider_bond::text,a.bond_exit_available_at FROM chain_offers o JOIN chain_accounts a ON a.chain_id=o.chain_id AND a.contract_address=o.contract_address AND lower(a.address)=lower(o.provider) WHERE o.chain_id=$1 AND lower(o.contract_address)=lower($2) AND lower(o.provider)=lower($3) AND o.offer_id=$4 AND o.version=$5 AND o.model_hash=$6 AND o.capability_hash=$7`, chainID, contractAddress, wallet, offered.OfferHash, offered.PriceVersion, offered.ModelHash, offered.CapabilityHash).Scan(&input, &output, &compute, &bond, &exit)
+		err = tx.QueryRowContext(ctx, `SELECT o.input_per_million::text,o.output_per_million::text,o.compute_per_second::text,a.provider_bond::text,a.bond_exit_available_at FROM chain_offers o JOIN chain_accounts a ON a.chain_id=o.chain_id AND a.contract_address=o.contract_address AND lower(a.address)=lower(o.provider) WHERE o.chain_id=$1 AND lower(o.contract_address)=lower($2) AND lower(o.provider)=lower($3) AND o.offer_id=$4 AND o.version=$5 AND o.model_hash=$6 AND o.capability_hash=$7`, chainID, contractAddress, wallet, offered.OfferHash, offered.PriceVersion, offered.ModelHash, offered.CapabilityHash).Scan(&input, &output, &compute, &bond, &exit)
 		if err != nil || bond == "0" || exit != 0 {
 			return ErrIneligibleRoute
 		}
@@ -173,11 +184,21 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 				available = 0
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO provider_routing_state(machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,true,$10,$11,$12,$13,$14) ON CONFLICT(machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,price_version=EXCLUDED.price_version,confirmed_bond=true,healthy=true,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,updated_at=now()`, machineID, offered.OfferID, offered.Model, offered.BackendKind, capabilities, offered.OfferHash, offered.ModelHash, offered.CapabilityHash, offered.PriceVersion, available, decimal(inputValue+outputValue+computeValue), input, output, compute); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO provider_routing_state(machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,evidence_kind,evidence_digest,metering_mode,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,true,$13,$14,$15,$16,$17) ON CONFLICT(machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,evidence_kind=EXCLUDED.evidence_kind,evidence_digest=EXCLUDED.evidence_digest,metering_mode=EXCLUDED.metering_mode,price_version=EXCLUDED.price_version,confirmed_bond=true,healthy=true,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,updated_at=now()`, machineID, offered.OfferID, offered.Model, offered.BackendKind, capabilities, offered.OfferHash, offered.ModelHash, offered.CapabilityHash, evidenceKind, evidenceDigest, meteringMode, offered.PriceVersion, available, decimal(inputValue+outputValue+computeValue), input, output, compute); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+func normalizedEvidence(kind, digest, metering, model string) (string, string, string) {
+	if kind == "" || digest == "" {
+		kind, digest = "provider_claimed", model
+	}
+	if metering == "" {
+		metering = "tokens_and_compute"
+	}
+	return kind, digest, metering
 }
 
 func (s *Store) OpenSession(ctx context.Context, accountID string) (string, uint64, error) {

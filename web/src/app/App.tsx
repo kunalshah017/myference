@@ -1,12 +1,13 @@
 import { DashboardShell } from './DashboardShell'
 import LandingPage from './LandingPage'
 
-function OperationalApp({ initialView = 'overview' }: { initialView?: 'overview' | 'api' }) {
+function OperationalApp({ initialView = 'overview' }: { initialView?: 'overview' | 'api' | 'hosting' }) {
   return <DashboardShell initialView={initialView} />
 }
 
 function App() {
   if (window.location.pathname === '/devices') return <OperationalApp initialView="api" />
+	if (window.location.pathname === '/host') return <OperationalApp initialView="hosting" />
   return window.location.pathname === '/app' ? <OperationalApp /> : <LandingPage />
 }
 

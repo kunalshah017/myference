@@ -31,6 +31,9 @@ type MarketOffer struct {
 	LatencyMilliseconds uint64    `json:"latency_milliseconds"`
 	SuccessBasisPoints  uint16    `json:"success_basis_points"`
 	Reputation          uint64    `json:"reputation"`
+	EvidenceKind        string    `json:"evidence_kind"`
+	EvidenceDigest      string    `json:"evidence_digest"`
+	MeteringMode        string    `json:"metering_mode"`
 	Available           bool      `json:"available"`
 	Stale               bool      `json:"stale"`
 	UpdatedAt           time.Time `json:"updated_at"`
@@ -82,7 +85,7 @@ func (s *Store) MarketplaceModel(ctx context.Context, modelName string, staleAft
 	cutoff := time.Now().Add(-staleAfter)
 	rows, err := s.db.QueryContext(ctx, `SELECT prs.machine_id,a.wallet_address,prs.offer_id,prs.model,array_to_json(prs.capabilities),prs.price_version,
 		prs.input_per_million::text,prs.output_per_million::text,prs.compute_per_second::text,prs.capacity,
-		prs.latency_milliseconds,prs.success_basis_points,prs.reputation,
+		prs.latency_milliseconds,prs.success_basis_points,prs.reputation,prs.evidence_kind,prs.evidence_digest,prs.metering_mode,
 		(prs.healthy AND prs.capacity>0 AND prs.updated_at >= $2),prs.updated_at < $2,prs.updated_at
 		FROM provider_routing_state prs
 		JOIN machines m ON m.id=prs.machine_id JOIN accounts a ON a.id=m.account_id
@@ -95,7 +98,7 @@ func (s *Store) MarketplaceModel(ctx context.Context, modelName string, staleAft
 	for rows.Next() {
 		var offer MarketOffer
 		var capabilities string
-		if err := rows.Scan(&offer.MachineID, &offer.ProviderAddress, &offer.OfferID, &offer.Model, &capabilities, &offer.PriceVersion, &offer.InputPerMillion, &offer.OutputPerMillion, &offer.ComputePerSecond, &offer.Capacity, &offer.LatencyMilliseconds, &offer.SuccessBasisPoints, &offer.Reputation, &offer.Available, &offer.Stale, &offer.UpdatedAt); err != nil {
+		if err := rows.Scan(&offer.MachineID, &offer.ProviderAddress, &offer.OfferID, &offer.Model, &capabilities, &offer.PriceVersion, &offer.InputPerMillion, &offer.OutputPerMillion, &offer.ComputePerSecond, &offer.Capacity, &offer.LatencyMilliseconds, &offer.SuccessBasisPoints, &offer.Reputation, &offer.EvidenceKind, &offer.EvidenceDigest, &offer.MeteringMode, &offer.Available, &offer.Stale, &offer.UpdatedAt); err != nil {
 			return MarketModelDetail{}, err
 		}
 		if err := json.Unmarshal([]byte(capabilities), &offer.Capabilities); err != nil {

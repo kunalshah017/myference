@@ -37,9 +37,13 @@ myference service install
 myference service start
 ```
 
+For the common unused-machine path, `myference host` replaces the Ollama add/list/capacity/serve sequence. It discovers installed models, records the runtime digest, opens the provider workspace for collateral and price activation, and serves in the foreground. Use `--model <name>` to choose a particular installed model or `--setup-only` before installing the background service.
+
 Machine, backend, and EIP-712 signer secrets are loaded from Windows Credential Manager or macOS Keychain and never stored in JSON. Browser approval submits `setProviderSigner` on Monad before the machine can become routable. `backend start` and `backend stop` are detected by the running daemon and update advertised capacity without disconnecting other backends.
 
 Ollama must use loopback. Cloud adapters require HTTPS except in loopback integration tests. Codex, Claude, and Kimi require Docker Desktop and a digest-pinned agent image. Each agent runs in a read-only, capability-dropped container on a unique internal Docker network and mounts only the disposable workspace. A separately packaged proxy sidecar is the only dual-homed peer: it permits only the configured upstream model and inference endpoints within the job's cumulative output-token budget. The agent sees only a random job token; the long-lived credential is mounted only into the proxy sidecar. Their receipts can bill measured compute time without inventing unavailable token counts.
+
+Marketplace prices are displayed as MON with a cached, informational USD reference. Billing and settlement always use the exact immutable integer MON rates published on-chain. Ollama and compatible APIs meter observed input, output, and compute usage; CLI agents are compute-only unless trustworthy upstream usage is available.
 
 `myference service install|start|stop|status|uninstall` uses a Windows Scheduled Task or a per-user macOS LaunchAgent. A foreground `serve` process stops cleanly with Ctrl+C. `legacy-start`, `legacy-status`, and `legacy-stop` remain available only for the preserved Windows LAN host.
 

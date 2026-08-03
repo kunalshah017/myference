@@ -52,13 +52,15 @@ func main() {
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference login | backend <add|list|start|stop> | capacity | status | serve | service <install|start|stop|status|uninstall>")
+		return errors.New("usage: myference login | host | backend <add|list|start|stop> | capacity | status | serve | service <install|start|stop|status|uninstall>")
 	}
 	switch args[0] {
 	case "login":
 		return runLogin(context.Background(), args[1:], output, defaultLoginDependencies())
 	case "backend":
 		return runBackend(args[1:], output)
+	case "host":
+		return runHost(context.Background(), args[1:], output)
 	case "capacity", "publish":
 		path, err := parseConfigFlag(args[0], args[1:])
 		if err != nil {
@@ -106,6 +108,97 @@ func run(args []string, output io.Writer) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runHost(ctx context.Context, args []string, output io.Writer) error {
+	flags := flag.NewFlagSet("host", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", defaultConfigPath(), "configuration path")
+	endpoint := flags.String("ollama-url", "http://127.0.0.1:11434", "local Ollama URL")
+	modelName := flags.String("model", "", "installed model to serve; defaults to the first model")
+	webURL := flags.String("web", "https://myference-web.onrender.com", "Myference web URL")
+	setupOnly := flags.Bool("setup-only", false, "configure the backend without starting the foreground server")
+	noBrowser := flags.Bool("no-browser", false, "do not open the provider workspace")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	model, err := configureLocalHost(ctx, *path, *endpoint, *modelName, nil)
+	if err != nil {
+		return err
+	}
+	activationURL := strings.TrimRight(*webURL, "/") + "/host"
+	if _, err := fmt.Fprintf(output, "Ready to host %s (%s). Activate pricing and collateral at %s\n", model.Name, model.Digest, activationURL); err != nil {
+		return err
+	}
+	if !*noBrowser {
+		if err := openBrowser(activationURL); err != nil {
+			_, _ = fmt.Fprintln(output, "Browser did not open; use the URL above.")
+		}
+	}
+	if *setupOnly {
+		return nil
+	}
+	serveContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return runServe(serveContext, *path, output)
+}
+
+func configureLocalHost(ctx context.Context, path, endpoint, requestedModel string, client *http.Client) (backend.Model, error) {
+	configured, err := ollama.New(endpoint, client)
+	if err != nil {
+		return backend.Model{}, err
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	models, err := configured.Models(queryCtx)
+	if err != nil {
+		return backend.Model{}, fmt.Errorf("connect to Ollama: %w", err)
+	}
+	if len(models) == 0 {
+		return backend.Model{}, errors.New("Ollama has no installed models; install one with `ollama pull <model>`")
+	}
+	slices.SortFunc(models, func(a, b backend.Model) int { return strings.Compare(a.Name, b.Name) })
+	selected := models[0]
+	if requestedModel != "" {
+		index := slices.IndexFunc(models, func(model backend.Model) bool { return model.Name == requestedModel })
+		if index < 0 {
+			return backend.Model{}, fmt.Errorf("model %q is not installed in Ollama", requestedModel)
+		}
+		selected = models[index]
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return backend.Model{}, fmt.Errorf("login before hosting: %w", err)
+	}
+	name := "local-" + safeBackendName(selected.Name)
+	index := slices.IndexFunc(cfg.Backends, func(item config.Backend) bool { return item.Kind == "ollama" && item.Model == selected.Name })
+	item := config.Backend{Name: name, Kind: "ollama", URL: endpoint, Model: selected.Name, PriceVersion: 1, Enabled: true}
+	if index >= 0 {
+		item.Name = cfg.Backends[index].Name
+		item.PriceVersion = cfg.Backends[index].PriceVersion
+		cfg.Backends[index] = item
+	} else {
+		if slices.ContainsFunc(cfg.Backends, func(existing config.Backend) bool { return existing.Name == name }) {
+			return backend.Model{}, fmt.Errorf("backend name %q already exists", name)
+		}
+		cfg.Backends = append(cfg.Backends, item)
+	}
+	if err := config.Save(path, cfg); err != nil {
+		return backend.Model{}, err
+	}
+	return selected, nil
+}
+
+func safeBackendName(model string) string {
+	var result strings.Builder
+	for _, character := range strings.ToLower(model) {
+		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' {
+			result.WriteRune(character)
+		} else if result.Len() > 0 && !strings.HasSuffix(result.String(), "-") {
+			result.WriteByte('-')
+		}
+	}
+	return strings.Trim(result.String(), "-")
 }
 
 func writeStatusJSON(cfg config.Config, capacity v1.Capacity, output io.Writer, loadCredential func(string, string) (string, error), now func() time.Time) error {
@@ -358,10 +451,11 @@ func discoverBackends(ctx context.Context, cfg config.Config, loadCredential fun
 		if err != nil {
 			return nil, nil, fmt.Errorf("discover backend %q: %w", item.Name, err)
 		}
-		if !slices.ContainsFunc(models, func(model backend.Model) bool { return model.Name == item.Model }) {
+		modelIndex := slices.IndexFunc(models, func(model backend.Model) bool { return model.Name == item.Model })
+		if modelIndex < 0 {
 			return nil, nil, fmt.Errorf("configured model %q is not available", item.Model)
 		}
-		offers = append(offers, offerCapacity(item))
+		offers = append(offers, offerCapacity(item, models[modelIndex]))
 		backends[item.Name] = client
 	}
 	return offers, backends, nil
@@ -573,20 +667,24 @@ func printCapacity(ctx context.Context, path string, output io.Writer) error {
 		if err != nil {
 			return err
 		}
+		var discovered backend.Model
 		found := false
 		for _, model := range models {
-			found = found || model.Name == item.Model
+			if model.Name == item.Model {
+				found = true
+				discovered = model
+			}
 		}
 		if !found {
 			return fmt.Errorf("configured model %q is not installed", item.Model)
 		}
 		capacity.Available++
-		capacity.Offers = append(capacity.Offers, offerCapacity(item))
+		capacity.Offers = append(capacity.Offers, offerCapacity(item, discovered))
 	}
 	return json.NewEncoder(output).Encode(capacity)
 }
 
-func offerCapacity(item config.Backend) v1.OfferCapacity {
+func offerCapacity(item config.Backend, discovered backend.Model) v1.OfferCapacity {
 	version := item.PriceVersion
 	if version == 0 {
 		version = 1
@@ -595,7 +693,14 @@ func offerCapacity(item config.Backend) v1.OfferCapacity {
 	if item.Kind == "codex" || item.Kind == "claude" || item.Kind == "kimi" {
 		capabilities = append(capabilities, "workspace")
 	}
-	return v1.OfferCapacity{OfferID: item.Name, Model: item.Model, PriceVersion: version, BackendKind: item.Kind, OfferHash: crypto.Keccak256Hash([]byte(item.Name)).Hex(), ModelHash: crypto.Keccak256Hash([]byte(item.Model)).Hex(), CapabilityHash: crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex(), Capabilities: capabilities}
+	evidenceKind, evidenceDigest, meteringMode := "upstream_model", discovered.Name, "tokens_and_compute"
+	if item.Kind == "ollama" {
+		evidenceKind, evidenceDigest = "ollama_digest", discovered.Digest
+	}
+	if item.Kind == "codex" || item.Kind == "claude" || item.Kind == "kimi" {
+		evidenceKind, evidenceDigest, meteringMode = "runtime_image", strings.TrimPrefix(item.Image[strings.LastIndex(item.Image, "@")+1:], "@"), "compute_only"
+	}
+	return v1.OfferCapacity{OfferID: item.Name, Model: item.Model, PriceVersion: version, BackendKind: item.Kind, OfferHash: crypto.Keccak256Hash([]byte(item.Name)).Hex(), ModelHash: crypto.Keccak256Hash([]byte(item.Model)).Hex(), CapabilityHash: crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex(), Capabilities: capabilities, EvidenceKind: evidenceKind, EvidenceDigest: evidenceDigest, MeteringMode: meteringMode}
 }
 
 func parseConfigFlag(name string, args []string) (string, error) {

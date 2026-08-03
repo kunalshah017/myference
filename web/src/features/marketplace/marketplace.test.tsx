@@ -19,7 +19,7 @@ beforeAll(async () => {
     response.setHeader('content-type', 'application/json')
     if (request.url === '/api/models') response.end(JSON.stringify(inventory))
     else if (request.url === '/api/activity') response.end(JSON.stringify(activity))
-    else if (request.url?.startsWith('/api/models/')) response.end(JSON.stringify({ model: inventory[0]?.model, offers: [{ machine_id: 'machine-live', provider_address: '0x1111111111111111111111111111111111111111', offer_id: 'offer-live', model: inventory[0]?.model, capabilities: ['chat', 'stream'], price_version: 3, input_per_million_wei: '10', output_per_million_wei: '20', compute_per_second_wei: '30', capacity: 2, latency_milliseconds: 40, success_basis_points: 9900, reputation: 4, available: true, stale: false, updated_at: '2026-08-02T17:00:00Z' }] }))
+    else if (request.url?.startsWith('/api/models/')) response.end(JSON.stringify({ model: inventory[0]?.model, offers: [{ machine_id: 'machine-live', provider_address: '0x1111111111111111111111111111111111111111', offer_id: 'offer-live', model: inventory[0]?.model, capabilities: ['chat', 'stream'], price_version: 3, input_per_million_wei: '10', output_per_million_wei: '20', compute_per_second_wei: '30', capacity: 2, latency_milliseconds: 40, success_basis_points: 9900, reputation: 4, evidence_kind: 'ollama_digest', evidence_digest: 'sha256:runtime-digest', metering_mode: 'tokens_and_compute', available: true, stale: false, updated_at: '2026-08-02T17:00:00Z' }] }))
     else { response.statusCode = 404; response.end('{}') }
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -42,6 +42,8 @@ it('renders only live API inventory with all-inclusive integer prices and provid
   await userEvent.click(await screen.findByRole('button', { name: /qwen2.5:0.5b/i }))
   expect((await screen.findAllByText('0.00000000000000001 MON')).length).toBeGreaterThan(0)
   expect(await screen.findByText(/price version 3/i)).toBeVisible()
+  expect(screen.getByText(/ollama digest pinned/i)).toBeVisible()
+  expect(screen.getByText(/tokens \+ compute metered/i)).toBeVisible()
   await userEvent.click(screen.getByRole('button', { name: /use provider machine-live/i }))
   expect(screen.getByText(/pinned to machine-live/i)).toBeVisible()
   expect(screen.queryByText(/mock|sample provider/i)).not.toBeInTheDocument()

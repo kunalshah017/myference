@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/kunalshah017/myference/cli/internal/backend"
 	"github.com/kunalshah017/myference/cli/internal/config"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
@@ -48,6 +49,38 @@ func TestBackendCommandsAddListStartStopAndStatus(t *testing.T) {
 	}
 	if len(loaded.Backends) != 1 || !loaded.Backends[0].Enabled {
 		t.Fatalf("unexpected backend state: %+v", loaded.Backends)
+	}
+}
+
+func TestConfigureLocalHostDiscoversOllamaAndIsIdempotent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/tags" {
+			http.NotFound(response, request)
+			return
+		}
+		response.Header().Set("content-type", "application/json")
+		_, _ = response.Write([]byte(`{"models":[{"name":"qwen2.5:0.5b","digest":"sha256:real-runtime","size":1024}]}`))
+	}))
+	defer server.Close()
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1"}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		selected, err := configureLocalHost(context.Background(), path, server.URL, "", server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selected.Name != "qwen2.5:0.5b" || selected.Digest != "sha256:real-runtime" {
+			t.Fatalf("selected=%+v", selected)
+		}
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Backends) != 1 || loaded.Backends[0].Kind != "ollama" || loaded.Backends[0].Model != "qwen2.5:0.5b" || !loaded.Backends[0].Enabled {
+		t.Fatalf("backends=%+v", loaded.Backends)
 	}
 }
 
@@ -190,7 +223,7 @@ func TestStatusJSONProvidesPlatformAttestationWithoutSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ := config.Load(path)
-	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{offerCapacity(config.Backend{Name: "local", Kind: "ollama", Model: "qwen", PriceVersion: 1})}}
+	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{offerCapacity(config.Backend{Name: "local", Kind: "ollama", Model: "qwen", PriceVersion: 1}, backend.Model{Name: "qwen", Digest: "sha256:test"})}}
 	if err := writeStatusJSON(cfg, capacity, &output, func(string, string) (string, error) { return fmt.Sprintf("%x", crypto.FromECDSA(key)), nil }, func() time.Time { return time.Unix(1_700_000_000, 0) }); err != nil {
 		t.Fatal(err)
 	}
@@ -212,12 +245,18 @@ func TestStatusJSONProvidesPlatformAttestationWithoutSecrets(t *testing.T) {
 }
 
 func TestOfferCapacityCarriesDeterministicMonadProofKeys(t *testing.T) {
-	offer := offerCapacity(config.Backend{Name: "local", Kind: "ollama", Model: "qwen", PriceVersion: 4, Enabled: true})
+	offer := offerCapacity(config.Backend{Name: "local", Kind: "ollama", Model: "qwen", PriceVersion: 4, Enabled: true}, backend.Model{Name: "qwen", Digest: "sha256:runtime"})
 	if offer.PriceVersion != 4 || len(offer.OfferHash) != 66 || len(offer.ModelHash) != 66 || len(offer.CapabilityHash) != 66 || offer.BackendKind != "ollama" || !slices.Equal(offer.Capabilities, []string{"stream", "text"}) {
 		t.Fatalf("unexpected offer proof keys: %+v", offer)
 	}
-	agent := offerCapacity(config.Backend{Name: "agent", Kind: "codex", Model: "codex", PriceVersion: 1, Enabled: true})
+	if offer.EvidenceKind != "ollama_digest" || offer.EvidenceDigest != "sha256:runtime" || offer.MeteringMode != "tokens_and_compute" {
+		t.Fatalf("ollama runtime evidence missing: %+v", offer)
+	}
+	agent := offerCapacity(config.Backend{Name: "agent", Kind: "codex", Model: "codex", Image: "codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", PriceVersion: 1, Enabled: true}, backend.Model{Name: "codex"})
 	if !slices.Equal(agent.Capabilities, []string{"stream", "text", "workspace"}) {
 		t.Fatalf("command agent lacks workspace capability: %+v", agent)
+	}
+	if agent.EvidenceKind != "runtime_image" || agent.EvidenceDigest != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || agent.MeteringMode != "compute_only" {
+		t.Fatalf("command agent evidence is unsafe: %+v", agent)
 	}
 }

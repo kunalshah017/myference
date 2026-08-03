@@ -145,6 +145,9 @@ type OfferCapacity struct {
 	ModelHash      string   `json:"model_hash,omitempty"`
 	CapabilityHash string   `json:"capability_hash,omitempty"`
 	Capabilities   []string `json:"capabilities,omitempty"`
+	EvidenceKind   string   `json:"evidence_kind,omitempty"`
+	EvidenceDigest string   `json:"evidence_digest,omitempty"`
+	MeteringMode   string   `json:"metering_mode,omitempty"`
 }
 
 func (o OfferCapacity) Validate() error {
@@ -173,6 +176,14 @@ func (o OfferCapacity) Validate() error {
 	}
 	if provided != 0 && len(o.Capabilities) == 0 {
 		return ErrInvalidMessage
+	}
+	if o.EvidenceKind != "" || o.EvidenceDigest != "" || o.MeteringMode != "" {
+		if o.EvidenceDigest == "" || (o.EvidenceKind != "ollama_digest" && o.EvidenceKind != "upstream_model" && o.EvidenceKind != "runtime_image") {
+			return ErrInvalidMessage
+		}
+		if o.MeteringMode != "tokens_and_compute" && o.MeteringMode != "compute_only" {
+			return ErrInvalidMessage
+		}
 	}
 	return nil
 }

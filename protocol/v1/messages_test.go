@@ -106,6 +106,22 @@ func TestMessageRejectsInvalidVersionAndEmptyRequestID(t *testing.T) {
 	}
 }
 
+func TestOfferCapacityValidatesRuntimeEvidenceAndMetering(t *testing.T) {
+	valid := OfferCapacity{OfferID: "offer-1", Model: "qwen", PriceVersion: 1, EvidenceKind: "ollama_digest", EvidenceDigest: "sha256:abc", MeteringMode: "tokens_and_compute"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid runtime evidence rejected: %v", err)
+	}
+	for _, offer := range []OfferCapacity{
+		{OfferID: "offer-1", Model: "qwen", PriceVersion: 1, EvidenceKind: "invented", EvidenceDigest: "abc", MeteringMode: "tokens_and_compute"},
+		{OfferID: "offer-1", Model: "qwen", PriceVersion: 1, EvidenceKind: "ollama_digest", MeteringMode: "tokens_and_compute"},
+		{OfferID: "offer-1", Model: "qwen", PriceVersion: 1, EvidenceKind: "ollama_digest", EvidenceDigest: "abc", MeteringMode: "tokens"},
+	} {
+		if err := offer.Validate(); err == nil {
+			t.Fatalf("invalid runtime evidence accepted: %+v", offer)
+		}
+	}
+}
+
 func TestMessageChunkSequenceIsStrictlyMonotonic(t *testing.T) {
 	tracker := NewChunkTracker()
 	for _, sequence := range []uint64{1, 2, 3} {
