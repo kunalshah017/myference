@@ -275,6 +275,9 @@ footer {
 .workspace-option strong { font-size: 0.8rem; }
 .provider-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .provider-form-footer p { max-width: 520px; margin: 0; color: var(--circuit-ink-soft); font-size: 0.74rem; line-height: 1.5; }
+.price-preview { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.5rem; padding:1rem; border-left:4px solid var(--proof-mint); background:var(--node-mist); }
+.price-preview strong { grid-column:1/-1; font-size:.72rem; }
+.price-preview span { font:600 .68rem var(--font-data); }
 @media (max-width: 900px) {
   .site-header { grid-template-columns: 1fr auto; }
   .site-header nav, .network-state { display: none; }

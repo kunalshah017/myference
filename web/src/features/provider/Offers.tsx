@@ -1,35 +1,43 @@
-import { useState, type FormEvent } from 'react'
-import type { OperationOffer } from '../../lib/api'
+import { useMemo, useState, type FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Money } from '../../components/Money'
+import { computeMinuteUSDToWeiPerSecond, formatMON, parseMON, usdToWei } from '../../lib/amount'
+import { ReferencePriceAPI, type OperationBackend, type OperationOffer } from '../../lib/api'
 import type { MarketWriter, SubmittedTransaction } from '../../lib/marketContract'
 
-export function Offers({ offers, writer, submit }: { offers: OperationOffer[]; writer: MarketWriter; submit: (action:()=>Promise<SubmittedTransaction>)=>Promise<void> }) {
-  const [id,setID]=useState(''); const [model,setModel]=useState(''); const [input,setInput]=useState(''); const [output,setOutput]=useState(''); const [compute,setCompute]=useState(''); const [workspace,setWorkspace]=useState(false)
-  const publish=async(event:FormEvent)=>{event.preventDefault();for(const value of [input,output,compute]) if(!/^\d+$/.test(value)) throw new Error('Prices must be integer wei.');await submit(()=>writer.publishOffer({offerID:id,model,capabilities:workspace?['text','stream','workspace']:['text','stream'],inputPerMillion:BigInt(input),outputPerMillion:BigInt(output),computePerSecond:BigInt(compute)}))}
+function offerID(backend: OperationBackend): string {
+  if (backend.offer_id) return backend.offer_id
+  const marker = backend.id.indexOf(':', 'backend:'.length)
+  return backend.id.startsWith('backend:') && marker >= 0 ? backend.id.slice(marker + 1) : backend.id
+}
+
+export function Offers({ offers, backends, writer, submit }: { offers: OperationOffer[]; backends: OperationBackend[]; writer: MarketWriter; submit: (action:()=>Promise<SubmittedTransaction>)=>Promise<void> }) {
+  const priceAPI = useMemo(() => new ReferencePriceAPI(), [])
+  const quote = useQuery({ queryKey: ['reference-price'], queryFn: () => priceAPI.price(), staleTime: 60_000, retry: false })
+  const [backendID,setBackendID]=useState(backends[0]?.id ?? '')
+  const [input,setInput]=useState(''); const [output,setOutput]=useState(''); const [compute,setCompute]=useState('')
+  const selected = backends.find((backend) => backend.id === backendID)
+  const computeOnly = selected ? ['codex','claude','kimi'].includes(selected.kind) : false
+  const rates = (() => { try {
+    if (!selected || !compute) return undefined
+    const computePerSecond = quote.data ? computeMinuteUSDToWeiPerSecond(compute, quote.data.usd_per_mon) : (parseMON(compute) + 59n) / 60n
+    return { inputPerMillion: computeOnly ? 0n : quote.data ? usdToWei(input, quote.data.usd_per_mon) : parseMON(input), outputPerMillion: computeOnly ? 0n : quote.data ? usdToWei(output, quote.data.usd_per_mon) : parseMON(output), computePerSecond }
+  } catch { return undefined } })()
+  const publish=async(event:FormEvent)=>{event.preventDefault();if(!selected||!rates) return;const capabilities=['text','stream'];if(computeOnly)capabilities.push('workspace');await submit(()=>writer.publishOffer({offerID:offerID(selected),model:selected.model,capabilities,inputPerMillion:rates.inputPerMillion,outputPerMillion:rates.outputPerMillion,computePerSecond:rates.computePerSecond}))}
+  const unit = quote.data ? 'USD' : 'MON'
   return <section className="provider-card offer-operations" aria-labelledby="offers-title">
-    <div className="provider-card-heading">
-      <div><p className="eyebrow">Pricing</p><h3 id="offers-title">Publish an offer</h3></div>
-      <span className="version-count">{offers.length} version{offers.length===1?'':'s'}</span>
-    </div>
-    <p className="provider-card-copy">Set the exact model and usage rates your machine will advertise. Existing sessions keep the price version they selected.</p>
-    {offers.length>0&&<div className="offer-history"><strong>Published versions</strong><ul>{offers.map((offer)=><li key={`${offer.offer_id}:${offer.version}`}><code>{offer.offer_id}</code><strong>Version {offer.version}</strong><span>{offer.input_per_million_wei} input · {offer.output_per_million_wei} output · {offer.compute_per_second_wei} compute wei</span></li>)}</ul></div>}
-    <form className="offer-form" onSubmit={(event)=>void publish(event)}>
-      <fieldset>
-        <legend>Model identity</legend>
-        <div className="provider-field-grid">
-          <div className="provider-field"><label htmlFor="offer-id">Offer name</label><input id="offer-id" aria-describedby="offer-id-help" placeholder="local-qwen" value={id} onChange={(event)=>setID(event.target.value)} required/><small id="offer-id-help">A stable name used by your CLI backend.</small></div>
-          <div className="provider-field"><label htmlFor="offer-model">Model</label><input id="offer-model" aria-describedby="offer-model-help" placeholder="qwen2.5:0.5b" value={model} onChange={(event)=>setModel(event.target.value)} required/><small id="offer-model-help">Must exactly match the model advertised by the machine.</small></div>
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Usage pricing</legend>
-        <div className="provider-field-grid provider-pricing-grid">
-          <div className="provider-field"><label htmlFor="offer-input">Input tokens</label><div className="input-with-unit"><input id="offer-input" inputMode="numeric" pattern="[0-9]+" aria-describedby="offer-input-help" placeholder="1000000000000" value={input} onChange={(event)=>setInput(event.target.value)} required/><span>wei / 1M</span></div><small id="offer-input-help">Charge in wei for one million input tokens.</small></div>
-          <div className="provider-field"><label htmlFor="offer-output">Output tokens</label><div className="input-with-unit"><input id="offer-output" inputMode="numeric" pattern="[0-9]+" aria-describedby="offer-output-help" placeholder="2000000000000" value={output} onChange={(event)=>setOutput(event.target.value)} required/><span>wei / 1M</span></div><small id="offer-output-help">Charge in wei for one million generated tokens.</small></div>
-          <div className="provider-field"><label htmlFor="offer-compute">Compute time</label><div className="input-with-unit"><input id="offer-compute" inputMode="numeric" pattern="[0-9]+" aria-describedby="offer-compute-help" placeholder="1000000000" value={compute} onChange={(event)=>setCompute(event.target.value)} required/><span>wei / sec</span></div><small id="offer-compute-help">Charge in wei for each second of measured compute.</small></div>
-        </div>
-      </fieldset>
-      <label className="workspace-option" htmlFor="offer-workspace"><input id="offer-workspace" type="checkbox" checked={workspace} onChange={(event)=>setWorkspace(event.target.checked)}/><span><strong>Allow temporary workspace</strong><small>Enable only for isolated CLI coding agents that accept disposable project files.</small></span></label>
-      <div className="provider-form-footer"><p>Publishing creates a new immutable on-chain price version.</p><button type="submit">Publish next offer version</button></div>
-    </form>
+    <div className="provider-card-heading"><div><p className="eyebrow">Pricing</p><h3 id="offers-title">Activate a discovered backend</h3></div><span className="version-count">{offers.length} version{offers.length===1?'':'s'}</span></div>
+    <p className="provider-card-copy">Choose a backend reported by your CLI. Myference fills in its exact model and offer identity.</p>
+    {offers.length>0&&<div className="offer-history"><strong>Published versions</strong><ul>{offers.map((offer)=><li key={`${offer.offer_id}:${offer.version}`}><code>{offer.offer_id}</code><strong>Version {offer.version}</strong><span><Money wei={offer.input_per_million_wei}/> input · <Money wei={offer.output_per_million_wei}/> output · <Money wei={offer.compute_per_second_wei}/> compute</span></li>)}</ul></div>}
+    {backends.length===0?<div className="dashboard-empty"><strong>No CLI backend discovered</strong><p>Run <code>myference host</code> on the machine first.</p></div>:<form className="offer-form" onSubmit={(event)=>void publish(event)}>
+      <div className="provider-field"><label htmlFor="offer-backend">Backend and model</label><select id="offer-backend" value={backendID} onChange={(event)=>setBackendID(event.target.value)}>{backends.map((backend)=><option key={backend.id} value={backend.id}>{backend.kind} · {backend.model} · {backend.healthy?'online':'awaiting heartbeat'}</option>)}</select><small>Detected by the connected provider CLI. No model name to copy.</small></div>
+      <fieldset><legend>Usage pricing</legend><p className="provider-note">Enter {unit} targets. {quote.data?`Converted using 1 MON = $${quote.data.usd_per_mon}; the MON result is locked on-chain.`:'The live USD quote is unavailable, so enter MON rates directly.'}</p><div className="provider-field-grid provider-pricing-grid">
+        <div className="provider-field"><label htmlFor="offer-input">Input tokens</label><div className="input-with-unit"><input id="offer-input" inputMode="decimal" aria-describedby="offer-input-help" value={input} onChange={(event)=>setInput(event.target.value)} disabled={computeOnly} required={!computeOnly}/><span>{unit} / 1M</span></div><small id="offer-input-help">{computeOnly?'CLI agents use compute-only pricing.':`${unit} for one million input tokens.`}</small></div>
+        <div className="provider-field"><label htmlFor="offer-output">Output tokens</label><div className="input-with-unit"><input id="offer-output" inputMode="decimal" aria-describedby="offer-output-help" value={output} onChange={(event)=>setOutput(event.target.value)} disabled={computeOnly} required={!computeOnly}/><span>{unit} / 1M</span></div><small id="offer-output-help">{computeOnly?'CLI agents use compute-only pricing.':`${unit} for one million output tokens.`}</small></div>
+        <div className="provider-field"><label htmlFor="offer-compute">Compute time</label><div className="input-with-unit"><input id="offer-compute" inputMode="decimal" aria-describedby="offer-compute-help" value={compute} onChange={(event)=>setCompute(event.target.value)} required/><span>{unit} / min</span></div><small id="offer-compute-help">{unit} for each minute of measured compute.</small></div>
+      </div></fieldset>
+      {rates&&<div className="price-preview" role="status"><strong>Locked on-chain rates</strong><span>{formatMON(rates.inputPerMillion)} / 1M input</span><span>{formatMON(rates.outputPerMillion)} / 1M output</span><span>{formatMON(rates.computePerSecond)} / compute second</span></div>}
+      <div className="provider-form-footer"><p>Publishing creates a new immutable on-chain price version.</p><button type="submit" disabled={!rates}>Publish offer</button></div>
+    </form>}
   </section>
 }

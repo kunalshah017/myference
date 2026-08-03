@@ -38,7 +38,7 @@ export function ProviderConsole({ api=new OperationsAPI(),writer:supplied }:{api
         </form>
         <p className="provider-note">Bond exits use the contract delay before funds can be withdrawn.</p>
       </section>
-      <Offers offers={operations.data.offers} writer={writer} submit={submit}/>
+      <Offers offers={operations.data.offers} backends={operations.data.machines.flatMap((machine)=>machine.backends)} writer={writer} submit={submit}/>
     </div>
     {status&&<p role="status" className="transaction-proof">{status}</p>}
     {error&&<p role="alert" className="inline-error">{error}</p>}
