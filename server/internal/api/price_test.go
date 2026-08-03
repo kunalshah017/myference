@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -36,6 +37,33 @@ func TestReferencePriceCachesLastFreshQuote(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("upstream calls=%d, want 1", calls)
 	}
+}
+
+func TestReferencePriceDoesNotSerializeCallersBehindSlowUpstream(t *testing.T) {
+	now := time.Unix(1_785_717_600, 0).UTC()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		fmt.Fprintf(w, `{"monad":{"usd":0.02,"last_updated_at":%d}}`, now.Unix())
+	}))
+	t.Cleanup(upstream.Close)
+	handler := NewReferencePrice(ReferencePriceConfig{Endpoint: upstream.URL, HTTPClient: upstream.Client(), CacheTTL: time.Minute, MaxAge: 15 * time.Minute, Now: func() time.Time { return now }})
+	var group sync.WaitGroup
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/reference-price", nil))
+	}()
+	<-started
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/reference-price", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("concurrent status=%d, want immediate 503", response.Code)
+	}
+	close(release)
+	group.Wait()
 }
 
 func TestReferencePriceRejectsStaleOrUnavailableQuote(t *testing.T) {

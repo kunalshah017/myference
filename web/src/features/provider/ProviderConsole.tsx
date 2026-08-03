@@ -12,7 +12,7 @@ import { Offers } from './Offers'
 export function ProviderConsole({ api=new OperationsAPI(),writer:supplied }:{api?:OperationsAPI;writer?:MarketWriter}){
   const operations=useQuery({queryKey:['operations'],queryFn:()=>api.operations(),retry:false,refetchInterval:15_000});const[bond,setBond]=useState('');const[status,setStatus]=useState('');const[error,setError]=useState('')
   if(operations.isPending)return <p role="status">Loading provider operations…</p>;if(operations.isError)return <p role="alert">Provider operations are unavailable.</p>
-  const writer=supplied??new ViemMarketWriter(operations.data,injectedProvider());const submit=async(action:()=>Promise<SubmittedTransaction>)=>{setError('');try{const tx=await action();setStatus(`${tx.hash} pending`);await tx.confirm();setStatus('Transaction finalized. Waiting for indexer.');await operations.refetch()}catch(reason){setError(reason instanceof Error?reason.message:'Transaction failed.')}}
+  const writer=supplied??new ViemMarketWriter(operations.data,injectedProvider());const submit=async(action:()=>Promise<SubmittedTransaction>)=>{setError('');try{const tx=await action();setStatus(`${tx.hash} pending`);const confirmation=await tx.confirm();setStatus('Transaction finalized. Waiting for indexer.');await operations.refetch();return confirmation}catch(reason){setError(reason instanceof Error?reason.message:'Transaction failed.');return undefined}}
   const deposit=async(event:FormEvent)=>{event.preventDefault();await submit(()=>writer.depositBond(parseMON(bond)))}
   return <section className="operations-section" aria-labelledby="provider-title">
     <p className="eyebrow">Provider account</p>

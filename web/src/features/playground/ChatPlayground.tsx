@@ -30,6 +30,7 @@ export function ChatPlayground({ api: supplied, marketplace: suppliedMarketplace
   return <div className="playground-grid">
     <form className="playground-config" onSubmit={send}>
       <p className="eyebrow">Request settings</p>
+	  {inventory.isError && <p role="alert" className="inline-error">Live model inventory could not be loaded.</p>}
       <label htmlFor="playground-model">Model</label><select id="playground-model" value={model || liveModels[0]?.model || ''} onChange={(event) => setModel(event.target.value)} disabled={inventory.isPending || liveModels.length===0} required><option value="">{inventory.isPending?'Loading live models…':liveModels.length===0?'No live models available':'Select a model'}</option>{liveModels.map((item)=><option key={item.model} value={item.model}>{item.model}</option>)}</select>
       <label htmlFor="playground-key">API key</label><div className="secret-input"><input id="playground-key" type="text" className={showKey?'':'secret-masked'} autoComplete="off" data-1p-ignore="true" data-lpignore="true" data-form-type="other" spellCheck={false} value={apiKey} onChange={(event) => setAPIKey(event.target.value)} placeholder="mf_…" required /><button type="button" onClick={()=>setShowKey((current)=>!current)}>{showKey?'Hide':'Show'}</button></div>
       <p className="form-note">Held in memory for this page only.</p>

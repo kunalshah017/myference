@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeMinuteUSDToWeiPerSecond, formatMON, parseMON, usdToWei, weiToUSD } from './amount'
+import { computeMinuteUSDToWeiPerSecond, formatMON, isFreshReferencePrice, parseMON, usdToWei, weiToUSD } from './amount'
 
 describe('MON money helpers', () => {
   it('formats small contract values as readable MON without losing them to zero', () => {
@@ -16,4 +16,11 @@ describe('MON money helpers', () => {
   it('formats a secondary USD estimate', () => {
     expect(weiToUSD(parseMON('5'), '0.02090926')).toBe('$0.104546')
   })
+})
+
+it('rejects expired or future reference prices', () => {
+  const now = Date.parse('2026-08-03T01:00:00Z')
+  expect(isFreshReferencePrice({ updated_at: '2026-08-03T00:50:00Z' }, now)).toBe(true)
+  expect(isFreshReferencePrice({ updated_at: '2026-08-03T00:44:59Z' }, now)).toBe(false)
+  expect(isFreshReferencePrice({ updated_at: '2026-08-03T01:01:01Z' }, now)).toBe(false)
 })

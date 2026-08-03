@@ -118,6 +118,9 @@ func (s *Store) UpdateProviderCapacity(ctx context.Context, machineID string, ca
 }
 
 func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string, capacity v1.Capacity, chainID uint64, contractAddress string) error {
+	if err := capacity.Validate(); err != nil {
+		return ErrIneligibleRoute
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -147,28 +150,32 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 		}
 		evidenceKind, evidenceDigest, meteringMode := normalizedEvidence(offered.EvidenceKind, offered.EvidenceDigest, offered.MeteringMode, offered.Model)
 		var previousDigest string
-		err := tx.QueryRowContext(ctx, `SELECT evidence_digest FROM provider_routing_state WHERE machine_id=$1 AND offer_id=$2`, machineID, offered.OfferID).Scan(&previousDigest)
+		var previousVersion uint64
+		err := tx.QueryRowContext(ctx, `SELECT evidence_digest,price_version FROM provider_routing_state WHERE machine_id=$1 AND offer_id=$2`, machineID, offered.OfferID).Scan(&previousDigest, &previousVersion)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if previousDigest != "" && previousDigest != offered.Model && previousDigest != evidenceDigest {
-			return ErrIneligibleRoute
-		}
-		var input, output, compute, bond string
-		var exit uint64
-		err = tx.QueryRowContext(ctx, `SELECT o.input_per_million::text,o.output_per_million::text,o.compute_per_second::text,a.provider_bond::text,a.bond_exit_available_at FROM chain_offers o JOIN chain_accounts a ON a.chain_id=o.chain_id AND a.contract_address=o.contract_address AND lower(a.address)=lower(o.provider) WHERE o.chain_id=$1 AND lower(o.contract_address)=lower($2) AND lower(o.provider)=lower($3) AND o.offer_id=$4 AND o.version=$5 AND o.model_hash=$6 AND o.capability_hash=$7`, chainID, contractAddress, wallet, offered.OfferHash, offered.PriceVersion, offered.ModelHash, offered.CapabilityHash).Scan(&input, &output, &compute, &bond, &exit)
-		if err != nil || bond == "0" || exit != 0 {
-			return ErrIneligibleRoute
-		}
-		inputValue, e1 := strconv.ParseUint(input, 10, 64)
-		outputValue, e2 := strconv.ParseUint(output, 10, 64)
-		computeValue, e3 := strconv.ParseUint(compute, 10, 64)
-		if e1 != nil || e2 != nil || e3 != nil || inputValue > ^uint64(0)-outputValue || inputValue+outputValue > ^uint64(0)-computeValue {
-			return ErrIneligibleRoute
+		if !runtimeEvidenceEligible(previousDigest, previousVersion, offered) {
+			continue
 		}
 		var backendID string
 		if err := tx.QueryRowContext(ctx, `INSERT INTO backends(id,machine_id,kind,model,enabled) VALUES ($1,$2,$3,$4,true) ON CONFLICT (machine_id,kind,model) DO UPDATE SET enabled=true RETURNING id`, `backend:`+machineID+":"+offered.OfferID, machineID, offered.BackendKind, offered.Model).Scan(&backendID); err != nil {
 			return err
+		}
+		var input, output, compute, bond string
+		var exit uint64
+		err = tx.QueryRowContext(ctx, `SELECT o.input_per_million::text,o.output_per_million::text,o.compute_per_second::text,a.provider_bond::text,a.bond_exit_available_at FROM chain_offers o JOIN chain_accounts a ON a.chain_id=o.chain_id AND a.contract_address=o.contract_address AND lower(a.address)=lower(o.provider) WHERE o.chain_id=$1 AND lower(o.contract_address)=lower($2) AND lower(o.provider)=lower($3) AND o.offer_id=$4 AND o.version=$5 AND o.model_hash=$6 AND o.capability_hash=$7`, chainID, contractAddress, wallet, offered.OfferHash, offered.PriceVersion, offered.ModelHash, offered.CapabilityHash).Scan(&input, &output, &compute, &bond, &exit)
+		if errors.Is(err, sql.ErrNoRows) || bond == "0" || exit != 0 {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		inputValue, e1 := strconv.ParseUint(input, 10, 64)
+		outputValue, e2 := strconv.ParseUint(output, 10, 64)
+		computeValue, e3 := strconv.ParseUint(compute, 10, 64)
+		if e1 != nil || e2 != nil || e3 != nil || inputValue > ^uint64(0)-outputValue || inputValue+outputValue > ^uint64(0)-computeValue || !meteringRatesEligible(meteringMode, inputValue, outputValue) {
+			continue
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO offers(id,backend_id,version,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id,version) DO NOTHING`, offered.OfferID, backendID, offered.PriceVersion, input, output, compute); err != nil {
 			return err
@@ -199,6 +206,14 @@ func normalizedEvidence(kind, digest, metering, model string) (string, string, s
 		metering = "tokens_and_compute"
 	}
 	return kind, digest, metering
+}
+
+func runtimeEvidenceEligible(previousDigest string, previousVersion uint64, offered v1.OfferCapacity) bool {
+	return previousDigest == "" || previousDigest == offered.Model || previousDigest == offered.EvidenceDigest || offered.PriceVersion > previousVersion
+}
+
+func meteringRatesEligible(mode string, input, output uint64) bool {
+	return mode != "compute_only" || input == 0 && output == 0
 }
 
 func (s *Store) OpenSession(ctx context.Context, accountID string) (string, uint64, error) {

@@ -111,6 +111,10 @@ func TestOfferCapacityValidatesRuntimeEvidenceAndMetering(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid runtime evidence rejected: %v", err)
 	}
+	claimed := OfferCapacity{OfferID: "offer-1", Model: "qwen", PriceVersion: 1, EvidenceKind: "provider_claimed", EvidenceDigest: "qwen", MeteringMode: "tokens_and_compute"}
+	if err := claimed.Validate(); err != nil {
+		t.Fatalf("honest provider-claimed evidence rejected: %v", err)
+	}
 	for _, offer := range []OfferCapacity{
 		{OfferID: "offer-1", Model: "qwen", PriceVersion: 1, EvidenceKind: "invented", EvidenceDigest: "abc", MeteringMode: "tokens_and_compute"},
 		{OfferID: "offer-1", Model: "qwen", PriceVersion: 1, EvidenceKind: "ollama_digest", MeteringMode: "tokens_and_compute"},

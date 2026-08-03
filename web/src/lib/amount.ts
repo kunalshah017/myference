@@ -43,3 +43,9 @@ export function weiToUSD(value: bigint | string, usdPerMON: string): string {
   const micros = BigInt(value) * quote.integer * 1_000_000n / (10n ** 18n * quote.scale)
   return `$${micros / 1_000_000n}.${(micros % 1_000_000n).toString().padStart(6, '0')}`
 }
+
+export function isFreshReferencePrice(quote: { updated_at: string } | undefined, now = Date.now()): boolean {
+  if (!quote) return false
+  const updated = Date.parse(quote.updated_at)
+  return Number.isFinite(updated) && updated <= now + 60_000 && now - updated <= 15 * 60_000
+}

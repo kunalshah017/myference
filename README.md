@@ -45,6 +45,8 @@ Ollama must use loopback. Cloud adapters require HTTPS except in loopback integr
 
 Marketplace prices are displayed as MON with a cached, informational USD reference. Billing and settlement always use the exact immutable integer MON rates published on-chain. Ollama and compatible APIs meter observed input, output, and compute usage; CLI agents are compute-only unless trustworthy upstream usage is available.
 
+When publishing a later immutable offer version for a price or runtime-digest change, select it on the running machine with `myference backend version --name <backend> --price-version <version>`. The daemon reloads this change without interrupting other backends.
+
 `myference service install|start|stop|status|uninstall` uses a Windows Scheduled Task or a per-user macOS LaunchAgent. A foreground `serve` process stops cleanly with Ctrl+C. `legacy-start`, `legacy-status`, and `legacy-stop` remain available only for the preserved Windows LAN host.
 
 ## Broker server

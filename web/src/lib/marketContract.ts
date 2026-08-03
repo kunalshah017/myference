@@ -11,13 +11,16 @@ export const marketABI = [
   { type: 'function', name: 'requestBondExit', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'finalizeBondExit', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'publishOffer', stateMutability: 'nonpayable', inputs: [{ name: 'offerId', type: 'bytes32' }, { name: 'modelHash', type: 'bytes32' }, { name: 'capabilityHash', type: 'bytes32' }, { name: 'inputPerMillion', type: 'uint256' }, { name: 'outputPerMillion', type: 'uint256' }, { name: 'computePerSecond', type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'latestOfferVersion', stateMutability: 'view', inputs: [{ name: 'provider', type: 'address' }, { name: 'offerId', type: 'bytes32' }], outputs: [{ name: '', type: 'uint64' }] },
   { type: 'function', name: 'openSession', stateMutability: 'nonpayable', inputs: [{ name: 'sessionId', type: 'bytes32' }, { name: 'allowance', type: 'uint256' }, { name: 'expiresAt', type: 'uint64' }], outputs: [] },
   { type: 'function', name: 'requestSessionClose', stateMutability: 'nonpayable', inputs: [{ name: 'sessionId', type: 'bytes32' }], outputs: [] },
   { type: 'function', name: 'finalizeSessionClose', stateMutability: 'nonpayable', inputs: [{ name: 'sessionId', type: 'bytes32' }], outputs: [] },
 ] as const
 
-export type SubmittedTransaction = { hash: Hash; confirm: () => Promise<void> }
+export type TransactionConfirmation = { offerVersion?: number }
+export type SubmittedTransaction = { hash: Hash; confirm: () => Promise<TransactionConfirmation | void> }
 export type OfferInput = { offerID: string; model: string; capabilities: string[]; inputPerMillion: bigint; outputPerMillion: bigint; computePerSecond: bigint }
+export function assertSuccessfulReceipt(receipt: { status: string }): void { if (receipt.status !== 'success') throw new Error('Monad transaction reverted.') }
 export interface MarketWriter {
   deposit(value: bigint): Promise<SubmittedTransaction>
   requestWithdrawal(amount: bigint): Promise<SubmittedTransaction>
@@ -46,7 +49,7 @@ export class ViemMarketWriter implements MarketWriter {
     const [account] = await wallet.requestAddresses()
     if (!account) throw new Error('The wallet did not return an account.')
     const publicClient = createPublicClient({ chain: monadTestnet, transport: http() })
-    const submitted = (hash: Hash): SubmittedTransaction => ({ hash, confirm: async () => { await publicClient.waitForTransactionReceipt({ hash, confirmations: this.operations.confirmations }) } })
+    const submitted = (hash: Hash): SubmittedTransaction => ({ hash, confirm: async () => { const receipt=await publicClient.waitForTransactionReceipt({ hash, confirmations: this.operations.confirmations });assertSuccessfulReceipt(receipt) } })
     return { wallet, publicClient, account, submitted }
   }
 
@@ -57,7 +60,7 @@ export class ViemMarketWriter implements MarketWriter {
   async setProviderSigner(signer: Address, allowed: boolean) { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'setProviderSigner',args:[getAddress(signer),allowed],account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async requestBondExit() { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'requestBondExit',account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async finalizeBondExit() { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'finalizeBondExit',account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
-  async publishOffer(offer: OfferInput) { const c=await this.clients(); const args=[hashLabel(offer.offerID),hashLabel(offer.model),hashLabel([...offer.capabilities].sort().join(',')),offer.inputPerMillion,offer.outputPerMillion,offer.computePerSecond] as const; const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'publishOffer',args,account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
+  async publishOffer(offer: OfferInput) { const c=await this.clients(); const offerHash=hashLabel(offer.offerID);const args=[offerHash,hashLabel(offer.model),hashLabel([...offer.capabilities].sort().join(',')),offer.inputPerMillion,offer.outputPerMillion,offer.computePerSecond] as const; const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'publishOffer',args,account:c.account});const hash=await c.wallet.writeContract(s.request);return {hash,confirm:async()=>{const receipt=await c.publicClient.waitForTransactionReceipt({hash,confirmations:this.operations.confirmations});assertSuccessfulReceipt(receipt);const version=await c.publicClient.readContract({address:this.address,abi:marketABI,functionName:'latestOfferVersion',args:[c.account,offerHash]});return {offerVersion:Number(version)}}} }
   async openSession(sessionID: Hex, allowance: bigint, expiresAt: bigint) { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'openSession',args:[sessionID,allowance,expiresAt],account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async requestSessionClose(sessionID: Hex) { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'requestSessionClose',args:[sessionID],account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }
   async finalizeSessionClose(sessionID: Hex) { const c=await this.clients(); const s=await c.publicClient.simulateContract({address:this.address,abi:marketABI,functionName:'finalizeSessionClose',args:[sessionID],account:c.account}); return c.submitted(await c.wallet.writeContract(s.request)) }

@@ -114,6 +114,7 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("host", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	path := flags.String("config", defaultConfigPath(), "configuration path")
+	serverURL := flags.String("server", "https://myference-api.onrender.com", "Myference server URL used when login is required")
 	endpoint := flags.String("ollama-url", "http://127.0.0.1:11434", "local Ollama URL")
 	modelName := flags.String("model", "", "installed model to serve; defaults to the first model")
 	webURL := flags.String("web", "https://myference-web.onrender.com", "Myference web URL")
@@ -121,6 +122,13 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	noBrowser := flags.Bool("no-browser", false, "do not open the provider workspace")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if _, err := config.Load(*path); errors.Is(err, os.ErrNotExist) {
+		if err := runLogin(ctx, []string{"--server", *serverURL, "--config", *path}, output, defaultLoginDependencies()); err != nil {
+			return fmt.Errorf("connect this machine: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("load host configuration: %w", err)
 	}
 	model, err := configureLocalHost(ctx, *path, *endpoint, *modelName, nil)
 	if err != nil {
@@ -592,6 +600,20 @@ func runBackendWithCredentials(args []string, output io.Writer, saveCredential f
 		for i := range cfg.Backends {
 			if cfg.Backends[i].Name == *name {
 				cfg.Backends[i].Enabled = command == "start"
+				found = true
+			}
+		}
+		if !found {
+			return errors.New("backend not found")
+		}
+	case "version":
+		if *priceVersion == 0 {
+			return errors.New("--price-version must be positive")
+		}
+		found := false
+		for i := range cfg.Backends {
+			if cfg.Backends[i].Name == *name {
+				cfg.Backends[i].PriceVersion = *priceVersion
 				found = true
 			}
 		}

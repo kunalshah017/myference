@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it } from 'vitest'
-import type { AccountOperations, OperationsAPI, ReferencePrice } from '../../lib/api'
+import type { AccountOperations, OperationBackend, OperationsAPI, ReferencePrice } from '../../lib/api'
 import type { MarketWriter, OfferInput, SubmittedTransaction } from '../../lib/marketContract'
 import { ProviderConsole } from './ProviderConsole'
+import { Offers } from './Offers'
 
 afterEach(cleanup)
 
@@ -19,10 +20,10 @@ it('shows real machines, immutable offer versions, collateral, and earnings', as
   const api = { operations: async () => operations } as OperationsAPI
   let bond = 0n
   let published: OfferInput | undefined
-  const confirmed: SubmittedTransaction = { hash: '0xbond', confirm: async () => undefined }
+  const confirmed: SubmittedTransaction = { hash: '0xbond', confirm: async () => ({ offerVersion: 1 }) }
   const writer = { depositBond: async (value: bigint) => { bond = value; return confirmed }, publishOffer: async (offer:OfferInput)=>{published=offer;return confirmed} } as unknown as MarketWriter
   const client = new QueryClient()
-  client.setQueryData<ReferencePrice>(['reference-price'], { symbol: 'MON', usd_per_mon: '0.02', source: 'CoinGecko', updated_at: '2026-08-03T00:00:00Z' })
+  client.setQueryData<ReferencePrice>(['reference-price'], { symbol: 'MON', usd_per_mon: '0.02', source: 'CoinGecko', updated_at: new Date().toISOString() })
   render(<QueryClientProvider client={client}><ProviderConsole api={api} writer={writer} /></QueryClientProvider>)
   expect(await screen.findByText('studio-node')).toBeVisible()
   expect(screen.getByRole('region', { name: /provider collateral/i })).toBeVisible()
@@ -40,4 +41,45 @@ it('shows real machines, immutable offer versions, collateral, and earnings', as
   expect(bond).toBe(2_000_000_000_000_000_000n)
   await userEvent.type(screen.getByLabelText(/input tokens/i),'0.10');await userEvent.type(screen.getByLabelText(/output tokens/i),'0.20');await userEvent.type(screen.getByLabelText(/compute time/i),'0.06');await userEvent.click(screen.getByRole('button',{name:/publish offer/i}))
   expect(published).toEqual({ offerID: 'local-qwen', model: 'qwen', capabilities: ['text','stream'], inputPerMillion: 5_000_000_000_000_000_000n, outputPerMillion: 10_000_000_000_000_000_000n, computePerSecond: 50_000_000_000_000_000n })
+	expect(screen.getByText(/activate published version 1/i)).toBeVisible()
+})
+
+it('selects a backend discovered after the provider screen opens', async () => {
+  const client = new QueryClient()
+  const writer = { publishOffer: async () => ({ hash: '0x1', confirm: async () => undefined }) } as unknown as MarketWriter
+  const submit = async (action:()=>Promise<SubmittedTransaction>) => { const transaction=await action(); return transaction.confirm() }
+  const view = render(<QueryClientProvider client={client}><Offers offers={[]} backends={[]} writer={writer} submit={submit} /></QueryClientProvider>)
+  const discovered: OperationBackend[] = [{ id: 'backend:machine-1:local', kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }]
+  view.rerender(<QueryClientProvider client={client}><Offers offers={[]} backends={discovered} writer={writer} submit={submit} /></QueryClientProvider>)
+  expect(screen.getByRole('combobox', { name: /backend and model/i })).toHaveValue('backend:machine-1:local')
+	await userEvent.type(screen.getByLabelText(/input tokens/i), '0.1')
+	await userEvent.type(screen.getByLabelText(/output tokens/i), '0.1')
+	await userEvent.type(screen.getByLabelText(/compute time/i), '0.1')
+	expect(screen.getByRole('button', { name: /publish offer/i })).toBeEnabled()
+})
+
+it('does not activate an unconfirmed offer version', async () => {
+  const client = new QueryClient()
+  const backend: OperationBackend[] = [{ id: 'backend:machine-1:local', kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }]
+  render(<QueryClientProvider client={client}><Offers offers={[]} backends={backend} writer={{ publishOffer: async () => ({ hash: '0x1', confirm: async () => undefined }) } as unknown as MarketWriter} submit={async()=>undefined} /></QueryClientProvider>)
+  await userEvent.type(screen.getByLabelText(/input tokens/i), '0.1')
+  await userEvent.type(screen.getByLabelText(/output tokens/i), '0.1')
+  await userEvent.type(screen.getByLabelText(/compute time/i), '0.1')
+  await userEvent.click(screen.getByRole('button', { name: /publish offer/i }))
+  expect(screen.queryByText(/activate published version/i)).not.toBeInTheDocument()
+  expect(screen.getByRole('alert')).toHaveTextContent(/could not be confirmed from monad/i)
+})
+
+it('never converts wallet values with an expired USD quote', async () => {
+  const operations: AccountOperations = {
+    chain_id: 10143, contract_address: '0x4444444444444444444444444444444444444444', explorer_url: '', confirmations: 2,
+    wallet_address: '0x1111111111111111111111111111111111111111', customer_balance_wei: '0', provider_bond_wei: '0', claimable_wei: '0', provider_earnings_wei: '0', bond_exit_available_at: 0, sessions: [],
+    machines: [{ id: 'machine-1', name: 'node', revoked: false, backends: [{ id: 'backend:machine-1:local', kind: 'ollama', model: 'qwen', enabled: true, healthy: false, capacity: 0 }] }], offers: [],
+  }
+  const api = { operations: async () => operations } as OperationsAPI
+  const client = new QueryClient()
+  client.setQueryData<ReferencePrice>(['reference-price'], { symbol: 'MON', usd_per_mon: '0.02', source: 'CoinGecko', updated_at: '2020-01-01T00:00:00Z' })
+  render(<QueryClientProvider client={client}><ProviderConsole api={api} writer={{} as MarketWriter} /></QueryClientProvider>)
+  expect(await screen.findByText(/live usd quote is unavailable/i)).toBeVisible()
+  expect(screen.getAllByText('MON / 1M')).toHaveLength(2)
 })

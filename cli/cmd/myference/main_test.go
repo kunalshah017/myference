@@ -28,6 +28,7 @@ func TestBackendCommandsAddListStartStopAndStatus(t *testing.T) {
 	var output bytes.Buffer
 	for _, args := range [][]string{
 		{"backend", "add", "--config", path, "--name", "local", "--model", "qwen2.5:0.5b", "--url", "http://127.0.0.1:11434"},
+		{"backend", "version", "--config", path, "--name", "local", "--price-version", "2"},
 		{"backend", "stop", "--config", path, "--name", "local"},
 		{"backend", "start", "--config", path, "--name", "local"},
 		{"backend", "list", "--config", path},
@@ -47,7 +48,7 @@ func TestBackendCommandsAddListStartStopAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Backends) != 1 || !loaded.Backends[0].Enabled {
+	if len(loaded.Backends) != 1 || !loaded.Backends[0].Enabled || loaded.Backends[0].PriceVersion != 2 {
 		t.Fatalf("unexpected backend state: %+v", loaded.Backends)
 	}
 }

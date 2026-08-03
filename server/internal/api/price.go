@@ -28,10 +28,11 @@ type referencePrice struct {
 }
 
 type referencePriceHandler struct {
-	config    ReferencePriceConfig
-	mu        sync.Mutex
-	cached    referencePrice
-	fetchedAt time.Time
+	config     ReferencePriceConfig
+	mu         sync.Mutex
+	cached     referencePrice
+	fetchedAt  time.Time
+	refreshing bool
 }
 
 func NewReferencePrice(config ReferencePriceConfig) http.Handler {
@@ -55,13 +56,23 @@ func NewReferencePrice(config ReferencePriceConfig) http.Handler {
 
 func (h *referencePriceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	now := h.config.Now().UTC()
 	quote := h.cached
-	if h.fetchedAt.IsZero() || now.Sub(h.fetchedAt) >= h.config.CacheTTL {
+	shouldFetch := (h.fetchedAt.IsZero() || now.Sub(h.fetchedAt) >= h.config.CacheTTL) && !h.refreshing
+	if shouldFetch {
+		h.refreshing = true
+	}
+	h.mu.Unlock()
+	if shouldFetch {
 		if fetched, err := h.fetch(r, now); err == nil {
-			quote, h.cached, h.fetchedAt = fetched, fetched, now
+			quote = fetched
+			h.mu.Lock()
+			h.cached = fetched
+			h.mu.Unlock()
 		}
+		h.mu.Lock()
+		h.fetchedAt, h.refreshing = now, false
+		h.mu.Unlock()
 	}
 	if quote.USDPerMON == "" || now.Sub(quote.UpdatedAt) > h.config.MaxAge {
 		http.Error(w, "MON reference price unavailable", http.StatusServiceUnavailable)

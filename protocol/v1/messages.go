@@ -178,7 +178,7 @@ func (o OfferCapacity) Validate() error {
 		return ErrInvalidMessage
 	}
 	if o.EvidenceKind != "" || o.EvidenceDigest != "" || o.MeteringMode != "" {
-		if o.EvidenceDigest == "" || (o.EvidenceKind != "ollama_digest" && o.EvidenceKind != "upstream_model" && o.EvidenceKind != "runtime_image") {
+		if o.EvidenceDigest == "" || (o.EvidenceKind != "provider_claimed" && o.EvidenceKind != "ollama_digest" && o.EvidenceKind != "upstream_model" && o.EvidenceKind != "runtime_image") {
 			return ErrInvalidMessage
 		}
 		if o.MeteringMode != "tokens_and_compute" && o.MeteringMode != "compute_only" {
