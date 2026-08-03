@@ -128,6 +128,10 @@ for event in stream:
         <section id="host" className="docs-section">
           <p className="eyebrow">Provider guide</p><h2>Host from your machine.</h2>
           <p className="docs-lead">The shortest path uses a local Ollama model. The CLI connects outbound to Myference, so you do not expose an inbound port or put your laptop directly on the public internet.</p>
+          <CopyBlock label="Windows PowerShell">{`irm https://myference.xyz/install.ps1 | iex`}</CopyBlock>
+          <CopyBlock label="macOS Terminal">{`curl -fsSL https://myference.xyz/install.sh | sh`}</CopyBlock>
+          <p className="docs-note">The installer selects Windows AMD64, macOS Intel, or macOS Apple Silicon automatically, verifies the published SHA-256 checksum, and installs the CLI with its agent proxy. Windows updates your user PATH; macOS installs into <code>/usr/local/bin</code> and asks for <code>sudo</code> only when needed.</p>
+          <p className="eyebrow">Manual downloads</p>
           <div className="docs-downloads">
             <a href={`${RELEASE_URL}/myference-windows-amd64-${RELEASE_TAG}.zip`}><Laptop /><span><strong>Windows 64-bit</strong><small>myference-windows-amd64</small></span><ArrowRight /></a>
             <a href={`${RELEASE_URL}/myference-macos-arm64-${RELEASE_TAG}.zip`}><Laptop /><span><strong>macOS Apple Silicon</strong><small>myference-macos-arm64</small></span><ArrowRight /></a>
@@ -136,12 +140,7 @@ for event in stream:
           <div className="docs-callout info"><ShieldCheck size={19} /><div><strong>Verify the download</strong><p>Download <code>SHA256SUMS</code> from the same release and compare the artifact checksum before running it. Release packages are not currently code-signed or notarized.</p></div></div>
           <ol className="docs-steps">
             <Step number="01" title="Install the CLI">
-              <p>Extract the artifact, then place the binary somewhere on your PATH.</p>
-              <CopyBlock label="Windows PowerShell">{`Expand-Archive .\\myference-windows-amd64-${RELEASE_TAG}.zip -DestinationPath .\\myference`}</CopyBlock>
-              <CopyBlock label="macOS Terminal">{`unzip myference-macos-arm64-${RELEASE_TAG}.zip -d myference
-chmod +x myference/myference
-sudo mv myference/myference /usr/local/bin/myference`}</CopyBlock>
-              <p className="docs-note">Intel Mac users should replace <code>arm64</code> with <code>amd64</code>. A fresh machine has no status until browser login creates its configuration.</p>
+              <p>Run the one-line installer above, then open a new terminal if Windows has just added Myference to your PATH. Use the manual artifacts only when you need an offline or pinned-version installation. Release packages are checksum-verified but are not yet code-signed or notarized.</p>
             </Step>
             <Step number="02" title="Install Ollama and a model"><p>Install Ollama from its official distribution, keep it on its default loopback address, and pull the model you want to serve.</p><CopyBlock label="Terminal or PowerShell">{`ollama pull qwen2.5:0.5b
 ollama list`}</CopyBlock></Step>

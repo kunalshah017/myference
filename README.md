@@ -24,7 +24,19 @@ See the [marketplace design](docs/superpowers/specs/2026-08-02-myference-marketp
 
 ## Provider CLI
 
-Download the binary for the machine, connect it to a wallet-bound account in the browser, configure one or more independently controlled backends, and start the outbound provider:
+Install the latest checksum-verified CLI with one command:
+
+```powershell
+irm https://myference.xyz/install.ps1 | iex
+```
+
+```bash
+curl -fsSL https://myference.xyz/install.sh | sh
+```
+
+The Windows installer supports AMD64 and updates the user PATH. The macOS installer detects Intel or Apple Silicon and installs into `/usr/local/bin`. Manual release artifacts and `SHA256SUMS` remain available on GitHub; releases are not yet code-signed or notarized.
+
+Connect the machine to a wallet-bound account in the browser, configure one or more independently controlled backends, and start the outbound provider:
 
 ```text
 myference login --server https://api.myference.xyz

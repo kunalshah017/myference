@@ -40,7 +40,24 @@ jobs:
       - run: npm ci
       - run: npm test -- --run
       - run: npm run lint
+      - run: sh ../scripts/test-installers.sh
       - run: npm run build
+
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'web/public/install.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | Format-List; exit 1 }
+      - name: Install latest Windows CLI
+        shell: pwsh
+        run: |
+          & ./scripts/test-installer-windows.ps1
 
   contracts:
     runs-on: ubuntu-latest
