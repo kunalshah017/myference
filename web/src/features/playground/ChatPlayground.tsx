@@ -19,7 +19,9 @@ export function ChatPlayground({ api: supplied, marketplace: suppliedMarketplace
     event.preventDefault(); setError(''); setSending(true)
     const next: ChatMessage[] = [...conversation, { role: 'user', content: message.trim() }]
     try {
-      const content = await api.chat((model || liveModels[0]?.model).trim(), apiKey.trim(), parseMON(maximumSpend).toString(), next)
+      const selectedModel = (model || liveModels[0]?.model || '').trim()
+      if (!selectedModel) throw new Error('Choose an available model before sending.')
+      const content = await api.chat(selectedModel, apiKey.trim(), parseMON(maximumSpend).toString(), next)
       setConversation([...next, { role: 'assistant', content }]); setMessage('')
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Inference request failed.') }
     finally { setSending(false) }
