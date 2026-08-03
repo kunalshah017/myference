@@ -38,7 +38,7 @@ func TestAnthropicMessagesStreamsNativeEventsThroughRealRelay(t *testing.T) {
 		}
 		return Principal{AccountID: "account", SessionID: "session", SessionBalance: 100}, nil
 	}, Candidates: func(context.Context, string) ([]router.Candidate, error) {
-		return []router.Candidate{{MachineID: "machine-1", OfferID: "offer", Model: "qwen", Capabilities: []string{"text", "stream", "workspace"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 80, PriceVersion: 1}}, nil
+		return []router.Candidate{{MachineID: "machine-1", OfferID: "offer", Model: "qwen", Capabilities: []string{"text", "stream", "workspace"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 80, PriceVersion: 1, InputPerMillion: "1", OutputPerMillion: "1", ComputePerSecond: "0"}}, nil
 	}, Reserve: func(context.Context, Reservation) error { return nil }, Transition: func(context.Context, string, string) error { return nil }, Abort: func(context.Context, string, string) error { return nil }, Persist: func(_ context.Context, p Proposal) error { persisted <- p; return nil }})
 	server := httptest.NewServer(NewAnthropic(openAI))
 	defer server.Close()

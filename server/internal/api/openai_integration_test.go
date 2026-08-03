@@ -47,16 +47,16 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	handler := NewOpenAI(Dependencies{
 		Hub: hub,
 		Authorize: func(_ context.Context, token, model, endpoint string, maximum uint64) (Principal, error) {
-			if token != "api-token" || model != "qwen" || endpoint != "/v1/chat/completions" || maximum != 100 {
+			if token != "api-token" || model != "qwen" || endpoint != "/v1/chat/completions" || maximum != 8_000_000_000_000_000_000 {
 				t.Fatalf("unexpected authorization input: %q %q %q %d", token, model, endpoint, maximum)
 			}
-			return Principal{AccountID: "account-1", SessionID: "session-1", SessionBalance: 100}, nil
+			return Principal{AccountID: "account-1", SessionID: "session-1", SessionBalance: 8_000_000_000_000_000_000}, nil
 		},
 		Candidates: func(context.Context, string) ([]router.Candidate, error) {
-			return []router.Candidate{{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", Capabilities: []string{"text", "stream", "workspace"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: 80, PriceVersion: 3, InputPerMillion: 1, OutputPerMillion: 1}}, nil
+			return []router.Candidate{{MachineID: "machine-1", OfferID: "offer-1", Model: "qwen", Capabilities: []string{"text", "stream", "workspace"}, ConfirmedBond: true, Healthy: true, Capacity: 1, MaximumCost: ^uint64(0), PriceVersion: 3, InputPerMillion: "292000000000000000000", OutputPerMillion: "1752000000000000000000", ComputePerSecond: "4866666666666667"}}, nil
 		},
 		Reserve: func(_ context.Context, reservation Reservation) error {
-			if reservation.SessionID != "session-1" || reservation.OfferID != "offer-1" || reservation.MaximumSpend != 2 {
+			if reservation.SessionID != "session-1" || reservation.OfferID != "offer-1" || reservation.MaximumSpend != 7_853_632_000_000_000_040 {
 				t.Fatalf("reservation=%+v", reservation)
 			}
 			return nil
@@ -91,7 +91,7 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodPost, apiServer.URL+"/v1/chat/completions", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer api-token")
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Myference-Max-Spend", "100")
+	request.Header.Set("X-Myference-Max-Spend", "8000000000000000000")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestOpenAIStreamingUsesRealRelayAndPersistsProposal(t *testing.T) {
 	cancelRequest, _ := http.NewRequestWithContext(cancelCtx, http.MethodPost, apiServer.URL+"/v1/chat/completions", strings.NewReader(body))
 	cancelRequest.Header.Set("Authorization", "Bearer api-token")
 	cancelRequest.Header.Set("Content-Type", "application/json")
-	cancelRequest.Header.Set("X-Myference-Max-Spend", "100")
+	cancelRequest.Header.Set("X-Myference-Max-Spend", "8000000000000000000")
 	cancelResponse, err := http.DefaultClient.Do(cancelRequest)
 	if err != nil {
 		t.Fatal(err)

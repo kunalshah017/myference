@@ -132,10 +132,18 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	maximumInputTokens := uint64(len([]byte(prompt)))*4 + 256
 	const maximumComputeMilliseconds uint64 = 120_000
 	for index := range candidates {
+		if !router.ValidRate(candidates[index].InputPerMillion) || !router.ValidRate(candidates[index].OutputPerMillion) || !router.ValidRate(candidates[index].ComputePerSecond) {
+			candidates[index].MaximumCost = ^uint64(0)
+			continue
+		}
+		if !router.HasPricing(candidates[index]) {
+			candidates[index].MaximumCost = 0
+			continue
+		}
 		cost, costErr := router.WorstCaseCost(candidates[index], maximumInputTokens, maximumOutputTokens, maximumComputeMilliseconds)
 		if costErr != nil {
 			candidates[index].MaximumCost = ^uint64(0)
-		} else if candidates[index].InputPerMillion != 0 || candidates[index].OutputPerMillion != 0 || candidates[index].ComputePerSecond != 0 {
+		} else {
 			candidates[index].MaximumCost = cost
 		}
 	}
