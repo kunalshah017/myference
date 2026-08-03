@@ -12,7 +12,7 @@ cli/internal/backend/ollama/   Real loopback Ollama adapter
 cli/internal/backend/openai/   OpenAI-compatible cloud adapter
 cli/internal/backend/command/  Disposable Codex/Claude/Kimi runner
 cli/internal/provider/         Authenticated outbound provider daemon
-cli/internal/platform/windows/ Windows lifecycle bridge
+cli/internal/platform/windows/ Native Windows provider lifecycle
 cli/internal/platform/darwin/  Native launchd lifecycle
 cli/platform/windows/legacy/   Preserved Windows PowerShell and Go CLI
 server/internal/settlement/    Receipt signing and settlement coordinator
@@ -34,7 +34,7 @@ irm https://myference.xyz/install.ps1 | iex
 curl -fsSL https://myference.xyz/install.sh | sh
 ```
 
-The Windows installer supports AMD64 and updates the user PATH. The macOS installer detects Intel or Apple Silicon and installs into `/usr/local/bin`. Manual release artifacts and `SHA256SUMS` remain available on GitHub; releases are not yet code-signed or notarized.
+The Windows installer supports AMD64, atomically installs the CLI, Windows proxy sidecar, and lifecycle script, and updates the user PATH. The macOS installer detects Intel or Apple Silicon and installs into `/usr/local/bin`. Manual release artifacts and `SHA256SUMS` remain available on GitHub; releases are not yet code-signed or notarized.
 
 Connect the machine to a wallet-bound account in the browser, configure one or more independently controlled backends, and start the outbound provider:
 
@@ -60,6 +60,10 @@ Marketplace prices are displayed as MON with a cached, informational USD referen
 When publishing a later immutable offer version for a price or runtime-digest change, select it on the running machine with `myference backend version --name <backend> --price-version <version>`. The daemon reloads this change without interrupting other backends.
 
 `myference service install|start|stop|status|uninstall` uses a Windows Scheduled Task or a per-user macOS LaunchAgent. A foreground `serve` process stops cleanly with Ctrl+C. `legacy-start`, `legacy-status`, and `legacy-stop` remain available only for the preserved Windows LAN host.
+
+Windows provider management is native and outbound-only: `myference windows doctor|models|test|status|dashboard`, `windows focus start|status|restore`, `windows headless install|start|status|restore`, and the idempotent emergency `windows restore`. One `serve` owns every enabled laptop backend; focus and headless reuse it and never open a LAN management listener. Complete [the physical Windows acceptance checklist](docs/windows-acceptance.md) before removing the preserved legacy implementation.
+
+Windows provider tuning requires AC power by default. For an intentional foreground battery session, use `myference serve --allow-battery` or `myference host --allow-battery`; scheduled service/headless sessions retain the safer AC-only policy.
 
 ## Broker server
 

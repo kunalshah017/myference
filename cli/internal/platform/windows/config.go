@@ -1,0 +1,135 @@
+package windows
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// Config defines the Windows host controls that can be applied by Myference.
+// It deliberately excludes LAN listeners, firewall settings, and endpoint discovery.
+type Config struct {
+	KeepAlive            string   `json:"keepAlive"`
+	ContextLength        int      `json:"contextLength"`
+	MaxLoadedModels      int      `json:"maxLoadedModels"`
+	NumParallel          int      `json:"numParallel"`
+	FlashAttention       bool     `json:"flashAttention"`
+	KVCacheType          string   `json:"kvCacheType"`
+	PerformancePowerPlan bool     `json:"performancePowerPlan"`
+	ProcessPriority      string   `json:"processPriority"`
+	RequireACPower       bool     `json:"requireACPower"`
+	StopProcesses        []string `json:"stopProcesses"`
+	StopServices         []string `json:"stopServices"`
+}
+
+// DefaultConfig preserves the useful legacy tuning while keeping all changes
+// explicit, reversible, and restricted to nonessential applications/services.
+func DefaultConfig() Config {
+	return Config{
+		KeepAlive:            "-1",
+		ContextLength:        4096,
+		MaxLoadedModels:      1,
+		NumParallel:          1,
+		FlashAttention:       true,
+		KVCacheType:          "q8_0",
+		PerformancePowerPlan: true,
+		ProcessPriority:      "High",
+		RequireACPower:       true,
+		StopProcesses: []string{
+			"OneDrive", "ms-teams", "Teams", "Discord", "Spotify", "steam", "EpicGamesLauncher", "Dropbox", "Creative Cloud", "NVIDIA Broadcast",
+		},
+		StopServices: []string{
+			"AdobeUpdateService", "DiagTrack", "Everything", "MapsBroker", "PhoneSvc", "PCManager Service Store", "Spooler", "SysMain", "WSearch", "WSLService", "VMAuthdService", "VMnetDHCP", "VMUSBArbService", "VMware NAT Service",
+		},
+	}
+}
+
+// UnmarshalJSON rejects every field outside this safe, local host-control schema.
+func (config *Config) UnmarshalJSON(data []byte) error {
+	type configAlias Config
+	var decoded configAlias
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	if decoder.More() {
+		return fmt.Errorf("invalid trailing configuration data")
+	}
+	*config = Config(decoded)
+	return config.Validate()
+}
+
+// Validate prevents unsafe system service changes and invalid Ollama tuning.
+func (config Config) Validate() error {
+	if config.ContextLength < 512 {
+		return fmt.Errorf("context length must be at least 512")
+	}
+	if config.MaxLoadedModels < 1 {
+		return fmt.Errorf("max loaded models must be at least 1")
+	}
+	if config.NumParallel < 1 {
+		return fmt.Errorf("num parallel must be at least 1")
+	}
+	switch config.KVCacheType {
+	case "f16", "q8_0", "q4_0":
+	default:
+		return fmt.Errorf("KV cache type %q is not supported", config.KVCacheType)
+	}
+	switch config.ProcessPriority {
+	case "Normal", "AboveNormal", "High":
+	default:
+		return fmt.Errorf("process priority %q is not supported", config.ProcessPriority)
+	}
+	for _, service := range config.StopServices {
+		if isProtectedService(service) {
+			return fmt.Errorf("service %q is protected and cannot be stopped", service)
+		}
+	}
+	for _, process := range config.StopProcesses {
+		if strings.EqualFold(trimExecutableSuffix(process), "explorer") {
+			return fmt.Errorf("Windows Explorer cannot be stopped by focus mode")
+		}
+	}
+	return nil
+}
+
+// ValidatePower enforces the AC-power policy unless the caller explicitly opts in
+// to battery operation with --allow-battery.
+func (config Config) ValidatePower(onACPower, allowBattery bool) error {
+	if config.RequireACPower && !onACPower && !allowBattery {
+		return fmt.Errorf("AC power is required; connect AC power or use --allow-battery")
+	}
+	return nil
+}
+
+func isProtectedService(name string) bool {
+	protected := map[string]struct{}{
+		"bfe": {}, "bits": {}, "cryptsvc": {}, "dhcp": {}, "dnscache": {}, "eventlog": {},
+		"dosvc": {}, "mpssvc": {}, "nlasvc": {}, "rpcss": {}, "samss": {}, "schedule": {}, "sedsvc": {},
+		"securityhealthservice": {}, "trustedinstaller": {}, "usosvc": {}, "waasmedicsvc": {}, "windefend": {}, "wuauserv": {},
+	}
+	_, found := protected[strings.ToLower(strings.TrimSpace(name))]
+	return found
+}
+
+// Command identifies a Windows machine-control action. Its Args are retained for
+// the later action-specific implementations to parse.
+type Command struct {
+	Action string
+	Args   []string
+}
+
+// ParseCommand accepts only the native Windows command namespace.
+func ParseCommand(args []string) (Command, error) {
+	if len(args) == 0 {
+		return Command{}, fmt.Errorf("usage: myference windows <doctor|status|models|test|dashboard|focus|headless|restore>")
+	}
+	switch args[0] {
+	case "doctor", "status", "models", "test", "dashboard", "focus", "headless", "restore":
+		return Command{Action: args[0], Args: append([]string(nil), args[1:]...)}, nil
+	default:
+		return Command{}, fmt.Errorf("unknown Windows action %q", args[0])
+	}
+}

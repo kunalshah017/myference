@@ -42,6 +42,9 @@ const (
 	defaultWebURL            = "https://myference.xyz"
 )
 
+type platformSessionModeKey struct{}
+type platformAllowBatteryKey struct{}
+
 var version = "dev"
 var commit = "unknown"
 
@@ -54,7 +57,7 @@ func main() {
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference login | host | backend <add|list|start|stop> | capacity | status | serve | service <install|start|stop|status|uninstall>")
+		return errors.New("usage: myference login | host | backend <add|list|start|stop|version> | capacity | status | serve | service <install|start|stop|status|uninstall> | windows <doctor|status|models|test|dashboard|focus|headless|restore>")
 	}
 	switch args[0] {
 	case "login":
@@ -92,12 +95,13 @@ func run(args []string, output io.Writer) error {
 		_, err = fmt.Fprintf(output, "machine %s account %s backends %d\n", cfg.MachineID, cfg.AccountID, len(cfg.Backends))
 		return err
 	case "serve":
-		path, err := parseConfigFlag("serve", args[1:])
+		path, allowBattery, err := parseServeFlags(args[1:])
 		if err != nil {
 			return err
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
+		ctx = context.WithValue(ctx, platformAllowBatteryKey{}, allowBattery)
 		err = runServe(ctx, path, output)
 		if errors.Is(err, context.Canceled) {
 			return nil
@@ -105,6 +109,8 @@ func run(args []string, output io.Writer) error {
 		return err
 	case "service":
 		return runPlatformCommand("service", args[1:], output)
+	case "windows":
+		return runPlatformCommand("windows", args[1:], output)
 	case "stop", "legacy-start", "legacy-stop", "legacy-status":
 		return runPlatformCommand(args[0], args[1:], output)
 	default:
@@ -121,6 +127,7 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	modelName := flags.String("model", "", "installed model to serve; defaults to the first model")
 	webURL := flags.String("web", defaultWebURL, "Myference web URL")
 	setupOnly := flags.Bool("setup-only", false, "configure the backend without starting the foreground server")
+	allowBattery := flags.Bool("allow-battery", false, "allow provider host tuning while on battery")
 	noBrowser := flags.Bool("no-browser", false, "do not open the provider workspace")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -150,7 +157,18 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	}
 	serveContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	return runServe(serveContext, *path, output)
+	return runServe(context.WithValue(serveContext, platformAllowBatteryKey{}, *allowBattery), *path, output)
+}
+
+func parseServeFlags(args []string) (string, bool, error) {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", defaultConfigPath(), "configuration path")
+	allowBattery := flags.Bool("allow-battery", false, "allow provider host tuning while on battery")
+	if err := flags.Parse(args); err != nil {
+		return "", false, err
+	}
+	return *path, *allowBattery, nil
 }
 
 func hostLoginArgs(serverURL, path string, noBrowser bool) []string {
@@ -356,7 +374,7 @@ func runLogin(ctx context.Context, args []string, output io.Writer, dependencies
 	return err
 }
 
-func runServe(ctx context.Context, path string, output io.Writer) error {
+func runServe(ctx context.Context, path string, output io.Writer) (resultErr error) {
 	stopPath := path + ".stop"
 	_ = os.Remove(stopPath)
 	serveContext, stopServing := context.WithCancel(ctx)
@@ -384,6 +402,22 @@ func runServe(ctx context.Context, path string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+	cleanupPlatform, err := startPlatformProviderSession(serveContext, cfg, output)
+	if err != nil {
+		return fmt.Errorf("prepare provider host: %w", err)
+	}
+	defer func() {
+		if cleanupErr := cleanupPlatform(); cleanupErr != nil {
+			if resultErr == nil {
+				resultErr = fmt.Errorf("restore provider host: %w", cleanupErr)
+			} else {
+				resultErr = fmt.Errorf("%v; restore provider host: %w", resultErr, cleanupErr)
+			}
+		}
+	}()
+	if err := preparePlatformBackends(serveContext, cfg); err != nil {
+		return fmt.Errorf("prepare provider backends: %w", err)
+	}
 	offers, backends, err := discoverBackends(serveContext, cfg, credential.Load)
 	if err != nil {
 		return err
@@ -395,10 +429,47 @@ func runServe(ctx context.Context, path string, output io.Writer) error {
 		return err
 	}
 	daemon := provider.NewDaemon(provider.Config{RelayURL: relay, Token: token, MachineID: cfg.MachineID, Offers: offers, SignerKey: signerKey, ChainID: cfg.ChainID, Contract: contract}, backends)
+	statusPath := providerStatusPath(path)
+	if err := provider.WriteStatusFile(statusPath, daemon.StatusSnapshot()); err != nil {
+		return fmt.Errorf("initialize provider status: %w", err)
+	}
+	statusContext, stopStatus := context.WithCancel(serveContext)
+	statusDone := make(chan struct{})
+	go func() {
+		defer close(statusDone)
+		watchProviderStatus(statusContext, statusPath, daemon, output, time.Second)
+	}()
+	defer func() {
+		stopStatus()
+		<-statusDone
+		if err := provider.RemoveStatusFile(statusPath); err != nil && resultErr == nil {
+			resultErr = fmt.Errorf("remove provider status: %w", err)
+		}
+	}()
 	watchContext, stopWatching := context.WithCancel(serveContext)
 	defer stopWatching()
 	go watchBackendConfig(watchContext, path, daemon, output)
 	return serveWithReconnect(serveContext, output, time.Second, 30*time.Second, daemon.Serve)
+}
+
+func providerStatusPath(configPath string) string { return configPath + ".status.json" }
+
+func watchProviderStatus(ctx context.Context, path string, daemon *provider.Daemon, output io.Writer, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := provider.WriteStatusFile(path, daemon.StatusSnapshot()); err != nil {
+				_, _ = fmt.Fprintf(output, "provider status update failed: %v\n", err)
+			}
+		}
+	}
 }
 
 func serveWithReconnect(ctx context.Context, output io.Writer, initialDelay, maximumDelay time.Duration, serve func(context.Context) error) error {
@@ -499,12 +570,7 @@ func watchBackendConfig(ctx context.Context, path string, daemon *provider.Daemo
 			last = info.ModTime()
 			cfg, err := config.Load(path)
 			if err == nil {
-				var offers []v1.OfferCapacity
-				var backends map[string]backend.Backend
-				offers, backends, err = discoverBackends(ctx, cfg, credential.Load)
-				if err == nil {
-					err = daemon.UpdateBackends(offers, backends)
-				}
+				err = reloadBackends(ctx, cfg, daemon)
 			}
 			if err != nil {
 				_, _ = fmt.Fprintf(output, "backend reload failed: %v\n", err)
@@ -513,6 +579,20 @@ func watchBackendConfig(ctx context.Context, path string, daemon *provider.Daemo
 			}
 		}
 	}
+}
+
+func reloadBackends(ctx context.Context, cfg config.Config, daemon *provider.Daemon) error {
+	if daemon == nil {
+		return errors.New("provider daemon is required")
+	}
+	if err := preparePlatformBackends(ctx, cfg); err != nil {
+		return fmt.Errorf("prepare changed backends: %w", err)
+	}
+	offers, backends, err := discoverBackends(ctx, cfg, credential.Load)
+	if err != nil {
+		return err
+	}
+	return daemon.UpdateBackends(offers, backends)
 }
 
 func relayURL(serverURL string) (string, error) {

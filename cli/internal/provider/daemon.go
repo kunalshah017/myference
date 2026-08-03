@@ -148,6 +148,8 @@ type Daemon struct {
 	jobsMu     sync.Mutex
 	jobs       map[string]context.CancelFunc
 	wg         sync.WaitGroup
+	statusMu   sync.RWMutex
+	status     StatusSnapshot
 }
 
 func NewDaemon(config Config, backends map[string]backend.Backend) *Daemon {
@@ -157,7 +159,8 @@ func NewDaemon(config Config, backends map[string]backend.Backend) *Daemon {
 	if config.DrainTimeout <= 0 {
 		config.DrainTimeout = 30 * time.Second
 	}
-	return &Daemon{config: config, backends: backends, state: NewRequestState(), jobs: make(map[string]context.CancelFunc)}
+	now := time.Now().UTC()
+	return &Daemon{config: config, backends: backends, state: NewRequestState(), jobs: make(map[string]context.CancelFunc), status: StatusSnapshot{StartedAt: now, UpdatedAt: now, Offers: offerStatuses(config.Offers)}}
 }
 
 func (d *Daemon) Serve(ctx context.Context) error {
@@ -171,10 +174,12 @@ func (d *Daemon) Serve(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect relay: %w", err)
 	}
+	d.setConnected(true)
 	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
 	heartbeatDone := make(chan struct{})
 	heartbeatStarted := false
 	defer func() {
+		d.setConnected(false)
 		if heartbeatStarted {
 			stopHeartbeat()
 			<-heartbeatDone
@@ -316,7 +321,62 @@ func (d *Daemon) UpdateBackends(offers []v1.OfferCapacity, backends map[string]b
 	d.config.Offers = append([]v1.OfferCapacity(nil), offers...)
 	d.backends = backends
 	d.backendsMu.Unlock()
+	d.statusMu.Lock()
+	d.status.Offers = offerStatuses(offers)
+	d.status.UpdatedAt = time.Now().UTC()
+	d.statusMu.Unlock()
 	return nil
+}
+
+func (d *Daemon) StatusSnapshot() StatusSnapshot {
+	d.statusMu.RLock()
+	defer d.statusMu.RUnlock()
+	snapshot := d.status
+	snapshot.Offers = append([]OfferStatus(nil), d.status.Offers...)
+	return snapshot
+}
+
+func (d *Daemon) setConnected(connected bool) {
+	d.statusMu.Lock()
+	d.status.Connected = connected
+	d.status.UpdatedAt = time.Now().UTC()
+	d.statusMu.Unlock()
+}
+
+func (d *Daemon) recordCompletion(offerID string, usage backend.Usage) {
+	d.statusMu.Lock()
+	d.status.Requests++
+	d.status.InputTokens += usage.InputTokens
+	d.status.OutputTokens += usage.OutputTokens
+	d.status.ComputeMilliseconds += usage.ComputeMilliseconds
+	d.setOfferHealthLocked(offerID, true, "")
+	d.status.UpdatedAt = time.Now().UTC()
+	d.statusMu.Unlock()
+}
+
+func (d *Daemon) recordOfferHealth(offerID string, healthy bool, message string) {
+	d.statusMu.Lock()
+	d.setOfferHealthLocked(offerID, healthy, message)
+	d.status.UpdatedAt = time.Now().UTC()
+	d.statusMu.Unlock()
+}
+
+func (d *Daemon) setOfferHealthLocked(offerID string, healthy bool, message string) {
+	for index := range d.status.Offers {
+		if d.status.Offers[index].OfferID == offerID {
+			d.status.Offers[index].Healthy = healthy
+			d.status.Offers[index].Error = message
+			return
+		}
+	}
+}
+
+func offerStatuses(offers []v1.OfferCapacity) []OfferStatus {
+	statuses := make([]OfferStatus, len(offers))
+	for index, offer := range offers {
+		statuses[index] = OfferStatus{OfferID: offer.OfferID, Model: offer.Model, Healthy: true}
+	}
+	return statuses
 }
 
 func (d *Daemon) Capacity() v1.Capacity {
@@ -371,12 +431,15 @@ func (d *Daemon) startJob(parent context.Context, connection *websocket.Conn, of
 		})
 		sequence++
 		if err != nil {
+			d.recordOfferHealth(offer.OfferID, false, err.Error())
 			failureContext, stopFailure := context.WithTimeout(context.WithoutCancel(jobCtx), 5*time.Second)
 			defer stopFailure()
 			_ = d.sendChunk(failureContext, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, ErrorCode: "backend_failed"})
 			return
 		}
-		_ = d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ComputeMilliseconds: usage.ComputeMilliseconds})
+		if err := d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ComputeMilliseconds: usage.ComputeMilliseconds}); err == nil {
+			d.recordCompletion(offer.OfferID, usage)
+		}
 	}()
 	return nil
 }

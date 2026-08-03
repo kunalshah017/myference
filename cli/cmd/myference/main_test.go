@@ -198,10 +198,35 @@ func TestProductionDefaultsUseBrandedDomains(t *testing.T) {
 	}
 }
 
+func TestWindowsCommandsReachTheNativeDispatchBoundary(t *testing.T) {
+	err := run([]string{"windows", "focus"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "focus <start|status|restore>") {
+		t.Fatalf("run(windows focus) error = %v, want focus usage", err)
+	}
+	err = run([]string{"windows", "headless"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "headless <install|start|status|restore>") {
+		t.Fatalf("run(windows headless) error = %v, want headless usage", err)
+	}
+}
+
+func TestWindowsCommandRejectsLANAction(t *testing.T) {
+	err := run([]string{"windows", "lan-check"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "unknown Windows action") {
+		t.Fatalf("run(windows lan-check) error = %v, want unknown Windows action", err)
+	}
+}
+
 func TestHostLoginArgumentsPreserveNoBrowser(t *testing.T) {
 	got := hostLoginArgs("https://api.myference.xyz", "/tmp/myference.json", true)
 	if !slices.Contains(got, "--no-browser") {
 		t.Fatalf("headless host login arguments=%v", got)
+	}
+}
+
+func TestServeFlagsPreserveConfigAndBatteryOverride(t *testing.T) {
+	path, allowBattery, err := parseServeFlags([]string{"--config", "provider.json", "--allow-battery"})
+	if err != nil || path != "provider.json" || !allowBattery {
+		t.Fatalf("path=%q allowBattery=%v err=%v", path, allowBattery, err)
 	}
 }
 

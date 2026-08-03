@@ -21,6 +21,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go test ./...
+      - run: go test -race ./cli/internal/provider ./cli/internal/platform/windows
       - run: go vet ./...
       - run: go build ./...
       - run: ./scripts/build-release.sh
@@ -49,17 +50,33 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify Windows CLI and proxy
+        shell: pwsh
+        run: |
+          go test ./... -count=1
+          go vet ./...
+          go build -o "$env:RUNNER_TEMP/myference.exe" ./cli/cmd/myference
+          go build -o "$env:RUNNER_TEMP/myference-agent-proxy.exe" ./cli/cmd/myference-agent-proxy
       - name: Parse PowerShell installer
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'web/public/install.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
-          if ($errors.Count -gt 0) { $errors | Format-List; exit 1 }
+          foreach ($file in @('web/public/install.ps1', 'packaging/windows/install.ps1', 'scripts/windows-acceptance.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | Format-List; exit 1 }
+          }
       - name: Install latest Windows CLI
         shell: pwsh
         run: |
           & ./scripts/test-installer-windows.ps1
+      - name: Non-destructive Windows acceptance
+        shell: pwsh
+        run: ./scripts/windows-acceptance.ps1 -NonDestructive
 
   contracts:
     runs-on: ubuntu-latest
