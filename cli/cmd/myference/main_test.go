@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -51,6 +52,13 @@ func TestBackendCommandsAddListStartStopAndStatus(t *testing.T) {
 	}
 	if len(loaded.Backends) != 1 || !loaded.Backends[0].Enabled || loaded.Backends[0].PriceVersion != 2 {
 		t.Fatalf("unexpected backend state: %+v", loaded.Backends)
+	}
+}
+
+func TestCodexCommandArgumentsAreEphemeralReadOnlyAndNonInteractive(t *testing.T) {
+	want := []string{"exec", "--ephemeral", "--sandbox", "read-only", "--ask-for-approval", "never", "--skip-git-repo-check", "--model", "gpt-codex", "-"}
+	if got := commandArguments("codex", "gpt-codex"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("commandArguments(codex)=%v, want %v", got, want)
 	}
 }
 
