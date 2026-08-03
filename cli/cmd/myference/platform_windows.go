@@ -3,7 +3,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/kunalshah017/myference/cli/internal/config"
 	platform "github.com/kunalshah017/myference/cli/internal/platform/windows"
+	"github.com/kunalshah017/myference/cli/internal/provider"
 )
 
 func runPlatformCommand(command string, args []string, output io.Writer) error {
@@ -39,6 +42,10 @@ func runPlatformCommand(command string, args []string, output io.Writer) error {
 			return runWindowsFocus(context.Background(), windowsCommand.Args, output)
 		case "restore":
 			return runWindowsRestore(context.Background(), windowsCommand.Args, output)
+		case "status":
+			return runWindowsStatus(context.Background(), windowsCommand.Args, output)
+		case "dashboard":
+			return runWindowsDashboard(context.Background(), windowsCommand.Args, output)
 		default:
 			return fmt.Errorf("windows %s is not implemented", windowsCommand.Action)
 		}
@@ -85,6 +92,99 @@ func runPlatformCommand(command string, args []string, output io.Writer) error {
 		return lifecycle.Status(context.Background())
 	default:
 		return lifecycle.Stop(context.Background())
+	}
+}
+
+var collectWindowsHostTelemetry = platform.CollectHostTelemetry
+
+func runWindowsStatus(ctx context.Context, args []string, output io.Writer) error {
+	flags := flag.NewFlagSet("windows status", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", defaultConfigPath(), "provider configuration path")
+	asJSON := flags.Bool("json", false, "print machine-readable status")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	status, err := provider.LoadStatusFile(providerStatusPath(*configPath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New("provider status is unavailable; start `myference serve`")
+		}
+		return err
+	}
+	host, err := collectWindowsHostTelemetry(ctx)
+	if err != nil {
+		return fmt.Errorf("collect Windows telemetry: %w", err)
+	}
+	if *asJSON {
+		encoder := json.NewEncoder(output)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(struct {
+			Provider provider.StatusSnapshot `json:"provider"`
+			Host     platform.HostTelemetry  `json:"host"`
+		}{Provider: status, Host: host})
+	}
+	_, err = io.WriteString(output, platform.RenderProviderStatus(status, host, time.Now()))
+	return err
+}
+
+func runWindowsDashboard(ctx context.Context, args []string, output io.Writer) error {
+	flags := flag.NewFlagSet("windows dashboard", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", defaultConfigPath(), "provider configuration path")
+	refresh := flags.Duration("refresh", time.Second, "dashboard refresh interval")
+	once := flags.Bool("once", false, "render one snapshot and exit")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *refresh < 250*time.Millisecond || *refresh > time.Minute {
+		return errors.New("dashboard refresh must be between 250ms and 1m")
+	}
+	render := func(clear bool) error {
+		status, err := provider.LoadStatusFile(providerStatusPath(*configPath))
+		if err != nil {
+			return err
+		}
+		host, err := collectWindowsHostTelemetry(ctx)
+		if err != nil {
+			return err
+		}
+		if clear {
+			if _, err := io.WriteString(output, "\x1b[2J\x1b[H"); err != nil {
+				return err
+			}
+		}
+		if _, err := io.WriteString(output, platform.RenderProviderStatus(status, host, time.Now())); err != nil {
+			return err
+		}
+		if !*once {
+			_, err = io.WriteString(output, "Press Q then Enter to close this viewer. The provider keeps running.\n")
+		}
+		return err
+	}
+	if err := render(false); err != nil || *once {
+		return err
+	}
+	quit := make(chan struct{})
+	go func() {
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if strings.EqualFold(strings.TrimSpace(line), "q") {
+			close(quit)
+		}
+	}()
+	ticker := time.NewTicker(*refresh)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-quit:
+			return nil
+		case <-ticker.C:
+			if err := render(true); err != nil {
+				return err
+			}
+		}
 	}
 }
 

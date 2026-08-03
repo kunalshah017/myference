@@ -413,10 +413,47 @@ func runServe(ctx context.Context, path string, output io.Writer) (resultErr err
 		return err
 	}
 	daemon := provider.NewDaemon(provider.Config{RelayURL: relay, Token: token, MachineID: cfg.MachineID, Offers: offers, SignerKey: signerKey, ChainID: cfg.ChainID, Contract: contract}, backends)
+	statusPath := providerStatusPath(path)
+	if err := provider.WriteStatusFile(statusPath, daemon.StatusSnapshot()); err != nil {
+		return fmt.Errorf("initialize provider status: %w", err)
+	}
+	statusContext, stopStatus := context.WithCancel(serveContext)
+	statusDone := make(chan struct{})
+	go func() {
+		defer close(statusDone)
+		watchProviderStatus(statusContext, statusPath, daemon, output, time.Second)
+	}()
+	defer func() {
+		stopStatus()
+		<-statusDone
+		if err := provider.RemoveStatusFile(statusPath); err != nil && resultErr == nil {
+			resultErr = fmt.Errorf("remove provider status: %w", err)
+		}
+	}()
 	watchContext, stopWatching := context.WithCancel(serveContext)
 	defer stopWatching()
 	go watchBackendConfig(watchContext, path, daemon, output)
 	return serveWithReconnect(serveContext, output, time.Second, 30*time.Second, daemon.Serve)
+}
+
+func providerStatusPath(configPath string) string { return configPath + ".status.json" }
+
+func watchProviderStatus(ctx context.Context, path string, daemon *provider.Daemon, output io.Writer, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := provider.WriteStatusFile(path, daemon.StatusSnapshot()); err != nil {
+				_, _ = fmt.Fprintf(output, "provider status update failed: %v\n", err)
+			}
+		}
+	}
 }
 
 func serveWithReconnect(ctx context.Context, output io.Writer, initialDelay, maximumDelay time.Duration, serve func(context.Context) error) error {

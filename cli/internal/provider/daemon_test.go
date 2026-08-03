@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,62 @@ import (
 	"github.com/kunalshah017/myference/cli/internal/backend"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
+
+func TestStatusSnapshotIsConcurrentImmutableAndTracksOfferHealth(t *testing.T) {
+	daemon := NewDaemon(Config{Offers: []v1.OfferCapacity{{OfferID: "one", Model: "m1", PriceVersion: 1}}}, map[string]backend.Backend{"one": testBackend{}})
+	daemon.setConnected(true)
+	var wait sync.WaitGroup
+	for range 100 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			daemon.recordCompletion("one", backend.Usage{InputTokens: 2, OutputTokens: 3, ComputeMilliseconds: 4})
+		}()
+	}
+	wait.Wait()
+	snapshot := daemon.StatusSnapshot()
+	if !snapshot.Connected || snapshot.StartedAt.IsZero() || snapshot.Requests != 100 || snapshot.InputTokens != 200 || snapshot.OutputTokens != 300 || snapshot.ComputeMilliseconds != 400 {
+		t.Fatalf("snapshot=%+v", snapshot)
+	}
+	if len(snapshot.Offers) != 1 || !snapshot.Offers[0].Healthy || snapshot.Offers[0].Model != "m1" {
+		t.Fatalf("offers=%+v", snapshot.Offers)
+	}
+	snapshot.Offers[0].Model = "mutated"
+	if daemon.StatusSnapshot().Offers[0].Model != "m1" {
+		t.Fatal("status snapshot shares offer state")
+	}
+	daemon.recordOfferHealth("one", false, "backend failed")
+	if got := daemon.StatusSnapshot().Offers[0]; got.Healthy || got.Error != "backend failed" {
+		t.Fatalf("failed offer=%+v", got)
+	}
+	if err := daemon.UpdateBackends([]v1.OfferCapacity{{OfferID: "two", Model: "m2", PriceVersion: 1}}, map[string]backend.Backend{"two": testBackend{}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := daemon.StatusSnapshot().Offers; len(got) != 1 || got[0].OfferID != "two" || !got[0].Healthy {
+		t.Fatalf("reloaded offers=%+v", got)
+	}
+}
+
+func TestStatusFileRoundTripAndRemoval(t *testing.T) {
+	path := t.TempDir() + "/provider.status.json"
+	want := StatusSnapshot{Connected: true, StartedAt: time.Unix(100, 0).UTC(), UpdatedAt: time.Unix(101, 0).UTC(), Requests: 2, Offers: []OfferStatus{{OfferID: "one", Model: "m", Healthy: true}}}
+	if err := WriteStatusFile(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStatusFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Requests != want.Requests || len(got.Offers) != 1 || got.Offers[0] != want.Offers[0] {
+		t.Fatalf("got=%+v want=%+v", got, want)
+	}
+	if err := RemoveStatusFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveStatusFile(path); err != nil {
+		t.Fatalf("repeat remove: %v", err)
+	}
+}
 
 func TestDaemonSignsOnlyPinnedReceiptDomain(t *testing.T) {
 	key, err := crypto.GenerateKey()
