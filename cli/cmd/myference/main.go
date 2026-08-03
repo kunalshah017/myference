@@ -386,6 +386,9 @@ func runServe(ctx context.Context, path string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := preparePlatformBackends(serveContext, cfg); err != nil {
+		return fmt.Errorf("prepare provider backends: %w", err)
+	}
 	offers, backends, err := discoverBackends(serveContext, cfg, credential.Load)
 	if err != nil {
 		return err
