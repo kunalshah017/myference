@@ -130,7 +130,7 @@ for event in stream:
           <p className="docs-lead">The shortest path uses a local Ollama model. The CLI connects outbound to Myference, so you do not expose an inbound port or put your laptop directly on the public internet.</p>
           <CopyBlock label="Windows PowerShell">{`irm https://myference.xyz/install.ps1 | iex`}</CopyBlock>
           <CopyBlock label="macOS Terminal">{`curl -fsSL https://myference.xyz/install.sh | sh`}</CopyBlock>
-          <p className="docs-note">The installer selects Windows AMD64, macOS Intel, or macOS Apple Silicon automatically, verifies the published SHA-256 checksum, and installs the CLI with its agent proxy. Windows updates your user PATH; macOS installs into <code>/usr/local/bin</code> and asks for <code>sudo</code> only when needed.</p>
+          <p className="docs-note">The installer selects Windows AMD64, macOS Intel, or macOS Apple Silicon automatically, verifies the published SHA-256 checksum, and installs the CLI with its Linux container proxy. Windows updates your user PATH; macOS installs into <code>/usr/local/bin</code> and asks for <code>sudo</code> only when needed.</p>
           <p className="eyebrow">Manual downloads</p>
           <div className="docs-downloads">
             <a href={`${RELEASE_URL}/myference-windows-amd64-${RELEASE_TAG}.zip`}><Laptop /><span><strong>Windows 64-bit</strong><small>myference-windows-amd64</small></span><ArrowRight /></a>
@@ -148,10 +148,10 @@ ollama list`}</CopyBlock></Step>
             <Step number="04" title="Approve the machine"><p>In the opened browser, connect the provider wallet, confirm the displayed device code, and approve its generated signer. The signer private key and machine token stay in Windows Credential Manager or macOS Keychain.</p></Step>
             <Step number="05" title="Stake and publish"><p>In <a href="/host">Host inference</a>, deposit at least the displayed minimum collateral. Select the discovered backend, then enter input and output prices per 1M tokens and a compute price per minute. With a fresh quote these fields use USD and preview the exact MON rates that will be locked on-chain; without one they use MON. Confirm both wallet transactions.</p></Step>
             <Step number="06" title="Match the offer version"><p>The first offer normally uses version 1. After any price or evidence change, publish a new immutable version and point the backend at the confirmed version:</p><CopyBlock label="Terminal or PowerShell">{`myference backend version --name local-qwen2-5-0-5b --price-version 2`}</CopyBlock></Step>
-            <Step number="07" title="Run headlessly"><p>First stop the foreground process with Ctrl+C. Configure without serving, install the native per-user service, then start it:</p><CopyBlock label="Windows or macOS">{`myference host --model qwen2.5:0.5b --setup-only
-myference service install
-myference service start
-myference service status`}</CopyBlock><p className="docs-note">Windows uses a Scheduled Task at login. macOS uses a per-user LaunchAgent. Use <code>service stop</code> or <code>service uninstall</code> whenever you want to stop providing.</p></Step>
+            <Step number="07" title="Run headlessly"><p>First stop the foreground process with Ctrl+C and configure without serving. On Windows, install the provider-owned headless task, inspect readiness, then start it:</p><CopyBlock label="Windows PowerShell">{`myference host --model qwen2.5:0.5b --setup-only
+myference windows headless install
+myference windows headless status
+myference windows headless start`}</CopyBlock><p className="docs-note"><code>windows headless start</code> signs out; the next login runs the provider without Explorer. For an ordinary background session that keeps the desktop, use <code>myference service install</code> and <code>myference service start</code>. macOS uses that service flow through a per-user LaunchAgent.</p></Step>
             <Step number="08" title="Monitor and claim"><p>The provider dashboard shows live requests, measured usage, settlement, revenue, protocol fees, collateral, and claimable MON. Use <strong>Claim available MON</strong> to transfer settled earnings to the connected wallet.</p></Step>
           </ol>
         </section>
@@ -168,9 +168,9 @@ myference service status`}</CopyBlock><p className="docs-note">Windows uses a Sc
   --secret "$PROVIDER_API_KEY"`}</CopyBlock>
           <CopyBlock label="Isolated CLI agent">{`myference backend add --kind codex --name codex-agent \\
   --model YOUR_CODEX_MODEL \\
-  --image YOUR_REGISTRY/YOUR_AGENT@sha256:YOUR_VERIFIED_DIGEST \\
+  --image ghcr.io/kunalshah017/myference-codex@sha256:YOUR_VERIFIED_DIGEST \\
   --secret "$OPENAI_API_KEY"`}</CopyBlock>
-          <p>Replace <code>codex</code> with <code>claude</code> or <code>kimi</code> for those runners. Command agents receive only bounded disposable workspaces, run in isolated containers, and are advertised as compute-only unless a trustworthy upstream token count is available.</p>
+          <p>Replace <code>codex</code> with <code>claude</code> or <code>kimi</code> for those runners. Command agents receive only bounded disposable workspaces, run in isolated containers, and are advertised as compute-only unless a trustworthy upstream token count is available. The public API exposes model responses only; it does not expose Codex shell, MCP, filesystem, Docker, or other agent tools.</p>
           <CopyBlock label="Manage independently">{`myference backend list
 myference backend stop --name cloud-model
 myference backend start --name cloud-model
@@ -198,6 +198,7 @@ myference capacity`}</CopyBlock>
             <li><Check /> Ollama is identified by its local runtime digest; compatible clouds by upstream model identity; agents by a pinned container digest.</li>
             <li><Check /> A digest proves the runtime artifact being advertised, not response quality or that two differently packaged models have identical weights.</li>
             <li><Check /> Agent workspaces reject absolute/traversal paths, invalid base64, more than 64 files, or more than 512 KiB decoded content.</li>
+            <li><Check /> The public API exposes model responses only; command execution remains private to the disposable, read-only container and has no Docker socket or host-home mount.</li>
             <li><Check /> API keys are scoped, shown once, and revocable. Keep them server-side and never commit them.</li>
           </ul>
         </section>
@@ -210,7 +211,7 @@ myference capacity`}</CopyBlock>
             <details><summary><code>myference host</code> cannot find Ollama</summary><p>Start Ollama, confirm <code>ollama list</code> shows the model, and keep the default <code>http://127.0.0.1:11434</code>. For another loopback port, pass <code>--ollama-url</code>.</p></details>
             <details><summary>Machine approval remains pending</summary><p>Use the same browser account you intend to host from, enter the displayed device code, and confirm the signer transaction in the wallet. The CLI keeps polling until approval or cancellation.</p></details>
             <details><summary>Offer is stale after a price change</summary><p>Wait for the publish transaction and indexer confirmation, then run <code>myference backend version --name NAME --price-version VERSION</code>. The daemon reloads the config automatically.</p></details>
-            <details><summary>Codex, Claude, or Kimi backend will not start</summary><p>Docker Desktop must be running. The image reference must include an immutable <code>@sha256:</code> digest, and the runner credential must be valid.</p></details>
+            <details><summary>Codex, Claude, or Kimi backend will not start</summary><p>The image reference must include an immutable <code>@sha256:</code> digest, and the runner credential must be valid. On Windows, Myference starts Docker Desktop and pulls missing digest-pinned images during provider startup. Run <code>myference windows doctor</code> or <code>myference windows headless status</code> to diagnose a missing CLI, first-run setup, startup timeout, Windows-container mode, or failed image pull.</p></details>
             <details><summary>USD reference is unavailable</summary><p>Settlement is unaffected. USD is display-only; exact immutable MON rates remain authoritative.</p></details>
             <details><summary>A request exceeds its estimate</summary><p>The router reserves the declared maximum before work starts. Generation is bounded by the request budget, and settlement rejects any receipt above the signed maximum rather than overdrawing the session.</p></details>
           </div>

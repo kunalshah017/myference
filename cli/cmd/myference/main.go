@@ -728,7 +728,7 @@ func runBackendWithCredentials(args []string, output io.Writer, saveCredential f
 func commandArguments(kind, model string) []string {
 	switch kind {
 	case "codex":
-		return []string{"exec", "--skip-git-repo-check", "--model", model, "-"}
+		return []string{"exec", "--ephemeral", "--sandbox", "read-only", "--ask-for-approval", "never", "--skip-git-repo-check", "--model", model, "-"}
 	case "claude":
 		return []string{"-p", "--model", model}
 	case "kimi":

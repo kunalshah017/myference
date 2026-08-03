@@ -22,6 +22,8 @@ func TestDoctorFindingsAreActionable(t *testing.T) {
 		ConfiguredModel:          "missing:latest",
 		InstalledModels:          []string{"qwen:latest"},
 		DockerRequired:           true,
+		DockerEngineReady:        true,
+		DockerEngineOS:           "linux",
 		OnACPowerKnown:           true,
 		CredentialStoreAvailable: false,
 		ConfigReadable:           false,
@@ -59,6 +61,8 @@ func TestDoctorFindingsAcceptHealthyHost(t *testing.T) {
 		InstalledModels:          []string{"qwen:latest"},
 		DockerRequired:           true,
 		DockerPath:               `C:\\Program Files\\Docker\\docker.exe`,
+		DockerEngineReady:        true,
+		DockerEngineOS:           "linux",
 		CredentialStoreAvailable: true,
 		OnACPowerKnown:           true,
 		OnACPower:                true,
@@ -68,6 +72,43 @@ func TestDoctorFindingsAcceptHealthyHost(t *testing.T) {
 	for _, finding := range findings {
 		if !finding.OK {
 			t.Fatalf("healthy finding failed: %+v", finding)
+		}
+	}
+}
+
+func TestDoctorFindingsRequireReadyLinuxEngineAndConfiguredImages(t *testing.T) {
+	findings := DoctorFindings(DoctorState{
+		WindowsVersion:    "Windows 11",
+		DockerRequired:    true,
+		DockerPath:        `C:\\Program Files\\Docker\\docker.exe`,
+		DockerEngineReady: true,
+		DockerEngineOS:    "linux",
+		DockerMissingImages: []string{
+			"ghcr.io/example/codex@sha256:missing",
+		},
+		OnACPowerKnown:           true,
+		OnACPower:                true,
+		CredentialStoreAvailable: true,
+		ServiceInstalled:         true,
+		ConfigReadable:           true,
+	})
+	for _, finding := range findings {
+		if finding.Name == "Docker" {
+			if finding.OK || !strings.Contains(finding.Message, "missing") || !strings.Contains(finding.Action, "serve") {
+				t.Fatalf("Docker finding=%+v", finding)
+			}
+			return
+		}
+	}
+	t.Fatal("Docker finding missing")
+}
+
+func TestRenderHeadlessStatusIncludesReadOnlyDockerReadiness(t *testing.T) {
+	status := DockerStatus{DockerPath: "docker.exe", EngineReady: true, EngineOS: "linux", MissingImages: []string{"missing-image"}}
+	got := RenderHeadlessStatus(true, status)
+	for _, expected := range []string{"Windows headless mode installed", "Docker engine ready (linux)", "missing-image"} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("status %q missing %q", got, expected)
 		}
 	}
 }

@@ -30,11 +30,19 @@ func TestContainerArgumentsIsolateHostAndNeverExposeLongLivedCredential(t *testi
 	if strings.Contains(joined, "long-lived-secret") || strings.Contains(joined, os.Getenv("HOME")) {
 		t.Fatalf("host credential or home leaked into container arguments: %q", joined)
 	}
-	if strings.Contains(joined, "host.docker.internal") {
-		t.Fatalf("agent can reach the host gateway: %q", joined)
+	for _, forbidden := range []string{"host.docker.internal", "/var/run/docker.sock", "--privileged", "--network host", "--device"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("agent received forbidden host capability %q: %q", forbidden, joined)
+		}
 	}
 	if !slices.Contains(arguments, image) {
 		t.Fatal("pinned agent image missing")
+	}
+}
+
+func TestProxyBinaryNameTargetsLinuxDockerContainerOnEveryHost(t *testing.T) {
+	if got := proxyBinaryName(); got != "myference-agent-proxy" {
+		t.Fatalf("proxyBinaryName()=%q, want Linux container executable", got)
 	}
 }
 

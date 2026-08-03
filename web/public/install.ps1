@@ -40,13 +40,13 @@ try {
     if ($actual -ne $expected) { throw "Checksum verification failed for $asset" }
 
     Expand-Archive -LiteralPath $archive -DestinationPath $package -Force
-    foreach ($file in @('myference.exe', 'myference-agent-proxy.exe', 'install-windows.ps1')) {
+    foreach ($file in @('myference.exe', 'myference-agent-proxy', 'install-windows.ps1')) {
         if (-not (Test-Path -LiteralPath (Join-Path $package $file))) { throw "Release is missing $file" }
     }
 
     $installDir = if ($env:MYFERENCE_INSTALL_DIR) { $env:MYFERENCE_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\Myference' }
     New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-    $files = @('myference-agent-proxy.exe', 'install-windows.ps1', 'myference.exe')
+    $files = @('myference-agent-proxy', 'install-windows.ps1', 'myference.exe')
     $transaction = [guid]::NewGuid().ToString('N')
     $staged = @{}
     $backups = @{}

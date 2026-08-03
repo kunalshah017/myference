@@ -34,7 +34,7 @@ irm https://myference.xyz/install.ps1 | iex
 curl -fsSL https://myference.xyz/install.sh | sh
 ```
 
-The Windows installer supports AMD64, atomically installs the CLI, Windows proxy sidecar, and lifecycle script, and updates the user PATH. The macOS installer detects Intel or Apple Silicon and installs into `/usr/local/bin`. Manual release artifacts and `SHA256SUMS` remain available on GitHub; releases are not yet code-signed or notarized.
+The Windows installer supports AMD64, atomically installs the CLI, Linux container proxy sidecar, and lifecycle script, and updates the user PATH. The macOS installer detects Intel or Apple Silicon and installs into `/usr/local/bin`. Manual release artifacts and `SHA256SUMS` remain available on GitHub; releases are not yet code-signed or notarized.
 
 Connect the machine to a wallet-bound account in the browser, configure one or more independently controlled backends, and start the outbound provider:
 
@@ -42,7 +42,7 @@ Connect the machine to a wallet-bound account in the browser, configure one or m
 myference login --server https://api.myference.xyz
 myference backend add --kind ollama --name local-qwen --model qwen2.5:0.5b
 myference backend add --kind openai --name cloud-model --model provider-model --url https://provider.example --secret "$PROVIDER_KEY"
-myference backend add --kind codex --name codex-agent --model codex --image ghcr.io/example/codex-agent@sha256:... --secret "$OPENAI_API_KEY"
+myference backend add --kind codex --name codex-agent --model YOUR_CODEX_MODEL --image ghcr.io/kunalshah017/myference-codex@sha256:... --secret "$OPENAI_API_KEY"
 myference backend list
 myference capacity
 myference service install
@@ -53,7 +53,7 @@ For the common unused-machine path, `myference host` replaces the Ollama add/lis
 
 Machine, backend, and EIP-712 signer secrets are loaded from Windows Credential Manager or macOS Keychain and never stored in JSON. Browser approval submits `setProviderSigner` on Monad before the machine can become routable. `backend start` and `backend stop` are detected by the running daemon and update advertised capacity without disconnecting other backends.
 
-Ollama must use loopback. Cloud adapters require HTTPS except in loopback integration tests. Codex, Claude, and Kimi require Docker Desktop and a digest-pinned agent image. Each agent runs in a read-only, capability-dropped container on a unique internal Docker network and mounts only the disposable workspace. A separately packaged proxy sidecar is the only dual-homed peer: it permits only the configured upstream model and inference endpoints within the job's cumulative output-token budget. The agent sees only a random job token; the long-lived credential is mounted only into the proxy sidecar. Their receipts can bill measured compute time without inventing unavailable token counts.
+Ollama must use loopback. Cloud adapters require HTTPS except in loopback integration tests. Codex, Claude, and Kimi require Docker Desktop and a digest-pinned agent image. On Windows provider startup, Myference starts Docker Desktop when needed, waits up to two minutes for its Linux engine, pulls only missing immutable images, and verifies them before advertising capacity. Each agent runs in an ephemeral, read-only, capability-dropped container on a unique internal Docker network and mounts only the disposable workspace—never the host home or Docker socket. A separately packaged Linux proxy sidecar is the only dual-homed peer: it permits only the configured upstream model and inference endpoints within the job's cumulative output-token budget. The agent sees only a random job token; the long-lived credential is mounted only into the proxy sidecar. The public API returns model output only and does not expose agent tools, shell, MCP, filesystem, or Docker access. Their receipts can bill measured compute time without inventing unavailable token counts.
 
 Marketplace prices are displayed as MON with a cached, informational USD reference. Billing and settlement always use the exact immutable integer MON rates published on-chain. Ollama and compatible APIs meter observed input, output, and compute usage; CLI agents are compute-only unless trustworthy upstream usage is available.
 
@@ -62,6 +62,8 @@ When publishing a later immutable offer version for a price or runtime-digest ch
 `myference service install|start|stop|status|uninstall` uses a Windows Scheduled Task or a per-user macOS LaunchAgent. A foreground `serve` process stops cleanly with Ctrl+C. `legacy-start`, `legacy-status`, and `legacy-stop` remain available only for the preserved Windows LAN host.
 
 Windows provider management is native and outbound-only: `myference windows doctor|models|test|status|dashboard`, `windows focus start|status|restore`, `windows headless install|start|status|restore`, and the idempotent emergency `windows restore`. One `serve` owns every enabled laptop backend; focus and headless reuse it and never open a LAN management listener. Complete [the physical Windows acceptance checklist](docs/windows-acceptance.md) before removing the preserved legacy implementation.
+
+`myference windows doctor` and `myference windows headless status` inspect Docker readiness without starting it or pulling images. `windows headless start` signs out; the next login launches the same provider task without Explorer, and its startup path performs the bounded Docker start/pull preparation described above.
 
 Windows provider tuning requires AC power by default. For an intentional foreground battery session, use `myference serve --allow-battery` or `myference host --allow-battery`; scheduled service/headless sessions retain the safer AC-only policy.
 
