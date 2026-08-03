@@ -12,21 +12,23 @@ import (
 
 const recoveryJournalFileName = "recovery.json"
 
-// ErrActiveRecoveryJournal prevents a later optimize or headless session from
+// ErrActiveRecoveryJournal prevents a later provider, focus, or headless session from
 // hiding the state that an earlier session still needs to restore.
 var ErrActiveRecoveryJournal = errors.New("an active Myference recovery journal already exists")
 
 // OllamaProcessSettings captures the process settings that a later restore must
 // put back after an optimization session.
 type OllamaProcessSettings struct {
-	Executable  string            `json:"executable"`
-	Priority    string            `json:"priority"`
-	Environment map[string]string `json:"environment"`
+	Executable  string             `json:"executable"`
+	Priority    string             `json:"priority"`
+	Environment map[string]*string `json:"environment"`
 }
 
 // RecoveryJournal is the complete pre-mutation snapshot for reversible Windows
 // host controls. Zero lid-action values are meaningful ("do nothing").
 type RecoveryJournal struct {
+	SessionKind        string                `json:"sessionKind"`
+	OwnerPID           int                   `json:"ownerPid"`
 	ActivePowerScheme  string                `json:"activePowerScheme"`
 	ACLidAction        int                   `json:"acLidAction"`
 	DCLidAction        int                   `json:"dcLidAction"`
@@ -136,6 +138,43 @@ func (store JournalStore) CompleteStage(stage string) error {
 	return store.replaceExisting(journal)
 }
 
+func (store JournalStore) Update(mutate func(*RecoveryJournal) error) error {
+	if mutate == nil {
+		return errors.New("journal update callback is required")
+	}
+	journal, err := store.Load()
+	if err != nil {
+		return err
+	}
+	if err := mutate(&journal); err != nil {
+		return err
+	}
+	return store.replaceExisting(journal)
+}
+
+func (store JournalStore) RemoveStages(prefixes ...string) error {
+	if len(prefixes) == 0 {
+		return errors.New("at least one recovery stage prefix is required")
+	}
+	return store.Update(func(journal *RecoveryJournal) error {
+		kept := journal.AppliedStages[:0]
+		for _, stage := range journal.AppliedStages {
+			remove := false
+			for _, prefix := range prefixes {
+				if prefix != "" && strings.HasPrefix(stage, prefix) {
+					remove = true
+					break
+				}
+			}
+			if !remove {
+				kept = append(kept, stage)
+			}
+		}
+		journal.AppliedStages = kept
+		return nil
+	})
+}
+
 // RollbackStages returns completed setup stages in the only safe restoration
 // order: the newest applied mutation is restored first. The returned slice is
 // independent of the journal so callers cannot alter durable recovery state.
@@ -225,6 +264,12 @@ func (store JournalStore) path() string {
 }
 
 func (journal RecoveryJournal) validate() error {
+	if journal.SessionKind != "provider" && journal.SessionKind != "headless" {
+		return fmt.Errorf("recovery session kind %q is not supported", journal.SessionKind)
+	}
+	if journal.OwnerPID <= 0 {
+		return errors.New("recovery session owner PID is required")
+	}
 	if strings.TrimSpace(journal.ActivePowerScheme) == "" {
 		return errors.New("active power scheme is required")
 	}
