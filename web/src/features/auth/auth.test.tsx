@@ -8,6 +8,7 @@ import { AuthAPI } from '../../lib/api'
 import { ApiKeys } from './ApiKeys'
 import { ConnectWallet } from './ConnectWallet'
 import { DeviceApproval } from './DeviceApproval'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const address = '0x1111111111111111111111111111111111111111' as Address
 let server: Server
@@ -122,10 +123,10 @@ describe('account authentication', () => {
   })
 
   it('reveals a new API key once, displays scopes, and revokes it', async () => {
-    render(<ApiKeys api={new AuthAPI(baseURL)} />)
+    render(<QueryClientProvider client={new QueryClient()}><ApiKeys api={new AuthAPI(baseURL)} /></QueryClientProvider>)
     expect(await screen.findByText('qwen')).toBeVisible()
     await userEvent.type(screen.getByLabelText(/model/i), 'qwen2.5:0.5b')
-    await userEvent.type(screen.getByLabelText(/maximum spend/i), '1000')
+    await userEvent.type(screen.getByLabelText(/maximum spend/i), '0.000000000000001')
     await userEvent.click(screen.getByRole('button', { name: /create api key/i }))
     expect(await screen.findByText('key-new.one-time-secret')).toBeVisible()
     expect(createdEndpoints).toEqual(['/v1/chat/completions', '/v1/messages'])
