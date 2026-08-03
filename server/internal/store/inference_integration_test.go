@@ -329,10 +329,10 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 		t.Fatalf("colliding offer candidates=%+v err=%v", candidates, err)
 	}
 	for _, candidate := range candidates {
-		if candidate.MachineID == "reconcile-machine" && (candidate.InputPerMillion != 10 || candidate.OutputPerMillion != 20 || candidate.ComputePerSecond != 30) {
+		if candidate.MachineID == "reconcile-machine" && (candidate.InputPerMillion != "10" || candidate.OutputPerMillion != "20" || candidate.ComputePerSecond != "30") {
 			t.Fatalf("first provider rates were overwritten: %+v", candidate)
 		}
-		if candidate.MachineID == "second-machine" && (candidate.InputPerMillion != 100 || candidate.OutputPerMillion != 200 || candidate.ComputePerSecond != 300) {
+		if candidate.MachineID == "second-machine" && (candidate.InputPerMillion != "100" || candidate.OutputPerMillion != "200" || candidate.ComputePerSecond != "300") {
 			t.Fatalf("second provider inherited colliding rates: %+v", candidate)
 		}
 	}
@@ -406,5 +406,85 @@ func TestCapacityReconcilesOnlyIndexedBondedMonadOffer(t *testing.T) {
 	}
 	if exactHold != "3" || holdReleased {
 		t.Fatalf("exact hold=%s released=%v", exactHold, holdReleased)
+	}
+}
+
+func TestWideProviderRatesReconcileIntoMarketplaceAndReservation(t *testing.T) {
+	databaseURL := os.Getenv("MYFERENCE_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("MYFERENCE_TEST_DATABASE_URL is required")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	for _, name := range []string{"000001_control_plane.sql", "000002_inference.sql", "000003_chain_index.sql", "000007_provider_operations.sql", "000008_machine_signers.sql", "000009_receipt_coordination.sql", "000014_reservation_finality.sql", "000015_runtime_model_evidence.sql"} {
+		if err := s.ApplyMigration(ctx, filepath.Join("..", "..", "..", "migrations", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, "TRUNCATE receipt_proposals,inference_reservations,provider_routing_state,outbox,requests,sessions,offers,backends,machines,accounts,chain_offers,chain_provider_signers,chain_accounts CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		inputRate   = "292000000000000000000"
+		outputRate  = "1752000000000000000000"
+		computeRate = "4866666666666667"
+		maximumCost = uint64(2048866666666667)
+	)
+	provider := "0x1111111111111111111111111111111111111111"
+	contract := "0x4444444444444444444444444444444444444444"
+	if err := s.CreateAccount(ctx, Account{ID: "wide-provider", WalletAddress: provider}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMachine(ctx, Machine{ID: "wide-machine", AccountID: "wide-provider", Name: "windows-openai"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE machines SET signer_address=$1 WHERE id='wide-machine'`, provider); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_accounts(chain_id,contract_address,address,provider_bond) VALUES (10143,$1,$2,100)`, contract, provider); err != nil {
+		t.Fatal(err)
+	}
+	offerHash := crypto.Keccak256Hash([]byte("openai-gpt-5.6-sol")).Hex()
+	modelHash := crypto.Keccak256Hash([]byte("gpt-5.6-sol")).Hex()
+	capabilityHash := crypto.Keccak256Hash([]byte("stream,text")).Hex()
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chain_offers(chain_id,contract_address,provider,offer_id,version,model_hash,capability_hash,input_per_million,output_per_million,compute_per_second) VALUES (10143,$1,$2,$3,1,$4,$5,$6,$7,$8)`, contract, provider, offerHash, modelHash, capabilityHash, inputRate, outputRate, computeRate); err != nil {
+		t.Fatal(err)
+	}
+	capacity := v1.Capacity{Available: 1, Offers: []v1.OfferCapacity{{OfferID: "openai-gpt-5.6-sol", Model: "gpt-5.6-sol", PriceVersion: 1, BackendKind: "openai", OfferHash: offerHash, ModelHash: modelHash, CapabilityHash: capabilityHash, Capabilities: []string{"stream", "text"}, EvidenceKind: "openai_model", EvidenceDigest: "gpt-5.6-sol", MeteringMode: "tokens_and_compute"}}}
+	if err := s.ReconcileProviderCapacity(ctx, "wide-machine", capacity, 10143, contract); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := s.RoutingCandidates(ctx, "gpt-5.6-sol")
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("candidates=%+v err=%v", candidates, err)
+	}
+	candidate := candidates[0]
+	if candidate.InputPerMillion != inputRate || candidate.OutputPerMillion != outputRate || candidate.ComputePerSecond != computeRate || candidate.MaximumCost != ^uint64(0) {
+		t.Fatalf("wide candidate=%+v", candidate)
+	}
+	detail, err := s.MarketplaceModel(ctx, "gpt-5.6-sol", time.Hour)
+	if err != nil || len(detail.Offers) != 1 || detail.Offers[0].InputPerMillion != inputRate || detail.Offers[0].OutputPerMillion != outputRate || detail.Offers[0].ComputePerSecond != computeRate {
+		t.Fatalf("marketplace offers=%+v err=%v", detail.Offers, err)
+	}
+	if err := s.CreateAccount(ctx, Account{ID: "wide-customer", WalletAddress: "0x5555555555555555555555555555555555555555"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateSession(ctx, Session{ID: "wide-session", AccountID: "wide-customer", State: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE sessions SET confirmed_balance_wei=3000000000000000 WHERE id='wide-session'`); err != nil {
+		t.Fatal(err)
+	}
+	reservation := InferenceReservation{RequestID: "wide-request", SessionID: "wide-session", AccountID: "wide-customer", MachineID: "wide-machine", OfferID: "openai-gpt-5.6-sol", PriceVersion: 1, MaximumSpend: maximumCost, MaximumInputTokens: 1, MaximumOutputTokens: 1, MaximumComputeMilliseconds: 1}
+	if err := s.ReserveInference(ctx, reservation); err != nil {
+		t.Fatal(err)
+	}
+	var reserved string
+	if err := s.db.QueryRowContext(ctx, `SELECT amount::text FROM inference_reservations WHERE request_id='wide-request'`).Scan(&reserved); err != nil || reserved != "2048866666666667" {
+		t.Fatalf("reserved=%q err=%v", reserved, err)
 	}
 }

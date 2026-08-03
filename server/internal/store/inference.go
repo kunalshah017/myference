@@ -77,20 +77,21 @@ func (s *Store) RoutingCandidates(ctx context.Context, model string) ([]router.C
 		if err := json.Unmarshal([]byte(capabilities), &candidate.Capabilities); err != nil {
 			return nil, err
 		}
-		candidate.MaximumCost, err = strconv.ParseUint(maximum, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("routing cost exceeds broker limit: %w", err)
+		maximumValue, ok := new(big.Int).SetString(maximum, 10)
+		if !ok || maximumValue.Sign() < 0 {
+			return nil, fmt.Errorf("invalid routing cost")
 		}
-		candidate.InputPerMillion, err = strconv.ParseUint(inputRate, 10, 64)
-		if err == nil {
-			candidate.OutputPerMillion, err = strconv.ParseUint(outputRate, 10, 64)
+		if maximumValue.IsUint64() {
+			candidate.MaximumCost = maximumValue.Uint64()
+		} else {
+			candidate.MaximumCost = ^uint64(0)
 		}
-		if err == nil {
-			candidate.ComputePerSecond, err = strconv.ParseUint(computeRate, 10, 64)
+		if !router.ValidRate(inputRate) || !router.ValidRate(outputRate) || !router.ValidRate(computeRate) {
+			return nil, fmt.Errorf("invalid routing rate")
 		}
-		if err != nil {
-			return nil, fmt.Errorf("routing rate exceeds broker limit: %w", err)
-		}
+		candidate.InputPerMillion = inputRate
+		candidate.OutputPerMillion = outputRate
+		candidate.ComputePerSecond = computeRate
 		result = append(result, candidate)
 	}
 	return result, rows.Err()
@@ -171,10 +172,8 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 		if err != nil {
 			return err
 		}
-		inputValue, e1 := strconv.ParseUint(input, 10, 64)
-		outputValue, e2 := strconv.ParseUint(output, 10, 64)
-		computeValue, e3 := strconv.ParseUint(compute, 10, 64)
-		if e1 != nil || e2 != nil || e3 != nil || inputValue > ^uint64(0)-outputValue || inputValue+outputValue > ^uint64(0)-computeValue || !meteringRatesEligible(meteringMode, inputValue, outputValue) {
+		maximumCost, ratesOK := routingRates(meteringMode, input, output, compute)
+		if !ratesOK {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO offers(id,backend_id,version,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id,version) DO NOTHING`, offered.OfferID, backendID, offered.PriceVersion, input, output, compute); err != nil {
@@ -191,7 +190,7 @@ func (s *Store) ReconcileProviderCapacity(ctx context.Context, machineID string,
 				available = 0
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO provider_routing_state(machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,evidence_kind,evidence_digest,metering_mode,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,true,$13,$14,$15,$16,$17) ON CONFLICT(machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,evidence_kind=EXCLUDED.evidence_kind,evidence_digest=EXCLUDED.evidence_digest,metering_mode=EXCLUDED.metering_mode,price_version=EXCLUDED.price_version,confirmed_bond=true,healthy=true,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,updated_at=now()`, machineID, offered.OfferID, offered.Model, offered.BackendKind, capabilities, offered.OfferHash, offered.ModelHash, offered.CapabilityHash, evidenceKind, evidenceDigest, meteringMode, offered.PriceVersion, available, decimal(inputValue+outputValue+computeValue), input, output, compute); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO provider_routing_state(machine_id,offer_id,model,backend_kind,capabilities,offer_hash,model_hash,capability_hash,evidence_kind,evidence_digest,metering_mode,price_version,confirmed_bond,healthy,capacity,maximum_cost,input_per_million,output_per_million,compute_per_second) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,true,$13,$14,$15,$16,$17) ON CONFLICT(machine_id,offer_id) DO UPDATE SET model=EXCLUDED.model,backend_kind=EXCLUDED.backend_kind,capabilities=EXCLUDED.capabilities,offer_hash=EXCLUDED.offer_hash,model_hash=EXCLUDED.model_hash,capability_hash=EXCLUDED.capability_hash,evidence_kind=EXCLUDED.evidence_kind,evidence_digest=EXCLUDED.evidence_digest,metering_mode=EXCLUDED.metering_mode,price_version=EXCLUDED.price_version,confirmed_bond=true,healthy=true,capacity=EXCLUDED.capacity,maximum_cost=EXCLUDED.maximum_cost,input_per_million=EXCLUDED.input_per_million,output_per_million=EXCLUDED.output_per_million,compute_per_second=EXCLUDED.compute_per_second,updated_at=now()`, machineID, offered.OfferID, offered.Model, offered.BackendKind, capabilities, offered.OfferHash, offered.ModelHash, offered.CapabilityHash, evidenceKind, evidenceDigest, meteringMode, offered.PriceVersion, available, maximumCost, input, output, compute); err != nil {
 			return err
 		}
 	}
@@ -212,8 +211,16 @@ func runtimeEvidenceEligible(previousDigest string, previousVersion uint64, offe
 	return previousDigest == "" || previousDigest == offered.Model || previousDigest == offered.EvidenceDigest || offered.PriceVersion > previousVersion
 }
 
-func meteringRatesEligible(mode string, input, output uint64) bool {
-	return mode != "compute_only" || input == 0 && output == 0
+func routingRates(mode, input, output, compute string) (string, bool) {
+	if !router.ValidRate(input) || !router.ValidRate(output) || !router.ValidRate(compute) || !meteringRatesEligible(mode, input, output) {
+		return "", false
+	}
+	maximum, err := router.SumRates(input, output, compute)
+	return maximum, err == nil
+}
+
+func meteringRatesEligible(mode, input, output string) bool {
+	return mode != "compute_only" || input == "0" && output == "0"
 }
 
 func (s *Store) OpenSession(ctx context.Context, accountID string) (string, uint64, error) {
@@ -267,16 +274,9 @@ func (s *Store) ReserveInference(ctx context.Context, reservation InferenceReser
 		}
 		return err
 	}
-	candidate := router.Candidate{}
-	candidate.InputPerMillion, err = strconv.ParseUint(inputRate, 10, 64)
-	if err == nil {
-		candidate.OutputPerMillion, err = strconv.ParseUint(outputRate, 10, 64)
-	}
-	if err == nil {
-		candidate.ComputePerSecond, err = strconv.ParseUint(computeRate, 10, 64)
-	}
+	candidate := router.Candidate{InputPerMillion: inputRate, OutputPerMillion: outputRate, ComputePerSecond: computeRate}
 	worstCase, costErr := router.WorstCaseCost(candidate, reservation.MaximumInputTokens, reservation.MaximumOutputTokens, reservation.MaximumComputeMilliseconds)
-	if err != nil || costErr != nil || worstCase == 0 || worstCase > reservation.MaximumSpend {
+	if costErr != nil || worstCase == 0 || worstCase > reservation.MaximumSpend {
 		return ErrIneligibleRoute
 	}
 	available := new(big.Int).Sub(new(big.Int).Set(confirmed), locked)
