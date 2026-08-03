@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,7 +46,11 @@ func New(image string, arguments []string, kind, model, secret string, timeout t
 		if executableErr != nil {
 			return nil, executableErr
 		}
-		proxyBinary = filepath.Join(filepath.Dir(executable), "myference-agent-proxy")
+		proxyName := "myference-agent-proxy"
+		if runtime.GOOS == "windows" {
+			proxyName += ".exe"
+		}
+		proxyBinary = filepath.Join(filepath.Dir(executable), proxyName)
 	}
 	if info, statErr := os.Stat(proxyBinary); statErr != nil || info.IsDir() {
 		return nil, errors.New("myference-agent-proxy is required beside the CLI")

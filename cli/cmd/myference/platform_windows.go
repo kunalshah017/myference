@@ -218,10 +218,11 @@ func startPlatformProviderSession(ctx context.Context, _ config.Config, _ io.Wri
 		return nil, err
 	}
 	runner := platform.NewNativeRunner()
+	allowBattery, _ := ctx.Value(platformAllowBatteryKey{}).(bool)
 	if mode, _ := ctx.Value(platformSessionModeKey{}).(string); mode == "headless" {
-		return platform.StartHeadlessProviderSession(ctx, platform.DefaultConfig(), platform.TuningOptions{}, store, runner)
+		return platform.StartHeadlessProviderSession(ctx, platform.DefaultConfig(), platform.TuningOptions{AllowBattery: allowBattery}, store, runner)
 	}
-	return platform.StartProviderSession(ctx, platform.DefaultConfig(), platform.TuningOptions{}, store, runner)
+	return platform.StartProviderSession(ctx, platform.DefaultConfig(), platform.TuningOptions{AllowBattery: allowBattery}, store, runner)
 }
 
 func runWindowsHeadless(ctx context.Context, args []string, output io.Writer) error {

@@ -43,6 +43,7 @@ const (
 )
 
 type platformSessionModeKey struct{}
+type platformAllowBatteryKey struct{}
 
 var version = "dev"
 var commit = "unknown"
@@ -94,12 +95,13 @@ func run(args []string, output io.Writer) error {
 		_, err = fmt.Fprintf(output, "machine %s account %s backends %d\n", cfg.MachineID, cfg.AccountID, len(cfg.Backends))
 		return err
 	case "serve":
-		path, err := parseConfigFlag("serve", args[1:])
+		path, allowBattery, err := parseServeFlags(args[1:])
 		if err != nil {
 			return err
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
+		ctx = context.WithValue(ctx, platformAllowBatteryKey{}, allowBattery)
 		err = runServe(ctx, path, output)
 		if errors.Is(err, context.Canceled) {
 			return nil
@@ -125,6 +127,7 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	modelName := flags.String("model", "", "installed model to serve; defaults to the first model")
 	webURL := flags.String("web", defaultWebURL, "Myference web URL")
 	setupOnly := flags.Bool("setup-only", false, "configure the backend without starting the foreground server")
+	allowBattery := flags.Bool("allow-battery", false, "allow provider host tuning while on battery")
 	noBrowser := flags.Bool("no-browser", false, "do not open the provider workspace")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -154,7 +157,18 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	}
 	serveContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	return runServe(serveContext, *path, output)
+	return runServe(context.WithValue(serveContext, platformAllowBatteryKey{}, *allowBattery), *path, output)
+}
+
+func parseServeFlags(args []string) (string, bool, error) {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", defaultConfigPath(), "configuration path")
+	allowBattery := flags.Bool("allow-battery", false, "allow provider host tuning while on battery")
+	if err := flags.Parse(args); err != nil {
+		return "", false, err
+	}
+	return *path, *allowBattery, nil
 }
 
 func hostLoginArgs(serverURL, path string, noBrowser bool) []string {

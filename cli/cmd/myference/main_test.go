@@ -223,6 +223,13 @@ func TestHostLoginArgumentsPreserveNoBrowser(t *testing.T) {
 	}
 }
 
+func TestServeFlagsPreserveConfigAndBatteryOverride(t *testing.T) {
+	path, allowBattery, err := parseServeFlags([]string{"--config", "provider.json", "--allow-battery"})
+	if err != nil || path != "provider.json" || !allowBattery {
+		t.Fatalf("path=%q allowBattery=%v err=%v", path, allowBattery, err)
+	}
+}
+
 func TestServeWithReconnectSurvivesRelayRestart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

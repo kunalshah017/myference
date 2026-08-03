@@ -25,17 +25,17 @@ mkdir -p "$stage/windows-amd64" "$stage/macos-amd64" "$stage/macos-arm64" "$stag
 build_cli windows amd64 "$stage/windows-amd64/myference.exe"
 build_cli darwin amd64 "$stage/macos-amd64/myference"
 build_cli darwin arm64 "$stage/macos-arm64/myference"
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/windows-amd64/myference-agent-proxy" "$root/cli/cmd/myference-agent-proxy"
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/windows-amd64/myference-agent-proxy.exe" "$root/cli/cmd/myference-agent-proxy"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/macos-amd64/myference-agent-proxy" "$root/cli/cmd/myference-agent-proxy"
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/macos-arm64/myference-agent-proxy" "$root/cli/cmd/myference-agent-proxy"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$stage/server-linux-amd64/myference-server" "$root/server/cmd/myference-server"
-cp "$root/packaging/windows/install.ps1" "$stage/windows-amd64/install.ps1"
+cp "$root/packaging/windows/install.ps1" "$stage/windows-amd64/install-windows.ps1"
 cp "$root/packaging/macos/com.myference.provider.plist" "$stage/macos-amd64/com.myference.provider.plist"
 cp "$root/packaging/macos/com.myference.provider.plist" "$stage/macos-arm64/com.myference.provider.plist"
 for directory in "$stage"/*-amd64 "$stage"/macos-arm64; do cp "$stage/VERSION" "$directory/VERSION"; done
 
 for artifact in "$stage"/*/myference*; do
-  if strings "$artifact" | grep -Eq 'ac0974bec39a17e36ba4a6b4d238ff944|mach-1\.machine-secret'; then
+  if LC_ALL=C grep -aEq 'ac0974bec39a17e36ba4a6b4d238ff944|mach-1\.machine-secret' "$artifact"; then
     echo "secret-like test material found in $artifact" >&2
     exit 1
   fi
