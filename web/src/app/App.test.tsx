@@ -49,4 +49,7 @@ it('serves complete public documentation for using and hosting inference', () =>
   expect(screen.getByRole('heading', { name: /pricing and settlement/i })).toBeVisible()
   expect(screen.getByRole('heading', { name: /security and model evidence/i })).toBeVisible()
   expect(screen.getByRole('heading', { name: /troubleshooting/i })).toBeVisible()
+  expect(screen.getAllByText(/public API exposes model responses only/i).length).toBeGreaterThan(0)
+  expect(screen.getByText(/starts Docker Desktop and pulls missing digest-pinned images/i)).toBeInTheDocument()
+  expect(screen.getByText(/Linux container proxy/i)).toBeVisible()
 })

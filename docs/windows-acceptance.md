@@ -5,7 +5,7 @@ Run this checklist on the exact release commit and a physical Windows 11 AMD64 l
 ## Automated prerequisites
 
 - [ ] The `verify` Windows job is green for the exact commit, including Go tests, vet, CLI/proxy builds, PowerShell parsing, installer rollback fixtures, and non-destructive acceptance.
-- [ ] `irm https://myference.xyz/install.ps1 | iex` installs `myference.exe`, `myference-agent-proxy.exe`, and `install-windows.ps1` together under `%LOCALAPPDATA%\Programs\Myference`.
+- [ ] `irm https://myference.xyz/install.ps1 | iex` installs `myference.exe`, Linux `myference-agent-proxy`, and `install-windows.ps1` together under `%LOCALAPPDATA%\Programs\Myference`.
 - [ ] `scripts/windows-acceptance.ps1 -Config <absolute-config>` passes and its before-state report is retained without secrets.
 
 ## Multi-provider lifecycle
@@ -27,6 +27,8 @@ Run this checklist on the exact release commit and a physical Windows 11 AMD64 l
 ## Headless lifecycle
 
 - [ ] `windows headless install` records original AC/DC lid actions and shell state before creating its task or mutating the host.
+- [ ] With an enabled digest-pinned command agent, `windows headless status` reports Docker/image readiness without starting Docker or pulling; provider startup starts Docker hidden when stopped, reaches Linux mode within two minutes, and pulls only a missing exact digest.
+- [ ] The published Codex image runs as a non-root user; a real request returns model text but exposes no tool-call API, host home, Docker socket, MCP configuration, or long-lived credential.
 - [ ] `windows headless start` signs out; the next login starts the same multi-backend provider and dashboard without Explorer.
 - [ ] Lid-close behavior, provider reconnect, status/dashboard, and on-demand backend start/stop work in headless mode.
 - [ ] Graceful headless stop and emergency `windows restore` restore the exact shell presence/value, lid actions, power plan, and remove only Myference-owned headless tasks.
