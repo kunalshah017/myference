@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -33,6 +35,10 @@ func runPlatformCommand(command string, args []string, output io.Writer) error {
 			return runWindowsModels(context.Background(), windowsCommand.Args, output)
 		case "test":
 			return runWindowsTest(context.Background(), windowsCommand.Args, output)
+		case "focus":
+			return runWindowsFocus(context.Background(), windowsCommand.Args, output)
+		case "restore":
+			return runWindowsRestore(context.Background(), windowsCommand.Args, output)
 		default:
 			return fmt.Errorf("windows %s is not implemented", windowsCommand.Action)
 		}
@@ -80,6 +86,72 @@ func runPlatformCommand(command string, args []string, output io.Writer) error {
 	default:
 		return lifecycle.Stop(context.Background())
 	}
+}
+
+func startPlatformProviderSession(ctx context.Context, _ config.Config, _ io.Writer) (func() error, error) {
+	store, err := platform.DefaultJournalStore()
+	if err != nil {
+		return nil, err
+	}
+	return platform.StartProviderSession(ctx, platform.DefaultConfig(), platform.TuningOptions{}, store, platform.NewNativeRunner())
+}
+
+func runWindowsFocus(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) != 1 {
+		return errors.New("usage: myference windows focus <start|status|restore>")
+	}
+	store, err := platform.DefaultJournalStore()
+	if err != nil {
+		return err
+	}
+	runner := platform.NewNativeRunner()
+	switch args[0] {
+	case "start":
+		if err := platform.StartFocus(ctx, platform.DefaultConfig(), store, runner); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(output, "Windows focus mode active")
+		return err
+	case "status":
+		journal, loadErr := store.Load()
+		if errors.Is(loadErr, os.ErrNotExist) {
+			_, err = fmt.Fprintln(output, "Windows focus mode inactive")
+			return err
+		}
+		if loadErr != nil {
+			return loadErr
+		}
+		active := slices.ContainsFunc(journal.AppliedStages, func(stage string) bool { return strings.HasPrefix(stage, "focus:") })
+		state := "inactive"
+		if active {
+			state = "active"
+		}
+		_, err = fmt.Fprintf(output, "Windows focus mode %s\n", state)
+		return err
+	case "restore":
+		if err := platform.RestoreFocus(ctx, store, runner); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(output, "Windows focus mode restored")
+		return err
+	default:
+		return fmt.Errorf("unknown Windows focus action %q", args[0])
+	}
+}
+
+func runWindowsRestore(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) != 0 {
+		return errors.New("usage: myference windows restore")
+	}
+	store, err := platform.DefaultJournalStore()
+	if err != nil {
+		return err
+	}
+	if err := platform.RestoreProviderTuning(ctx, store, platform.NewNativeRunner()); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(output, "Windows provider host state restored")
+	return err
 }
 
 func runWindowsModels(ctx context.Context, args []string, output io.Writer) error {

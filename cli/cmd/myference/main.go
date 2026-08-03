@@ -358,7 +358,7 @@ func runLogin(ctx context.Context, args []string, output io.Writer, dependencies
 	return err
 }
 
-func runServe(ctx context.Context, path string, output io.Writer) error {
+func runServe(ctx context.Context, path string, output io.Writer) (resultErr error) {
 	stopPath := path + ".stop"
 	_ = os.Remove(stopPath)
 	serveContext, stopServing := context.WithCancel(ctx)
@@ -386,6 +386,19 @@ func runServe(ctx context.Context, path string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+	cleanupPlatform, err := startPlatformProviderSession(serveContext, cfg, output)
+	if err != nil {
+		return fmt.Errorf("prepare provider host: %w", err)
+	}
+	defer func() {
+		if cleanupErr := cleanupPlatform(); cleanupErr != nil {
+			if resultErr == nil {
+				resultErr = fmt.Errorf("restore provider host: %w", cleanupErr)
+			} else {
+				resultErr = fmt.Errorf("%v; restore provider host: %w", resultErr, cleanupErr)
+			}
+		}
+	}()
 	if err := preparePlatformBackends(serveContext, cfg); err != nil {
 		return fmt.Errorf("prepare provider backends: %w", err)
 	}

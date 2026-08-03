@@ -87,6 +87,11 @@ func (config Config) Validate() error {
 			return fmt.Errorf("service %q is protected and cannot be stopped", service)
 		}
 	}
+	for _, process := range config.StopProcesses {
+		if strings.EqualFold(trimExecutableSuffix(process), "explorer") {
+			return fmt.Errorf("Windows Explorer cannot be stopped by focus mode")
+		}
+	}
 	return nil
 }
 

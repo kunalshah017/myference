@@ -14,6 +14,10 @@ import (
 
 func preparePlatformBackends(context.Context, config.Config) error { return nil }
 
+func startPlatformProviderSession(context.Context, config.Config, io.Writer) (func() error, error) {
+	return func() error { return nil }, nil
+}
+
 func runPlatformCommand(string, []string, io.Writer) error {
 	return errors.New("service lifecycle commands require Windows or macOS")
 }
