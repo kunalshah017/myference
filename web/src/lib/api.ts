@@ -30,7 +30,7 @@ export class AuthAPI {
     return this.request<WalletChallenge>('/auth/wallet/challenge', { method: 'POST', body: { address } })
   }
 
-  session() { return this.request<Session>('/auth/session') }
+  session() { return this.request<Session | undefined>('/auth/session') }
 
   logout() { return this.request<void>('/auth/session', { method: 'DELETE' }) }
 

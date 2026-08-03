@@ -108,7 +108,7 @@ func TestWalletDeviceAndAPIKeyHTTPFlow(t *testing.T) {
 		t.Fatalf("expected revoked key rejection, got %v", err)
 	}
 	requestJSON[map[string]any](t, client, http.MethodDelete, server.URL+"/auth/session", nil, nil, http.StatusNoContent)
-	getJSON[map[string]any](t, client, server.URL+"/auth/session", nil, http.StatusUnauthorized)
+	requestJSON[map[string]any](t, client, http.MethodGet, server.URL+"/auth/session", nil, nil, http.StatusNoContent)
 }
 
 func TestWalletHTTPRejectsWrongOriginChainAndExpiredDevice(t *testing.T) {

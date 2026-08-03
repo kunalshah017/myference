@@ -53,6 +53,8 @@ beforeAll(async () => {
       } else if (request.url === '/auth/session' && request.method === 'DELETE') {
         loggedOut = true
         send(204)
+      } else if (request.url === '/auth/session' && request.method === 'GET') {
+        send(204)
       } else {
         send(404, { error: 'not found' })
       }
@@ -80,6 +82,10 @@ function wallet(chainId = '0x279f'): EIP1193Provider {
 }
 
 describe('account authentication', () => {
+  it('treats a signed-out session probe as empty state', async () => {
+    await expect(new AuthAPI(baseURL).session()).resolves.toBeUndefined()
+  })
+
   it('refuses an unsupported chain before requesting a challenge', async () => {
     render(<ConnectWallet api={new AuthAPI(baseURL)} provider={wallet('0x1')} />)
     await userEvent.click(screen.getByRole('button', { name: /connect wallet/i }))

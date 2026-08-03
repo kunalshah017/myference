@@ -158,6 +158,27 @@ func TestRelayURLUsesOutboundWebSocketEndpoint(t *testing.T) {
 	}
 }
 
+func TestServeWithReconnectSurvivesRelayRestart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	var output bytes.Buffer
+	err := serveWithReconnect(ctx, &output, time.Millisecond, time.Millisecond, func(context.Context) error {
+		calls++
+		if calls == 3 {
+			cancel()
+			return context.Canceled
+		}
+		return fmt.Errorf("relay restart %d", calls)
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	if got := strings.Count(output.String(), "relay disconnected"); got != 2 {
+		t.Fatalf("reconnect messages=%d output=%q", got, output.String())
+	}
+}
+
 func TestStatusJSONProvidesPlatformAttestationWithoutSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct", MachineID: "machine"}); err != nil {

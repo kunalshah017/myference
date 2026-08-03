@@ -124,10 +124,18 @@ func sessionSameSite(secure bool) http.SameSite {
 }
 
 func (h *httpHandler) session(w http.ResponseWriter, r *http.Request) {
-	session, ok := h.authenticate(w, r)
-	if ok {
-		writeJSON(w, SessionView{AccountID: session.AccountID, WalletAddress: session.WalletAddress, ExpiresAt: session.ExpiresAt}, http.StatusOK)
+	cookie, err := r.Cookie(browserSessionCookie)
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
+	session, err := h.service.AuthenticateBrowserSession(r.Context(), cookie.Value)
+	if err != nil {
+		h.clearSessionCookie(w)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, SessionView{AccountID: session.AccountID, WalletAddress: session.WalletAddress, ExpiresAt: session.ExpiresAt}, http.StatusOK)
 }
 
 func (h *httpHandler) sessionDelete(w http.ResponseWriter, r *http.Request, session BrowserSession) {
@@ -135,8 +143,12 @@ func (h *httpHandler) sessionDelete(w http.ResponseWriter, r *http.Request, sess
 		h.write(w, nil, err, 0)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: browserSessionCookie, Value: "", Path: "/", HttpOnly: true, Secure: h.config.SecureCookies, SameSite: sessionSameSite(h.config.SecureCookies), MaxAge: -1, Expires: time.Unix(1, 0)})
+	h.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *httpHandler) clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: browserSessionCookie, Value: "", Path: "/", HttpOnly: true, Secure: h.config.SecureCookies, SameSite: sessionSameSite(h.config.SecureCookies), MaxAge: -1, Expires: time.Unix(1, 0)})
 }
 
 func (h *httpHandler) deviceCreate(w http.ResponseWriter, r *http.Request) {

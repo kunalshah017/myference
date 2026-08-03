@@ -287,7 +287,41 @@ func runServe(ctx context.Context, path string, output io.Writer) error {
 	watchContext, stopWatching := context.WithCancel(serveContext)
 	defer stopWatching()
 	go watchBackendConfig(watchContext, path, daemon, output)
-	return daemon.Serve(serveContext)
+	return serveWithReconnect(serveContext, output, time.Second, 30*time.Second, daemon.Serve)
+}
+
+func serveWithReconnect(ctx context.Context, output io.Writer, initialDelay, maximumDelay time.Duration, serve func(context.Context) error) error {
+	if initialDelay <= 0 {
+		initialDelay = time.Second
+	}
+	if maximumDelay < initialDelay {
+		maximumDelay = initialDelay
+	}
+	delay := initialDelay
+	for {
+		err := serve(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if _, writeErr := fmt.Fprintf(output, "relay disconnected: %v; retrying in %s\n", err, delay); writeErr != nil {
+			return writeErr
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil
+		case <-timer.C:
+		}
+		if delay < maximumDelay {
+			delay *= 2
+			if delay > maximumDelay {
+				delay = maximumDelay
+			}
+		}
+	}
 }
 
 func watchStopRequest(ctx context.Context, stopPath string, stop context.CancelFunc) {

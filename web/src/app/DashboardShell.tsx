@@ -29,11 +29,11 @@ const navigation: { view: DashboardView; label: string; group: 'use' | 'host' }[
 
 const icons = { overview: Home, models: Cpu, playground: Bot, funds: CircleDollarSign, api: KeyRound, usage: ActivityIcon, hosting: Server, earnings: Banknote }
 
-export function DashboardShell() {
+export function DashboardShell({ initialView = 'overview' }: { initialView?: DashboardView }) {
   const api = useMemo(() => new AuthAPI(), [])
   const marketplace = useMemo(() => new MarketplaceAPI(), [])
   const [session, setSession] = useState<Session>()
-  const [view, setView] = useState<DashboardView>('overview')
+  const [view, setView] = useState<DashboardView>(initialView)
   const [routeState, setRouteState] = useState('')
   useEffect(() => { void api.session().then(setSession).catch(() => undefined) }, [api])
 
