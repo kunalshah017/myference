@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -76,6 +77,24 @@ func TestReferencePriceRejectsStaleOrUnavailableQuote(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/reference-price", nil))
 	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
+func TestReferencePriceFallsBackToFreshDefiLlamaQuote(t *testing.T) {
+	now := time.Unix(1_785_717_600, 0).UTC()
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+	}))
+	t.Cleanup(primary.Close)
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"coins":{"coingecko:monad":{"price":0.0208,"symbol":"MON","timestamp":%d,"confidence":0.99}}}`, now.Unix())
+	}))
+	t.Cleanup(fallback.Close)
+	handler := NewReferencePrice(ReferencePriceConfig{Endpoint: primary.URL, FallbackEndpoint: fallback.URL, HTTPClient: fallback.Client(), Now: func() time.Time { return now }})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/reference-price", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"source":"DefiLlama"`) {
 		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
 	}
 }

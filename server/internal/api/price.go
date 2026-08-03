@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"math/big"
 	"net/http"
@@ -12,13 +13,15 @@ import (
 )
 
 const coinGeckoMONPriceURL = "https://api.coingecko.com/api/v3/simple/price?ids=monad&vs_currencies=usd&include_last_updated_at=true"
+const defiLlamaMONPriceURL = "https://coins.llama.fi/prices/current/coingecko:monad"
 
 type ReferencePriceConfig struct {
-	Endpoint   string
-	HTTPClient *http.Client
-	CacheTTL   time.Duration
-	MaxAge     time.Duration
-	Now        func() time.Time
+	Endpoint         string
+	FallbackEndpoint string
+	HTTPClient       *http.Client
+	CacheTTL         time.Duration
+	MaxAge           time.Duration
+	Now              func() time.Time
 }
 
 type referencePrice struct {
@@ -39,6 +42,7 @@ type referencePriceHandler struct {
 func NewReferencePrice(config ReferencePriceConfig) http.Handler {
 	if config.Endpoint == "" {
 		config.Endpoint = coinGeckoMONPriceURL
+		config.FallbackEndpoint = defiLlamaMONPriceURL
 	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{Timeout: 5 * time.Second}
@@ -87,20 +91,41 @@ func (h *referencePriceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 }
 
 func (h *referencePriceHandler) fetch(r *http.Request, now time.Time) (referencePrice, error) {
-	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, h.config.Endpoint, nil)
+	quote, primaryErr := h.fetchCoinGecko(r, now)
+	if primaryErr == nil || h.config.FallbackEndpoint == "" {
+		return quote, primaryErr
+	}
+	quote, fallbackErr := h.fetchDefiLlama(r, now)
+	if fallbackErr != nil {
+		return referencePrice{}, fmt.Errorf("primary: %v; fallback: %v", primaryErr, fallbackErr)
+	}
+	return quote, nil
+}
+
+func (h *referencePriceHandler) request(r *http.Request, endpoint string) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, endpoint, nil)
 	if err != nil {
-		return referencePrice{}, err
+		return nil, err
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "Myference/0.1 (+https://github.com/kunalshah017/myference)")
 	response, err := h.config.HTTPClient.Do(request)
 	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		return nil, fmt.Errorf("price provider status %d", response.StatusCode)
+	}
+	return response, nil
+}
+
+func (h *referencePriceHandler) fetchCoinGecko(r *http.Request, now time.Time) (referencePrice, error) {
+	response, err := h.request(r, h.config.Endpoint)
+	if err != nil {
 		return referencePrice{}, err
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return referencePrice{}, errors.New("price provider unavailable")
-	}
 	decoder := json.NewDecoder(response.Body)
 	decoder.UseNumber()
 	var payload struct {
@@ -112,11 +137,41 @@ func (h *referencePriceHandler) fetch(r *http.Request, now time.Time) (reference
 	if err := decoder.Decode(&payload); err != nil {
 		return referencePrice{}, err
 	}
-	value := strings.TrimSpace(payload.Monad.USD.String())
+	return validateReferencePrice(strings.TrimSpace(payload.Monad.USD.String()), payload.Monad.LastUpdatedAt, "CoinGecko", now, h.config.MaxAge)
+}
+
+func (h *referencePriceHandler) fetchDefiLlama(r *http.Request, now time.Time) (referencePrice, error) {
+	response, err := h.request(r, h.config.FallbackEndpoint)
+	if err != nil {
+		return referencePrice{}, err
+	}
+	defer response.Body.Close()
+	decoder := json.NewDecoder(response.Body)
+	decoder.UseNumber()
+	var payload struct {
+		Coins map[string]struct {
+			Price      json.Number `json:"price"`
+			Symbol     string      `json:"symbol"`
+			Timestamp  int64       `json:"timestamp"`
+			Confidence json.Number `json:"confidence"`
+		} `json:"coins"`
+	}
+	if err := decoder.Decode(&payload); err != nil {
+		return referencePrice{}, err
+	}
+	coin := payload.Coins["coingecko:monad"]
+	confidence, _ := new(big.Rat).SetString(coin.Confidence.String())
+	if coin.Symbol != "MON" || confidence == nil || confidence.Cmp(big.NewRat(9, 10)) < 0 {
+		return referencePrice{}, errors.New("invalid price confidence")
+	}
+	return validateReferencePrice(strings.TrimSpace(coin.Price.String()), coin.Timestamp, "DefiLlama", now, h.config.MaxAge)
+}
+
+func validateReferencePrice(value string, timestamp int64, source string, now time.Time, maxAge time.Duration) (referencePrice, error) {
 	price, ok := new(big.Rat).SetString(value)
-	updated := time.Unix(payload.Monad.LastUpdatedAt, 0).UTC()
-	if !ok || price.Sign() <= 0 || payload.Monad.LastUpdatedAt <= 0 || updated.After(now.Add(time.Minute)) || now.Sub(updated) > h.config.MaxAge {
+	updated := time.Unix(timestamp, 0).UTC()
+	if !ok || price.Sign() <= 0 || timestamp <= 0 || updated.After(now.Add(time.Minute)) || now.Sub(updated) > maxAge {
 		return referencePrice{}, errors.New("invalid or stale price")
 	}
-	return referencePrice{Symbol: "MON", USDPerMON: value, Source: "CoinGecko", UpdatedAt: updated}, nil
+	return referencePrice{Symbol: "MON", USDPerMON: value, Source: source, UpdatedAt: updated}, nil
 }
