@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -199,6 +200,9 @@ func TestProductionDefaultsUseBrandedDomains(t *testing.T) {
 }
 
 func TestWindowsCommandsReachTheNativeDispatchBoundary(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("native Windows dispatch is compiled only on Windows")
+	}
 	err := run([]string{"windows", "focus"}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "focus <start|status|restore>") {
 		t.Fatalf("run(windows focus) error = %v, want focus usage", err)
@@ -210,6 +214,9 @@ func TestWindowsCommandsReachTheNativeDispatchBoundary(t *testing.T) {
 }
 
 func TestWindowsCommandRejectsLANAction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("native Windows dispatch is compiled only on Windows")
+	}
 	err := run([]string{"windows", "lan-check"}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "unknown Windows action") {
 		t.Fatalf("run(windows lan-check) error = %v, want unknown Windows action", err)

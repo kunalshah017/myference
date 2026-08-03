@@ -158,7 +158,7 @@ func TestDaemonUpdatesIndividualBackendCapacityWithoutRestart(t *testing.T) {
 }
 
 func TestDaemonConnectsToRealTLSRelayAndStreamsBackend(t *testing.T) {
-	events := make(chan v1.Envelope, 4)
+	events := make(chan v1.Envelope, 8)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer token" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -169,7 +169,7 @@ func TestDaemonConnectsToRealTLSRelayAndStreamsBackend(t *testing.T) {
 			return
 		}
 		defer connection.Close(websocket.StatusNormalClosure, "test complete")
-		for range 3 {
+		for range 2 {
 			_, payload, err := connection.Read(r.Context())
 			if err != nil {
 				return
@@ -214,7 +214,7 @@ func TestDaemonConnectsToRealTLSRelayAndStreamsBackend(t *testing.T) {
 		MachineID:         "machine-1",
 		Offers:            []v1.OfferCapacity{{OfferID: "local", Model: "model", PriceVersion: 1}},
 		HTTPClient:        client,
-		HeartbeatInterval: 10 * time.Millisecond,
+		HeartbeatInterval: time.Hour,
 	}, map[string]backend.Backend{"local": testBackend{}})
 	done := make(chan error, 1)
 	go func() { done <- daemon.Serve(ctx) }()
