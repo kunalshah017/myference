@@ -111,7 +111,7 @@ Expected: PASS.
 Replace the default Codex example with:
 
 ```powershell
-myference backend add --kind codex --name codex-cli --model gpt-5.3-codex
+myference backend add --kind codex --name codex-cli-terra --model gpt-5.6-terra
 ```
 
 Document `--image` plus `--secret` as the explicit legacy isolated-image form, state that native mode reuses local Codex login, and state that Myference blocks all Codex tools and workspace access.
@@ -122,31 +122,31 @@ Run: `go test ./...`, `go test -race ./cli/internal/backend/codex ./cli/internal
 
 Expected: PASS.
 
-### Task 4: Live Windows migration and release
+### Task 4: Live Windows installation, isolated acceptance, and release
 
 **Files:**
 - Modify outside repository through CLI: `%APPDATA%/myference/config.json`
 - Install outside repository: `%LOCALAPPDATA%/Programs/Myference/myference.exe`
 
 **Interfaces:**
-- Consumes: existing `gpt-5.3-codex` offer and laptop Codex login.
-- Produces: the same public offer backed by native `codex exec`, one healthy provider process, pushed `main`, and green CI.
+- Consumes: the laptop Codex login and the verified ChatGPT-supported `gpt-5.6-terra` model.
+- Produces: installed native Codex capability ready for a future published offer, the existing three OpenAI API offers served by one healthy provider process, pushed `main`, and green CI.
 
 - [ ] **Step 1: Build and install the tested CLI**
 
 Build `./cli/cmd/myference`, stop the Scheduled Task, restore any confirmed stale provider recovery journal, replace the installed executable after hash verification, and restart exactly one task process.
 
-- [ ] **Step 2: Migrate the existing offer in place**
+- [ ] **Step 2: Remove unsupported and unpublished live offers**
 
-Run `myference backend add --replace --kind codex --name gpt-5.3-codex --model gpt-5.3-codex --price-version 1` and restart the provider once.
+Permanently remove unsupported API-only and unpublished native Codex entries with `myference backend remove --name <offer>`, then restart the provider once. Keep only the three currently published OpenAI API offers enabled. Add `codex-cli-terra` later, after its matching pricing offer is published.
 
 - [ ] **Step 3: Execute live text-only and adversarial requests**
 
-Run a harmless `Reply with exactly: ok` request and require nonzero input/output usage. Run a prompt demanding a shell command and require provider failure, a recorded tool-attempt marker, and no command output delivered to the client.
+Exercise the native runner outside the advertised production config. Run a harmless `Reply with exactly: ok` request and require nonzero input/output usage. Run a prompt demanding a shell command and require no tool execution or command output delivered to the client.
 
 - [ ] **Step 4: Verify provider health**
 
-Require relay connected, all enabled offers healthy after a successful Codex request, Scheduled Task `Running`, exactly one `myference.exe`, and no leftover Codex job directories or authentication files outside the private provider home.
+Require relay connected with exactly the three published OpenAI API offers healthy, Scheduled Task `Running`, exactly one `myference.exe`, and no leftover Codex job directories or authentication files outside the private provider home.
 
 - [ ] **Step 5: Commit, rebase, push, and monitor CI**
 

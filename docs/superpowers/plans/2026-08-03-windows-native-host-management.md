@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the existing multi-backend provider daemon own safe Windows host preparation and recovery while preserving on-demand `backend add|start|stop` behavior and removing obsolete legacy gateway code only after real acceptance.
+**Goal:** Make the existing multi-backend provider daemon own safe Windows host preparation and recovery while preserving on-demand `backend add|start|stop|remove` behavior and removing obsolete legacy gateway code only after real acceptance.
 
 **Architecture:** The shared `config.Config.Backends` list remains the only source of backend/model truth. One `serve` process advertises every enabled backend as a separate offer, prepares enabled local Ollama models before initial or live capacity publication, applies one journaled Windows tuning session around the daemon, and restores it on shutdown. Windows-only doctor, status, dashboard, focus, headless, and emergency recovery commands are adapters around that same provider lifecycle; none create a LAN listener or separate provider service.
 
@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - One `serve` process owns every enabled backend on the laptop; Windows must not create one service per backend.
-- `backend add|list|start|stop|version` and the shared provider config remain cross-platform and authoritative.
+- `backend add|list|start|stop|remove|version` and the shared provider config remain cross-platform and authoritative.
 - An enabled backend is never advertised until discovery and platform preparation succeed; a failed live reload retains the last good daemon capacity.
 - Windows host policy contains no backend name, model, credential, price, LAN, firewall, endpoint-discovery, or listener fields.
 - Provider tuning is applied once per `serve` session and restored on every graceful exit path.

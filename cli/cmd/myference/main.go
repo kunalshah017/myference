@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/kunalshah017/myference/cli/internal/account"
 	"github.com/kunalshah017/myference/cli/internal/backend"
+	codexbackend "github.com/kunalshah017/myference/cli/internal/backend/codex"
 	commandbackend "github.com/kunalshah017/myference/cli/internal/backend/command"
 	"github.com/kunalshah017/myference/cli/internal/backend/ollama"
 	openaiBackend "github.com/kunalshah017/myference/cli/internal/backend/openai"
@@ -111,6 +112,11 @@ func run(args []string, output io.Writer) error {
 		return runPlatformCommand("service", args[1:], output)
 	case "windows":
 		return runPlatformCommand("windows", args[1:], output)
+	case "internal":
+		if len(args) == 2 && args[1] == "codex-deny-tool" {
+			return runCodexDenyTool(os.Stdin, output)
+		}
+		return errors.New("unknown internal command")
 	case "stop", "legacy-start", "legacy-stop", "legacy-status":
 		return runPlatformCommand(args[0], args[1:], output)
 	default:
@@ -615,10 +621,28 @@ func relayURL(serverURL string) (string, error) {
 }
 
 func runBackend(args []string, output io.Writer) error {
-	return runBackendWithCredentials(args, output, credential.Save)
+	return runBackendWithDependencies(args, output, defaultBackendCommandDependencies())
 }
 
 func runBackendWithCredentials(args []string, output io.Writer, saveCredential func(string, string, string) error) error {
+	dependencies := defaultBackendCommandDependencies()
+	dependencies.SaveCredential = saveCredential
+	return runBackendWithDependencies(args, output, dependencies)
+}
+
+type backendCommandDependencies struct {
+	SaveCredential   func(string, string, string) error
+	DeleteCredential func(string, string) error
+	NewNativeCodex   func(string, time.Duration) (backend.Backend, error)
+}
+
+func defaultBackendCommandDependencies() backendCommandDependencies {
+	return backendCommandDependencies{SaveCredential: credential.Save, DeleteCredential: credential.Delete, NewNativeCodex: func(model string, timeout time.Duration) (backend.Backend, error) {
+		return codexbackend.New(model, timeout)
+	}}
+}
+
+func runBackendWithDependencies(args []string, output io.Writer, dependencies backendCommandDependencies) error {
 	if len(args) == 0 {
 		return errors.New("backend command is required")
 	}
@@ -632,10 +656,17 @@ func runBackendWithCredentials(args []string, output io.Writer, saveCredential f
 	kind := flags.String("kind", "ollama", "backend kind: ollama, openai, codex, claude, or kimi")
 	image := flags.String("image", "", "pinned Docker image containing the command agent")
 	secret := flags.String("secret", "", "backend credential stored in the OS credential vault")
-	priceVersion := flags.Uint64("price-version", 1, "published Monad offer version")
+	priceVersion := flags.Uint64("price-version", 0, "published Monad offer version")
+	replace := flags.Bool("replace", false, "replace an existing backend with the same name")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
+	priceVersionSet := false
+	flags.Visit(func(item *flag.Flag) {
+		if item.Name == "price-version" {
+			priceVersionSet = true
+		}
+	})
 	cfg, err := config.Load(*path)
 	if err != nil {
 		return err
@@ -649,6 +680,10 @@ func runBackendWithCredentials(args []string, output io.Writer, saveCredential f
 		if !supported[*kind] {
 			return errors.New("unsupported backend kind")
 		}
+		existingIndex := slices.IndexFunc(cfg.Backends, func(item config.Backend) bool { return item.Name == *name })
+		if existingIndex >= 0 && !*replace {
+			return errors.New("backend name already exists; use --replace to migrate it explicitly")
+		}
 		switch *kind {
 		case "ollama":
 			if _, err := ollama.New(*endpoint, nil); err != nil {
@@ -658,6 +693,32 @@ func runBackendWithCredentials(args []string, output io.Writer, saveCredential f
 			if _, err := openaiBackend.New(*endpoint, *secret, nil); err != nil {
 				return err
 			}
+		case "codex":
+			if *image == "" {
+				if *secret != "" {
+					return errors.New("native Codex uses the existing Codex CLI login; omit --secret")
+				}
+				if dependencies.NewNativeCodex == nil {
+					return errors.New("native Codex backend is unavailable")
+				}
+				client, err := dependencies.NewNativeCodex(*model, 2*time.Minute)
+				if err != nil {
+					return err
+				}
+				validationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, err = client.Models(validationCtx)
+				cancel()
+				if err != nil {
+					return err
+				}
+			} else {
+				if *secret == "" {
+					return errors.New("--secret is required with a pinned Codex --image")
+				}
+				if _, err := commandbackend.New(*image, commandArguments(*kind, *model), *kind, *model, *secret, 2*time.Minute); err != nil {
+					return err
+				}
+			}
 		default:
 			if *secret == "" || *image == "" {
 				return errors.New("--secret and a pinned --image are required for isolated command agents")
@@ -666,25 +727,44 @@ func runBackendWithCredentials(args []string, output io.Writer, saveCredential f
 				return err
 			}
 		}
-		if slices.ContainsFunc(cfg.Backends, func(item config.Backend) bool { return item.Name == *name }) {
-			return errors.New("backend name already exists")
+		effectivePriceVersion := *priceVersion
+		if existingIndex >= 0 && !priceVersionSet {
+			effectivePriceVersion = cfg.Backends[existingIndex].PriceVersion
 		}
-		if *priceVersion == 0 {
-			return errors.New("--price-version must be positive")
+		if effectivePriceVersion == 0 {
+			effectivePriceVersion = 1
 		}
-		item := config.Backend{Name: *name, Kind: *kind, Model: *model, PriceVersion: *priceVersion, Enabled: true, Image: *image}
+		item := config.Backend{Name: *name, Kind: *kind, Model: *model, PriceVersion: effectivePriceVersion, Enabled: true, Image: *image}
 		if *kind == "ollama" || *kind == "openai" {
 			item.URL = *endpoint
 		}
-		cfg.Backends = append(cfg.Backends, item)
-		if *kind != "ollama" {
-			if saveCredential == nil {
+		var deleteCredentialAccount string
+		if existingIndex >= 0 {
+			previous := cfg.Backends[existingIndex]
+			cfg.Backends[existingIndex] = item
+			if backendUsesCredential(previous.Kind, previous.Image) && !backendUsesCredential(item.Kind, item.Image) {
+				deleteCredentialAccount = cfg.MachineID + "/" + item.Name
+			}
+		} else {
+			cfg.Backends = append(cfg.Backends, item)
+		}
+		if backendUsesCredential(item.Kind, item.Image) {
+			if dependencies.SaveCredential == nil {
 				return errors.New("credential store unavailable")
 			}
-			if err := saveCredential(backendCredentialService, cfg.MachineID+"/"+*name, *secret); err != nil {
+			if err := dependencies.SaveCredential(backendCredentialService, cfg.MachineID+"/"+*name, *secret); err != nil {
 				return fmt.Errorf("store backend credential: %w", err)
 			}
 		}
+		if err := config.Save(*path, cfg); err != nil {
+			return err
+		}
+		if deleteCredentialAccount != "" && dependencies.DeleteCredential != nil {
+			if err := dependencies.DeleteCredential(backendCredentialService, deleteCredentialAccount); err != nil {
+				return fmt.Errorf("remove obsolete backend credential: %w", err)
+			}
+		}
+		return nil
 	case "start", "stop":
 		found := false
 		for i := range cfg.Backends {
@@ -696,6 +776,28 @@ func runBackendWithCredentials(args []string, output io.Writer, saveCredential f
 		if !found {
 			return errors.New("backend not found")
 		}
+	case "remove":
+		if *name == "" {
+			return errors.New("--name is required")
+		}
+		index := slices.IndexFunc(cfg.Backends, func(item config.Backend) bool { return item.Name == *name })
+		if index < 0 {
+			return errors.New("backend not found")
+		}
+		removed := cfg.Backends[index]
+		if backendUsesCredential(removed.Kind, removed.Image) && dependencies.DeleteCredential == nil {
+			return errors.New("credential store unavailable")
+		}
+		cfg.Backends = slices.Delete(cfg.Backends, index, index+1)
+		if err := config.Save(*path, cfg); err != nil {
+			return err
+		}
+		if backendUsesCredential(removed.Kind, removed.Image) {
+			if err := dependencies.DeleteCredential(backendCredentialService, cfg.MachineID+"/"+removed.Name); err != nil {
+				return fmt.Errorf("remove backend credential: %w", err)
+			}
+		}
+		return nil
 	case "version":
 		if *priceVersion == 0 {
 			return errors.New("--price-version must be positive")
@@ -725,10 +827,14 @@ func runBackendWithCredentials(args []string, output io.Writer, saveCredential f
 	return config.Save(*path, cfg)
 }
 
+func backendUsesCredential(kind, image string) bool {
+	return kind == "openai" || kind == "claude" || kind == "kimi" || (kind == "codex" && image != "")
+}
+
 func commandArguments(kind, model string) []string {
 	switch kind {
 	case "codex":
-		return []string{"exec", "--ephemeral", "--sandbox", "read-only", "--ask-for-approval", "never", "--skip-git-repo-check", "--model", model, "-"}
+		return []string{"exec", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--model", model, "-"}
 	case "claude":
 		return []string{"-p", "--model", model}
 	case "kimi":
@@ -739,6 +845,12 @@ func commandArguments(kind, model string) []string {
 }
 
 func configuredBackend(item config.Backend, machineID string, loadCredential func(string, string) (string, error)) (backend.Backend, error) {
+	return configuredBackendWithNative(item, machineID, loadCredential, func(model string, timeout time.Duration) (backend.Backend, error) {
+		return codexbackend.New(model, timeout)
+	})
+}
+
+func configuredBackendWithNative(item config.Backend, machineID string, loadCredential func(string, string) (string, error), newNativeCodex func(string, time.Duration) (backend.Backend, error)) (backend.Backend, error) {
 	switch item.Kind {
 	case "ollama":
 		return ollama.New(item.URL, nil)
@@ -748,7 +860,19 @@ func configuredBackend(item config.Backend, machineID string, loadCredential fun
 			return nil, fmt.Errorf("load backend credential: %w", err)
 		}
 		return openaiBackend.New(item.URL, secret, nil)
-	case "codex", "claude", "kimi":
+	case "codex":
+		if item.Image == "" {
+			if newNativeCodex == nil {
+				return nil, errors.New("native Codex backend is unavailable")
+			}
+			return newNativeCodex(item.Model, 2*time.Minute)
+		}
+		secret, err := loadCredential(backendCredentialService, machineID+"/"+item.Name)
+		if err != nil {
+			return nil, fmt.Errorf("load backend credential: %w", err)
+		}
+		return commandbackend.New(item.Image, commandArguments(item.Kind, item.Model), item.Kind, item.Model, secret, 2*time.Minute)
+	case "claude", "kimi":
 		secret, err := loadCredential(backendCredentialService, machineID+"/"+item.Name)
 		if err != nil {
 			return nil, fmt.Errorf("load backend credential: %w", err)
@@ -757,6 +881,24 @@ func configuredBackend(item config.Backend, machineID string, loadCredential fun
 	default:
 		return nil, fmt.Errorf("unsupported backend kind %q", item.Kind)
 	}
+}
+
+func runCodexDenyTool(input io.Reader, output io.Writer) error {
+	marker := strings.TrimSpace(os.Getenv("MYFERENCE_CODEX_TOOL_MARKER"))
+	if marker == "" {
+		return errors.New("Codex tool marker is not configured")
+	}
+	raw, err := io.ReadAll(io.LimitReader(input, (1<<20)+1))
+	if err != nil {
+		return err
+	}
+	if len(raw) > 1<<20 {
+		return errors.New("Codex tool hook input is too large")
+	}
+	if err := os.WriteFile(marker, []byte("blocked"), 0o600); err != nil {
+		return err
+	}
+	return json.NewEncoder(output).Encode(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Myference model-only provider blocks all Codex tools."}})
 }
 
 func printCapacity(ctx context.Context, path string, output io.Writer) error {
@@ -801,15 +943,16 @@ func offerCapacity(item config.Backend, discovered backend.Model) v1.OfferCapaci
 	if version == 0 {
 		version = 1
 	}
+	commandAgent := item.Kind == "claude" || item.Kind == "kimi" || (item.Kind == "codex" && item.Image != "")
 	capabilities := []string{"stream", "text"}
-	if item.Kind == "codex" || item.Kind == "claude" || item.Kind == "kimi" {
+	if commandAgent {
 		capabilities = append(capabilities, "workspace")
 	}
 	evidenceKind, evidenceDigest, meteringMode := "upstream_model", discovered.Name, "tokens_and_compute"
 	if item.Kind == "ollama" {
 		evidenceKind, evidenceDigest = "ollama_digest", discovered.Digest
 	}
-	if item.Kind == "codex" || item.Kind == "claude" || item.Kind == "kimi" {
+	if commandAgent {
 		evidenceKind, evidenceDigest, meteringMode = "runtime_image", strings.TrimPrefix(item.Image[strings.LastIndex(item.Image, "@")+1:], "@"), "compute_only"
 	}
 	return v1.OfferCapacity{OfferID: item.Name, Model: item.Model, PriceVersion: version, BackendKind: item.Kind, OfferHash: crypto.Keccak256Hash([]byte(item.Name)).Hex(), ModelHash: crypto.Keccak256Hash([]byte(item.Model)).Hex(), CapabilityHash: crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex(), Capabilities: capabilities, EvidenceKind: evidenceKind, EvidenceDigest: evidenceDigest, MeteringMode: meteringMode}

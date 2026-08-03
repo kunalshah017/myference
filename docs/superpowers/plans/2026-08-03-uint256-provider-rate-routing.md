@@ -206,8 +206,8 @@ Push `main` to `origin`, inspect the resulting GitHub checks until complete, and
 
 - [ ] **Step 5: Verify the live provider and marketplace**
 
-Confirm the `Myference Provider` scheduled task remains running in normal mode, broker connectivity is healthy, and all four configured models are healthy. Poll the public marketplace until `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, and `gpt-5.3-codex` appear with their exact rates. If deployment is asynchronous, continue monitoring rather than switching to headless mode or republishing offers.
+Confirm the `Myference Provider` scheduled task remains running in normal mode, broker connectivity is healthy, and the three currently published OpenAI API offers are healthy. Poll the public marketplace until `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` appear with their exact rates. Do not advertise a native Codex entry until its matching pricing offer has been published.
 
 - [ ] **Step 6: Report evidence**
 
-Report pushed commit IDs, test/CI results, deployed revision, normal provider task status, and the four public marketplace entries.
+Report pushed commit IDs, test/CI results, deployed revision, normal provider task status, and the three public marketplace entries.

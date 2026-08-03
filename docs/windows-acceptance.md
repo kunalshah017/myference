@@ -12,8 +12,17 @@ Run this checklist on the exact release commit and a physical Windows 11 AMD64 l
 
 - [ ] Two enabled laptop backends/models appear as distinct offers and both serve real broker requests.
 - [ ] `backend stop --name <one>` removes only that offer; `backend start` restores it without disconnecting the other provider.
+- [ ] `backend remove --name <one>` permanently deletes only that configured offer and removes its vault credential when applicable.
 - [ ] A failed model preload or invalid live config preserves the last good advertised capacity.
 - [ ] Relay interruption reconnects without losing accumulated local status counters.
+
+## Native Codex model-only provider
+
+- [ ] With `codex` installed and logged in, `backend add --kind codex --name codex-cli-terra --model gpt-5.6-terra` succeeds without Docker, `--image`, `--secret`, or an OpenAI API key.
+- [ ] A real native Codex request returns only final model text and reports nonzero input, output, and compute usage.
+- [ ] A prompt explicitly demanding shell, file, MCP, web, app, plugin, skill, or agent use fails with a local blocked-tool diagnostic and returns no tool output to the client.
+- [ ] The native Codex process uses the private Myference provider home and an empty disposable job directory; the user's normal config, projects, global skills, plugins, MCP servers, apps, and rules are not loaded.
+- [ ] Replacing an existing offer with `backend add --replace --kind codex` preserves its name and price version and removes only that offer's obsolete backend credential.
 
 ## Host controls and recovery
 

@@ -12,7 +12,7 @@ The normal marketplace path remains unchanged and outbound-only:
 myference host
 myference serve
 myference service install|start|stop|status|uninstall
-myference backend add|list|start|stop|version
+myference backend add|list|start|stop|remove|version
 ```
 
 One `serve` process owns every enabled backend on the laptop. Each enabled backend/model is advertised as a separate offer; `backend start|stop --name NAME` changes availability on demand through the existing live config reload and capacity heartbeat. Windows does not create a separate service per backend.
