@@ -19,6 +19,7 @@ $configPath = (Resolve-Path -LiteralPath $Config).Path
 $argument = if ($Headless) { 'windows headless run --config "{0}"' -f $configPath } else { 'serve --config "{0}"' -f $configPath }
 $action = New-ScheduledTaskAction -Execute $executablePath -Argument $argument
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+$runLevel = if ($Headless) { 'Highest' } else { 'Limited' }
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel $runLevel
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
