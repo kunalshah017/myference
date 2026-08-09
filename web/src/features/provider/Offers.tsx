@@ -1,57 +1,31 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Money } from '../../components/Money'
-import { computeMinuteUSDToWeiPerSecond, formatMON, isFreshReferencePrice, parseMON, usdToWei } from '../../lib/amount'
-import { ReferencePriceAPI, type OperationBackend, type OperationOffer, type ProviderActivation } from '../../lib/api'
-import type { MarketWriter, SubmittedTransaction, TransactionConfirmation } from '../../lib/marketContract'
+import { formatMON, parseMON } from '../../lib/amount'
+import type { EditableProviderOffer, ProviderActionInput } from '../../lib/api'
 
-function offerID(backend: OperationBackend): string {
-	if (backend.id.startsWith('activation:')) return backend.id.slice('activation:'.length)
-  const marker = backend.id.indexOf(':', 'backend:'.length)
-  return backend.id.startsWith('backend:') && marker >= 0 ? backend.id.slice(marker + 1) : backend.id
-}
-
-export function Offers({ offers, backends, writer, submit, activation, onActivationComplete }: { offers: OperationOffer[]; backends: OperationBackend[]; writer: MarketWriter; submit: (action:()=>Promise<SubmittedTransaction>)=>Promise<TransactionConfirmation | void>; activation?: ProviderActivation; onActivationComplete?:(versions:Record<string,number>)=>Promise<void> }) {
-  const priceAPI = useMemo(() => new ReferencePriceAPI(), [])
-  const quote = useQuery({ queryKey: ['reference-price'], queryFn: () => priceAPI.price(), staleTime: 60_000, retry: false })
-  const availableBackends = useMemo(() => {
-    const result = [...backends]
-    for (const offer of activation?.offers ?? []) if (!result.some((backend)=>offerID(backend)===offer.offer_id)) result.push({ id:`activation:${offer.offer_id}`, offer_hashes:[], kind:offer.kind, model:offer.model, enabled:true, healthy:false, capacity:0 })
-    return result
-  }, [activation, backends])
-  const [backendID,setBackendID]=useState(availableBackends[0]?.id ?? '')
-	const [activated,setActivated]=useState<{name:string;version:number}>()
-	const [activationVersions,setActivationVersions]=useState<Record<string,number>>({})
-  const [activationError,setActivationError]=useState('')
-  const [input,setInput]=useState(''); const [output,setOutput]=useState(''); const [compute,setCompute]=useState('')
-  const selected = availableBackends.find((backend) => backend.id === backendID) ?? availableBackends[0]
-	useEffect(()=>{if(!selected&&availableBackends[0])setBackendID(availableBackends[0].id)},[availableBackends,selected])
-	const activationOffer=selected?activation?.offers.find((offer)=>offer.offer_id===offerID(selected)):undefined
-  const computeOnly = activationOffer ? activationOffer.metering_mode==='compute_only' : selected ? ['codex','claude','kimi'].includes(selected.kind) : false
-	const freshQuote = isFreshReferencePrice(quote.data) ? quote.data : undefined
-  const rates = (() => { try {
-    if (!selected || !compute) return undefined
-    const computePerSecond = freshQuote ? computeMinuteUSDToWeiPerSecond(compute, freshQuote.usd_per_mon) : (parseMON(compute) + 59n) / 60n
-    return { inputPerMillion: computeOnly ? 0n : freshQuote ? usdToWei(input, freshQuote.usd_per_mon) : parseMON(input), outputPerMillion: computeOnly ? 0n : freshQuote ? usdToWei(output, freshQuote.usd_per_mon) : parseMON(output), computePerSecond }
-  } catch { return undefined } })()
-  const publish=async(event:FormEvent)=>{event.preventDefault();if(!selected||!rates) return;setActivationError('');const capabilities=activationOffer?.capabilities??['text','stream'];if(!activationOffer&&computeOnly)capabilities.push('workspace');try{const confirmation=await submit(()=>writer.publishOffer({offerID:offerID(selected),model:selected.model,capabilities,inputPerMillion:rates.inputPerMillion,outputPerMillion:rates.outputPerMillion,computePerSecond:rates.computePerSecond}));if(!confirmation?.offerVersion){setActivationError('Published offer version could not be confirmed from Monad.');return}const name=offerID(selected);setActivated({name,version:confirmation.offerVersion});const versions={...activationVersions,[name]:confirmation.offerVersion};setActivationVersions(versions);if(activation&&onActivationComplete&&activation.offers.every((offer)=>versions[offer.offer_id]>0))await onActivationComplete(versions)}catch(reason){setActivationError(reason instanceof Error?reason.message:'Offer publication failed.')}}
-  const unit = freshQuote ? 'USD' : 'MON'
-  return <section className="provider-card offer-operations" aria-labelledby="offers-title">
-    <div className="provider-card-heading"><div><p className="eyebrow">Pricing</p><h3 id="offers-title">Activate a discovered backend</h3></div><span className="version-count">{offers.length} version{offers.length===1?'':'s'}</span></div>
-	{activation&&<div className="activation-handoff" role="status"><strong>Terminal setup in progress</strong><span>Publish {activation.offers.length} selected offer{activation.offers.length===1?'':'s'} here. The CLI will continue automatically.</span></div>}
-    <p className="provider-card-copy">Choose a backend reported by your CLI. Myference fills in its exact model and offer identity.</p>
-    {offers.length>0&&<div className="offer-history"><strong>Published versions</strong><ul>{offers.map((offer)=><li key={`${offer.offer_id}:${offer.version}`}><code>{offer.offer_id}</code><strong>Version {offer.version}</strong><span><Money wei={offer.input_per_million_wei}/> input · <Money wei={offer.output_per_million_wei}/> output · <Money wei={offer.compute_per_second_wei}/> compute</span></li>)}</ul></div>}
-    {availableBackends.length===0?<div className="dashboard-empty"><strong>No CLI backend discovered</strong><p>Run <code>myference</code> on the machine first.</p></div>:<form className="offer-form" onSubmit={(event)=>void publish(event)}>
-      <div className="provider-field"><label htmlFor="offer-backend">Backend and model</label><select id="offer-backend" value={selected?.id ?? ''} onChange={(event)=>setBackendID(event.target.value)}>{availableBackends.map((backend)=><option key={backend.id} value={backend.id}>{backend.kind} · {backend.model} · {backend.healthy?'online':'selected in terminal'}</option>)}</select><small>Detected by the connected provider CLI. No model name to copy.</small></div>
-      <fieldset><legend>Usage pricing</legend><p className="provider-note">Enter {unit} targets. {freshQuote?`Converted using 1 MON = $${freshQuote.usd_per_mon}; the MON result is locked on-chain.`:'The live USD quote is unavailable, so enter MON rates directly.'}</p><div className="provider-field-grid provider-pricing-grid">
-        <div className="provider-field"><label htmlFor="offer-input">Input tokens</label><div className="input-with-unit"><input id="offer-input" inputMode="decimal" aria-describedby="offer-input-help" value={input} onChange={(event)=>setInput(event.target.value)} disabled={computeOnly} required={!computeOnly}/><span>{unit} / 1M</span></div><small id="offer-input-help">{computeOnly?'CLI agents use compute-only pricing.':`${unit} for one million input tokens.`}</small></div>
-        <div className="provider-field"><label htmlFor="offer-output">Output tokens</label><div className="input-with-unit"><input id="offer-output" inputMode="decimal" aria-describedby="offer-output-help" value={output} onChange={(event)=>setOutput(event.target.value)} disabled={computeOnly} required={!computeOnly}/><span>{unit} / 1M</span></div><small id="offer-output-help">{computeOnly?'CLI agents use compute-only pricing.':`${unit} for one million output tokens.`}</small></div>
-        <div className="provider-field"><label htmlFor="offer-compute">Compute time</label><div className="input-with-unit"><input id="offer-compute" inputMode="decimal" aria-describedby="offer-compute-help" value={compute} onChange={(event)=>setCompute(event.target.value)} required/><span>{unit} / min</span></div><small id="offer-compute-help">{unit} for each minute of measured compute.</small></div>
-      </div></fieldset>
-      {rates&&<div className="price-preview" role="status"><strong>Locked on-chain rates</strong><span>{formatMON(rates.inputPerMillion)} / 1M input</span><span>{formatMON(rates.outputPerMillion)} / 1M output</span><span>{formatMON(rates.computePerSecond)} / compute second</span></div>}
-      <div className="provider-form-footer"><p>Publishing creates a new immutable on-chain price version.</p><button type="submit" disabled={!rates}>Publish offer</button></div>
-	  {activated && <p className="provider-note" role="status">{activation?`Published ${Object.keys(activationVersions).length} of ${activation.offers.length} selected offers. The terminal will continue when all are ready.`:<>Activate published version {activated.version} on the provider machine: <code>myference backend version --name {activated.name} --price-version {activated.version}</code>. The running daemon reloads it automatically.</>}</p>}
-	  {activationError && <p role="alert" className="inline-error">{activationError}</p>}
-    </form>}
-  </section>
+export function Offers({ offers, publish }: { offers: EditableProviderOffer[]; publish: (input: ProviderActionInput) => Promise<void> }) {
+  const [offerID, setOfferID] = useState(offers[0]?.offer_id ?? '')
+  const [input, setInput] = useState('')
+  const [output, setOutput] = useState('')
+  const [compute, setCompute] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const selected = useMemo(() => offers.find((offer) => offer.offer_id === offerID) ?? offers[0], [offerID, offers])
+  useEffect(() => {
+    if (!selected) return
+    setOfferID(selected.offer_id)
+    setInput(formatMON(BigInt(selected.input_per_million_wei)).replace(' MON', ''))
+    setOutput(formatMON(BigInt(selected.output_per_million_wei)).replace(' MON', ''))
+    setCompute(formatMON(BigInt(selected.compute_per_second_wei)).replace(' MON', ''))
+  }, [selected])
+  const rates = (() => { try { return selected ? { input: selected.metering_mode === 'compute_only' ? 0n : parseMON(input), output: selected.metering_mode === 'compute_only' ? 0n : parseMON(output), compute: parseMON(compute) } : undefined } catch { return undefined } })()
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!selected || !rates) return
+    setBusy(true); setError('')
+    try {
+      await publish({ kind: 'publish_offer', offers: [{ offer_id: selected.offer_id, model: selected.model, kind: selected.backend_kind, capabilities: selected.capabilities, metering_mode: selected.metering_mode, input_per_million_wei: rates.input.toString(), output_per_million_wei: rates.output.toString(), compute_per_second_wei: rates.compute.toString() }] })
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Offer repricing failed.') } finally { setBusy(false) }
+  }
+  return <section className="provider-card offer-operations" aria-labelledby="offers-title"><div className="provider-card-heading"><div><p className="eyebrow">Pricing</p><h3 id="offers-title">Reprice an existing CLI offer</h3></div><span className="version-count">{offers.length} offer{offers.length === 1 ? '' : 's'}</span></div><p className="provider-card-copy">New offers and model identities are created only in the Myference CLI. Here you can publish a new immutable price version for an existing offer.</p>{offers.length === 0 ? <div className="dashboard-empty"><strong>No published CLI offers</strong><p>Run <code>myference</code> to configure a provider and publish its first offer.</p></div> : <form className="offer-form" onSubmit={(event) => void submit(event)}><div className="provider-field"><label htmlFor="existing-offer">Existing offer</label><select id="existing-offer" value={selected?.offer_id ?? ''} onChange={(event) => setOfferID(event.target.value)}>{offers.map((offer) => <option key={offer.offer_id} value={offer.offer_id}>{offer.offer_id} · {offer.model} · v{offer.version}</option>)}</select><small>The model, backend, capabilities, and metering identity cannot be changed here.</small></div><div className="offer-history"><strong>Current indexed version</strong><ul><li><code>{selected?.offer_id}</code><strong>Version {selected?.version}</strong><span><Money wei={selected?.input_per_million_wei ?? '0'}/> input · <Money wei={selected?.output_per_million_wei ?? '0'}/> output · <Money wei={selected?.compute_per_second_wei ?? '0'}/> compute</span></li></ul></div><fieldset><legend>New MON rates</legend><div className="provider-field-grid provider-pricing-grid"><div className="provider-field"><label htmlFor="offer-input">Input tokens</label><div className="input-with-unit"><input id="offer-input" inputMode="decimal" value={input} onChange={(event) => setInput(event.target.value)} disabled={selected?.metering_mode === 'compute_only'} required={selected?.metering_mode !== 'compute_only'}/><span>MON / 1M</span></div></div><div className="provider-field"><label htmlFor="offer-output">Output tokens</label><div className="input-with-unit"><input id="offer-output" inputMode="decimal" value={output} onChange={(event) => setOutput(event.target.value)} disabled={selected?.metering_mode === 'compute_only'} required={selected?.metering_mode !== 'compute_only'}/><span>MON / 1M</span></div></div><div className="provider-field"><label htmlFor="offer-compute">Compute time</label><div className="input-with-unit"><input id="offer-compute" inputMode="decimal" value={compute} onChange={(event) => setCompute(event.target.value)} required/><span>MON / sec</span></div></div></div></fieldset><div className="provider-form-footer"><p>Only the exact rates above are sent to your wallet.</p><button type="submit" disabled={!rates || busy}>{busy ? 'Waiting for confirmation…' : 'Publish price version'}</button></div>{error && <p role="alert" className="inline-error">{error}</p>}</form>}</section>
 }

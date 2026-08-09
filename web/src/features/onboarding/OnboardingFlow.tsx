@@ -4,7 +4,6 @@ import { Check, ChevronRight, Cpu, RefreshCw, Server, WalletCards } from 'lucide
 import { formatUnits } from 'viem'
 import { ConnectWallet } from '../auth/ConnectWallet'
 import { DeviceApproval } from '../auth/DeviceApproval'
-import { ProviderConsole } from '../provider/ProviderConsole'
 import { Money } from '../../components/Money'
 import { parseMON } from '../../lib/amount'
 import { injectedProvider } from '../../lib/chain'
@@ -170,7 +169,7 @@ export function OnboardingFlow({ session, initialRole, authAPI: suppliedAuth, op
         : loading ? <div className="dashboard-empty" role="status"><strong>Reading your account state…</strong><p>Checking Monad Testnet and the Myference indexer.</p></div>
         : operations.isError ? <section className="onboarding-step"><p className="eyebrow">Account state</p><h1>Try the indexer again</h1><p role="alert">Your account state could not be loaded. No transaction was sent.</p><button type="button" onClick={() => void operations.refetch()}><RefreshCw size={16} aria-hidden="true" /> Retry account state</button></section>
         : role === 'consumer' ? <ConsumerSteps models={models} selectedModel={selectedModel} modelName={modelName} setModelName={setModelName} inventoryError={inventory.isError} refreshInventory={() => void inventory.refetch()} operationsError={operations.isError} operations={operations.data} keys={keys.data ?? []} keySecret={keySecret} recommended={recommended} usdPerMON={price.data?.usd_per_mon} depositAmount={depositAmount} setDepositAmount={setDepositAmount} deposit={deposit} sessionAllowance={sessionAllowance} setSessionAllowance={setSessionAllowance} openSession={openSession} keyMaximum={keyMaximum} setKeyMaximum={setKeyMaximum} createKey={createKey} prompt={prompt} setPrompt={setPrompt} infer={infer} answer={answer} progress={consumerProgress} finish={onSkip} />
-        : <ProviderSteps authAPI={authAPI} operationsAPI={operationsAPI} operations={operations.data} writer={marketWriter} progress={providerProgress} finish={onSkip} />}
+		: <ProviderSteps authAPI={authAPI} progress={providerProgress} finish={onSkip} />}
         <TransactionStatus status={status} error={error} />
       </main>
     </div>
@@ -225,14 +224,13 @@ function ConsumerSteps(props: ConsumerProps) {
   </>
 }
 
-function ProviderSteps({ authAPI, operationsAPI, operations, writer, progress, finish }: { authAPI: AuthAPI; operationsAPI: OperationsAPI; operations?: Awaited<ReturnType<OperationsAPI['operations']>>; writer?: MarketWriter; progress: OnboardingProgress; finish?: () => void }) {
+function ProviderSteps({ authAPI, progress, finish }: { authAPI: AuthAPI; progress: OnboardingProgress; finish?: () => void }) {
   const windows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
   const install = windows ? 'irm https://myference.xyz/install.ps1 | iex' : 'curl -fsSL https://myference.xyz/install.sh | sh'
   const next = progress.next?.id
-  if (!operations) return <div className="dashboard-empty" role="status"><strong>Loading provider account…</strong></div>
   return <>
-    {next === 'machine' && <section className="onboarding-step"><p className="eyebrow">Connect a machine</p><h1>Turn this computer into a provider</h1><p>Install the CLI, then start the guided host command. It discovers the backend and opens a browser device code for this account.</p><div className="onboarding-command"><span>{windows ? 'Windows PowerShell' : 'macOS / Linux'}</span><code>{install}</code></div><div className="onboarding-command"><span>Configure and run</span><code>myference host</code></div><div className="onboarding-command"><span>Keep it running after restart</span><code>myference service install</code></div><DeviceApproval api={authAPI} /></section>}
-    {(next === 'bond' || next === 'offer') && <section className="onboarding-step onboarding-provider-console"><p className="eyebrow">{next === 'bond' ? 'Collateral' : 'Publish and activate'}</p><h1>{next === 'bond' ? 'Back your provider' : 'Put the discovered model live'}</h1><p>{next === 'bond' ? 'Collateral remains yours unless a proven serving violation is slashed.' : 'Set readable rates, publish the immutable version on Monad, then run the displayed CLI sync command.'}</p><ProviderConsole api={operationsAPI} writer={writer} /></section>}
+	{next === 'machine' && <section className="onboarding-step"><p className="eyebrow">Open the terminal UI</p><h1>Turn this computer into a provider</h1><p>Install and run Myference. The terminal discovers local models and installed AI CLIs, then opens a short browser sign-in when wallet approval is needed.</p><div className="onboarding-command"><span>{windows ? 'Windows PowerShell' : 'macOS / Linux'}</span><code>{install}</code></div><div className="onboarding-command"><span>Guided provider setup</span><code>myference</code></div><DeviceApproval api={authAPI} /></section>}
+	{(next === 'bond' || next === 'offer') && <section className="onboarding-step"><p className="eyebrow">Continue in the terminal</p><h1>{next === 'bond' ? 'Back your provider from the CLI' : 'Publish and start from the CLI'}</h1><p>Run <code>myference</code> to open the terminal UI. It guides collateral, pricing, wallet approval, and hosting without requiring this dashboard.</p><div className="onboarding-command"><span>Interactive provider control plane</span><code>myference</code></div></section>}
     {progress.complete && <section className="onboarding-step onboarding-complete"><Check aria-hidden="true" /><p className="eyebrow">Provider live</p><h1>Your machine can receive requests</h1><p>Keep the daemon running. Capacity, requests, settlement, earnings, and slashing remain visible in the hosting dashboard.</p>{finish && <button type="button" onClick={finish}>Open dashboard</button>}</section>}
   </>
 }

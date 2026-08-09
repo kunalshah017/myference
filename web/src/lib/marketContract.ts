@@ -1,5 +1,4 @@
 import { createPublicClient, createWalletClient, custom, getAddress, http, keccak256, stringToHex, type Address, type EIP1193Provider, type Hash, type Hex } from 'viem'
-import type { AccountOperations } from './api'
 import { monadTestnet } from './chain'
 
 export const marketABI = [
@@ -20,6 +19,7 @@ export const marketABI = [
 export type TransactionConfirmation = { offerVersion?: number }
 export type SubmittedTransaction = { hash: Hash; confirm: () => Promise<TransactionConfirmation | void> }
 export type OfferInput = { offerID: string; model: string; capabilities: string[]; inputPerMillion: bigint; outputPerMillion: bigint; computePerSecond: bigint }
+export type MarketConfiguration = { chain_id: number; contract_address: `0x${string}`; confirmations: number }
 export function assertSuccessfulReceipt(receipt: { status: string }): void { if (receipt.status !== 'success') throw new Error('Monad transaction reverted.') }
 export interface MarketWriter {
   deposit(value: bigint): Promise<SubmittedTransaction>
@@ -37,9 +37,9 @@ export interface MarketWriter {
 
 export class ViemMarketWriter implements MarketWriter {
   private readonly address: Address
-  private readonly operations: AccountOperations
+	private readonly operations: MarketConfiguration
   private readonly provider?: EIP1193Provider
-  constructor(operations: AccountOperations, provider?: EIP1193Provider) { this.operations = operations; this.provider = provider; this.address = getAddress(operations.contract_address) }
+	constructor(operations: MarketConfiguration, provider?: EIP1193Provider) { this.operations = operations; this.provider = provider; this.address = getAddress(operations.contract_address) }
 
   private async clients() {
     if (!this.provider) throw new Error('Connect an EVM wallet before sending a transaction.')

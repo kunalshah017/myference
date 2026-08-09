@@ -99,8 +99,8 @@ it('explains that an existing API key secret cannot be recovered', async () => {
 it('takes providers from CLI setup into an unattended native service', async () => {
   renderFlow({ session, initialRole: 'provider' })
   expect(await screen.findByRole('heading', { name: /turn this computer into a provider/i })).toBeVisible()
-  expect(screen.getByText('myference host')).toBeVisible()
-  expect(screen.getByText('myference service install')).toBeVisible()
+	expect(screen.getByText('myference')).toBeVisible()
+	expect(screen.getByText(/terminal discovers local models and installed ai clis/i)).toBeVisible()
   expect(screen.getByLabelText(/device code/i)).toBeVisible()
 })
 

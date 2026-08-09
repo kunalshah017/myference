@@ -21,8 +21,12 @@ export type UsageRecord = { request_id: string; model: string; input_tokens: num
 export type ProviderSettlement = { request_id: string; model: string; input_tokens: number; output_tokens: number; compute_milliseconds: number; revenue_wei: string; transaction_hash: string; completed_at: string }
 export type SlashRecord = { request_id: string; amount_wei: string; block_number: number; transaction_hash: string; indexed_at: string }
 export type AccountAnalytics = { customer: AnalyticsTotals; provider: AnalyticsTotals; daily: AnalyticsDay[]; usage: UsageRecord[]; settlements: ProviderSettlement[]; slashes: SlashRecord[] }
-export type ActivationOffer = { offer_id: string; model: string; kind: string; capabilities?: string[]; metering_mode?: 'tokens_and_compute' | 'compute_only' }
-export type ProviderActivation = { id: string; status: 'pending' | 'confirmed'; offers: ActivationOffer[]; versions?: Record<string, number>; expires_at: string }
+export type ProviderOffer = { offer_id: string; model: string; kind: string; capabilities: string[]; metering_mode: 'tokens_and_compute' | 'compute_only'; input_per_million_wei: string; output_per_million_wei: string; compute_per_second_wei: string }
+export type EditableProviderOffer = Omit<ProviderOffer, 'kind'> & { backend_kind: string; version: number }
+export type ProviderAccount = { chain_id: number; contract_address: `0x${string}`; explorer_url: string; confirmations: number; wallet_address: `0x${string}`; minimum_bond_wei: string; provider_bond_wei: string; claimable_wei: string; provider_earnings_wei: string; bond_exit_available_at: number; offers: EditableProviderOffer[] }
+export type ProviderActionKind = 'publish_offer' | 'deposit_collateral' | 'request_collateral_exit' | 'finalize_collateral_exit'
+export type ProviderActionInput = { kind: ProviderActionKind; amount_wei?: string; offers?: ProviderOffer[] }
+export type ProviderAction = ProviderActionInput & { id: string; status: 'pending_wallet' | 'pending_chain' | 'confirmed'; wallet_address: `0x${string}`; transaction_hashes?: `0x${string}`[]; versions?: Record<string, number>; expires_at: string }
 
 export class APIError extends Error {
   readonly status: number
@@ -111,16 +115,24 @@ export class OperationsAPI {
   operations() { return requestJSON<AccountOperations>(`${this.baseURL}/api/account/operations`) }
 }
 
-export class ProviderActivationAPI {
+export class ProviderAPI {
   private readonly baseURL: string
   constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
-  get(id: string) { return requestJSON<ProviderActivation>(`${this.baseURL}/api/provider/activations/${encodeURIComponent(id)}`) }
-  async complete(id: string, versions: Record<string, number>) {
-    const response = await fetch(`${this.baseURL}/api/provider/activations/${encodeURIComponent(id)}/complete`, {
-      method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versions }),
+  account() { return requestJSON<ProviderAccount>(`${this.baseURL}/api/provider/account`) }
+  get(id: string) { return requestJSON<ProviderAction>(`${this.baseURL}/api/provider/actions/${encodeURIComponent(id)}`) }
+  async create(input: ProviderActionInput) {
+    const response = await fetch(`${this.baseURL}/api/provider/actions`, {
+      method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
     })
     if (!response.ok) throw await responseError(response)
-    return response.json() as Promise<ProviderActivation>
+    return response.json() as Promise<ProviderAction>
+  }
+  async submitted(id: string, transactionHashes: `0x${string}`[]) {
+    const response = await fetch(`${this.baseURL}/api/provider/actions/${encodeURIComponent(id)}/submitted`, {
+      method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transaction_hashes: transactionHashes }),
+    })
+    if (!response.ok) throw await responseError(response)
+    return response.json() as Promise<ProviderAction>
   }
 }
 

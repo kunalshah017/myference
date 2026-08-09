@@ -26,7 +26,7 @@ const navigation: { view: DashboardView; label: string; group: 'use' | 'host' }[
   { view: 'funds', label: 'Funds', group: 'use' },
   { view: 'api', label: 'API access', group: 'use' },
   { view: 'usage', label: 'Usage', group: 'use' },
-  { view: 'hosting', label: 'Host inference', group: 'host' },
+	{ view: 'hosting', label: 'Provider account', group: 'host' },
   { view: 'earnings', label: 'Earnings & stake', group: 'host' },
 ]
 
@@ -90,7 +90,7 @@ export function DashboardShell({ initialView = 'overview', authAPI }: { initialV
         {view === 'funds' && (session ? <Billing /> : disconnected('Connect a wallet to deposit MON and open bounded spending sessions.'))}
         {view === 'api' && <><ApiAccessGuide />{session ? <><ApiKeys api={api} marketplaceApi={marketplace} /><DeviceApproval api={api} /></> : disconnected('Connect a wallet to create API keys and approve provider devices.')}</>}
         {view === 'usage' && <section><p className="eyebrow">Requests and settlement</p><h1>Usage</h1>{session ? <><UsageAnalytics /><section className="embedded-activity"><p className="eyebrow">Realtime request state</p><h2>In-flight activity</h2><Activity api={marketplace} authApi={api} connected onState={setRouteState} /></section></> : disconnected('Connect a wallet to inspect confirmed tokens, cost, and request activity.')}{routeState && <p className="route-state">Latest route state: {routeState}</p>}</section>}
-        {view === 'hosting' && <section><p className="eyebrow">Provider workspace</p><h1>Host inference</h1><p className="dashboard-intro">Manage local models, cloud APIs, and CLI agents; follow accepted requests through settlement in realtime.</p>{session ? <><ProviderConsole /><section className="embedded-activity"><p className="eyebrow">Realtime provider traffic</p><h2>Inference requests</h2><Activity api={marketplace} authApi={api} connected onState={setRouteState} /></section></> : disconnected('Connect a wallet to manage provider machines, backends, and offers.')}</section>}
+		{view === 'hosting' && <section><p className="eyebrow">Provider account</p><h1>Collateral and offer pricing</h1><p className="dashboard-intro">Use the Myference terminal UI to discover models, create offers, and run hosting. This page manages collateral and reprices existing offers.</p>{session ? <><ProviderConsole /><section className="embedded-activity"><p className="eyebrow">Realtime provider traffic</p><h2>Inference requests</h2><Activity api={marketplace} authApi={api} connected onState={setRouteState} /></section></> : disconnected('Connect a wallet to manage provider collateral and existing offer prices.')}</section>}
         {view === 'earnings' && <section><p className="eyebrow">Provider settlement</p><h1>Earnings and stake</h1>{session ? <><ProviderAnalytics /><ProviderConsole /></> : disconnected('Connect a wallet to inspect earnings, collateral, slashing, and bond-exit state.')}</section>}
       </main>
     </div>
