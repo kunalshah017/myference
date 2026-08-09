@@ -113,6 +113,19 @@ func TestAttachRejectsIncompatibleWalletOffer(t *testing.T) {
 	}
 }
 
+func TestAttachRejectsOfferAlreadyUsedByAnotherBackend(t *testing.T) {
+	offer := account.EditableOffer{OfferID: "local-qwen", Model: "qwen", BackendKind: "ollama", Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1}
+	cfg := config.Config{Backends: []config.Backend{
+		{Name: "first", OfferID: offer.OfferID, Kind: "ollama", Model: "qwen", PriceVersion: 1},
+		{Name: "second", Kind: "ollama", Model: "qwen"},
+	}}
+	saved := false
+	service := Service{API: &providerAPIStub{account: account.ProviderAccount{Offers: []account.EditableOffer{offer}}}, Token: "token", LoadConfig: func() (config.Config, error) { return cfg, nil }, SaveConfig: func(config.Config) error { saved = true; return nil }}
+	if err := service.Attach(context.Background(), "second", offer.OfferID); err == nil || saved {
+		t.Fatalf("err=%v saved=%v", err, saved)
+	}
+}
+
 type providerAPIStub struct {
 	created  account.ProviderActionInput
 	actions  []account.ProviderAction

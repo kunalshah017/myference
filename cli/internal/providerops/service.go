@@ -148,6 +148,11 @@ func (s Service) Attach(ctx context.Context, backendName, offerID string) error 
 	if backendIndex < 0 {
 		return fmt.Errorf("backend %q not found", backendName)
 	}
+	if slices.ContainsFunc(cfg.Backends, func(item config.Backend) bool {
+		return item.Name != backendName && item.EffectiveOfferID() == offerID
+	}) {
+		return fmt.Errorf("wallet offer %q is already attached to another backend", offerID)
+	}
 	providerAccount, err := s.Account(ctx)
 	if err != nil {
 		return err
