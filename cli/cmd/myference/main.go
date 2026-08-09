@@ -447,6 +447,9 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	endpoint := flags.String("ollama-url", "http://127.0.0.1:11434", "local Ollama URL")
 	modelName := flags.String("model", "", "installed model to serve; defaults to the first model")
 	webURL := flags.String("web", defaultWebURL, "Myference web URL")
+	inputPrice := flags.String("input-per-million", "", "input price in MON per million tokens")
+	outputPrice := flags.String("output-per-million", "", "output price in MON per million tokens")
+	computePrice := flags.String("compute-per-second", "", "compute price in MON per second")
 	setupOnly := flags.Bool("setup-only", false, "configure the backend without starting the foreground server")
 	allowBattery := flags.Bool("allow-battery", false, "allow provider host tuning while on battery")
 	noBrowser := flags.Bool("no-browser", false, "do not open the provider workspace")
@@ -464,17 +467,46 @@ func runHost(ctx context.Context, args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	activationURL := strings.TrimRight(*webURL, "/") + "/host"
-	if _, err := fmt.Fprintf(output, "Ready to host %s (%s). Activate pricing and collateral at %s\n", model.Name, model.Digest, activationURL); err != nil {
+	configured, err := config.Load(*path)
+	if err != nil {
 		return err
 	}
-	if !*noBrowser {
-		if err := openBrowser(activationURL); err != nil {
-			_, _ = fmt.Fprintln(output, "Browser did not open; use the URL above.")
+	index := slices.IndexFunc(configured.Backends, func(item config.Backend) bool { return item.Kind == "ollama" && item.Model == model.Name })
+	if index < 0 {
+		return errors.New("configured backend was not saved")
+	}
+	prices := []string{*inputPrice, *outputPrice, *computePrice}
+	provided := 0
+	for _, value := range prices {
+		if value != "" {
+			provided++
 		}
+	}
+	if provided != 0 && provided != len(prices) {
+		return errors.New("host pricing requires --input-per-million, --output-per-million, and --compute-per-second together")
+	}
+	if provided == len(prices) {
+		service, _, serviceErr := providerOperations(*path, *webURL, output, *noBrowser)
+		if serviceErr != nil {
+			return serviceErr
+		}
+		if err := service.Publish(ctx, configured.Backends[index], providerops.Rates{InputPerMillionMON: *inputPrice, OutputPerMillionMON: *outputPrice, ComputePerSecondMON: *computePrice}); err != nil {
+			return err
+		}
+		configured, err = config.Load(*path)
+		if err != nil {
+			return err
+		}
+		index = slices.IndexFunc(configured.Backends, func(item config.Backend) bool { return item.Kind == "ollama" && item.Model == model.Name })
+	}
+	if _, err := fmt.Fprintf(output, "Configured %s (%s).\n", model.Name, model.Digest); err != nil {
+		return err
 	}
 	if *setupOnly {
 		return nil
+	}
+	if index < 0 || configured.Backends[index].PriceVersion == 0 {
+		return errors.New("publish pricing first with `myference offer publish` or the host pricing flags")
 	}
 	serveContext, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -529,7 +561,7 @@ func configureLocalHost(ctx context.Context, path, endpoint, requestedModel stri
 	}
 	name := "local-" + safeBackendName(selected.Name)
 	index := slices.IndexFunc(cfg.Backends, func(item config.Backend) bool { return item.Kind == "ollama" && item.Model == selected.Name })
-	item := config.Backend{Name: name, Kind: "ollama", URL: endpoint, Model: selected.Name, PriceVersion: 1, Enabled: true}
+	item := config.Backend{Name: name, Kind: "ollama", URL: endpoint, Model: selected.Name, Enabled: true}
 	if index >= 0 {
 		item.Name = cfg.Backends[index].Name
 		item.PriceVersion = cfg.Backends[index].PriceVersion
