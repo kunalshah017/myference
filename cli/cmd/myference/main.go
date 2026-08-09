@@ -570,6 +570,7 @@ func configureLocalHost(ctx context.Context, path, endpoint, requestedModel stri
 	item := config.Backend{Name: name, Kind: "ollama", URL: endpoint, Model: selected.Name, Enabled: true}
 	if index >= 0 {
 		item.Name = cfg.Backends[index].Name
+		item.OfferID = cfg.Backends[index].OfferID
 		item.PriceVersion = cfg.Backends[index].PriceVersion
 		cfg.Backends[index] = item
 	} else {
@@ -895,6 +896,9 @@ func discoverBackends(ctx context.Context, cfg config.Config, loadCredential fun
 		if !item.Enabled {
 			continue
 		}
+		if item.PriceVersion == 0 {
+			return nil, nil, fmt.Errorf("backend %q has no finalized offer version; publish or attach an offer before serving", item.Name)
+		}
 		client, err := configuredBackend(item, cfg.MachineID, loadCredential)
 		if err != nil {
 			return nil, nil, err
@@ -1146,17 +1150,19 @@ func runBackendWithDependencies(args []string, output io.Writer, dependencies ba
 				return err
 			}
 		}
-		effectivePriceVersion := *priceVersion
-		if existingIndex >= 0 && !priceVersionSet {
-			effectivePriceVersion = cfg.Backends[existingIndex].PriceVersion
-		}
-		item := config.Backend{Name: *name, Kind: *kind, Model: *model, PriceVersion: effectivePriceVersion, Enabled: true, Image: *image}
+		item := config.Backend{Name: *name, Kind: *kind, Model: *model, PriceVersion: *priceVersion, Enabled: true, Image: *image}
 		if *kind == "ollama" || *kind == "openai" {
 			item.URL = *endpoint
 		}
 		var deleteCredentialAccount string
 		if existingIndex >= 0 {
 			previous := cfg.Backends[existingIndex]
+			if sameOfferShape(previous, item) {
+				item.OfferID = previous.OfferID
+				if previous.OfferID != "" || !priceVersionSet {
+					item.PriceVersion = previous.PriceVersion
+				}
+			}
 			cfg.Backends[existingIndex] = item
 			if backendUsesCredential(previous.Kind, previous.Image) && !backendUsesCredential(item.Kind, item.Image) {
 				deleteCredentialAccount = cfg.MachineID + "/" + item.Name
@@ -1245,6 +1251,14 @@ func runBackendWithDependencies(args []string, output io.Writer, dependencies ba
 
 func backendUsesCredential(kind, image string) bool {
 	return kind == "openai" || kind == "kimi" || ((kind == "codex" || kind == "claude") && image != "")
+}
+
+func sameOfferShape(left, right config.Backend) bool {
+	return left.Kind == right.Kind && left.Model == right.Model && backendUsesWorkspace(left) == backendUsesWorkspace(right)
+}
+
+func backendUsesWorkspace(item config.Backend) bool {
+	return item.Kind == "kimi" || ((item.Kind == "codex" || item.Kind == "claude") && item.Image != "")
 }
 
 func commandArguments(kind, model string) []string {
@@ -1377,10 +1391,7 @@ func printCapacity(ctx context.Context, path string, output io.Writer) error {
 func offerCapacity(item config.Backend, discovered backend.Model) v1.OfferCapacity {
 	offerID := item.EffectiveOfferID()
 	version := item.PriceVersion
-	if version == 0 {
-		version = 1
-	}
-	commandAgent := item.Kind == "kimi" || ((item.Kind == "codex" || item.Kind == "claude") && item.Image != "")
+	commandAgent := backendUsesWorkspace(item)
 	capabilities := []string{"stream", "text"}
 	if commandAgent {
 		capabilities = append(capabilities, "workspace")

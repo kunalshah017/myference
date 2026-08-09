@@ -63,6 +63,7 @@ func Apply(ctx context.Context, current config.Config, selections []Selection, s
 		}
 		if index >= 0 {
 			item.Name = updated.Backends[index].Name
+			item.OfferID = updated.Backends[index].OfferID
 			item.PriceVersion = updated.Backends[index].PriceVersion
 			updated.Backends[index] = item
 		} else {

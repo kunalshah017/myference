@@ -230,7 +230,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.depositAmount.Blur()
 			}
 		}
-		return model, model.accountCommand()
+		if message.err == nil {
+			return model, model.accountCommand()
+		}
+		return model, nil
 	case tea.KeyPressMsg:
 		key := message.String()
 		if model.screen == ScreenAPI && key != "enter" && key != "esc" && key != "ctrl+c" {

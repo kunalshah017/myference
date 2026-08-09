@@ -106,6 +106,17 @@ func TestOffersRequireSelectionWhenSeveralWalletOffersAreCompatible(t *testing.T
 	}
 }
 
+func TestFailedProviderOperationKeepsErrorWithoutRefreshingAccount(t *testing.T) {
+	model := NewModel(Dependencies{Account: func(context.Context) (account.ProviderAccount, error) {
+		return account.ProviderAccount{}, nil
+	}}, nil)
+	updated, command := model.Update(providerOperationMsg{err: errors.New("attachment failed")})
+	result := updated.(Model)
+	if command != nil || result.err == nil || !strings.Contains(result.err.Error(), "attachment failed") {
+		t.Fatalf("command=%v err=%v", command, result.err)
+	}
+}
+
 func TestCollateralRendersAccountAndRunsAvailableAction(t *testing.T) {
 	requested := false
 	model := NewModel(Dependencies{Account: func(context.Context) (account.ProviderAccount, error) {

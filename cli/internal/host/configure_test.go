@@ -11,7 +11,7 @@ import (
 
 func TestApplyIsIdempotentAndPreservesOfferIdentity(t *testing.T) {
 	current := config.Config{ServerURL: "https://api.example", AccountID: "account", MachineID: "machine", Backends: []config.Backend{
-		{Name: "my-qwen-offer", Kind: "ollama", URL: "http://127.0.0.1:11434", Model: "qwen", PriceVersion: 7, Enabled: true},
+		{Name: "machine-qwen", OfferID: "my-qwen-offer", Kind: "ollama", URL: "http://127.0.0.1:11434", Model: "qwen", PriceVersion: 7, Enabled: true},
 		{Name: "old", Kind: "ollama", URL: "http://127.0.0.1:11434", Model: "old", PriceVersion: 2, Enabled: true},
 	}}
 	selection := []Selection{{Candidate: Candidate{Kind: "ollama", Name: "Ollama", URL: "http://127.0.0.1:11434", Model: "qwen"}}}
@@ -23,7 +23,7 @@ func TestApplyIsIdempotentAndPreservesOfferIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(updated.Backends) != 2 || updated.Backends[0].Name != "my-qwen-offer" || updated.Backends[0].PriceVersion != 7 || !updated.Backends[0].Enabled || updated.Backends[1].Enabled {
+	if len(updated.Backends) != 2 || updated.Backends[0].Name != "machine-qwen" || updated.Backends[0].OfferID != "my-qwen-offer" || updated.Backends[0].PriceVersion != 7 || !updated.Backends[0].Enabled || updated.Backends[1].Enabled {
 		t.Fatalf("backends=%+v", updated.Backends)
 	}
 	if !reflect.DeepEqual(saved, updated) {

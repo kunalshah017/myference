@@ -123,6 +123,34 @@ func TestBackendAddReplacesOpenAIWithNativeCodex(t *testing.T) {
 	}
 }
 
+func TestBackendReplacePreservesAttachmentOnlyForSameOfferShape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	initial := config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1", Backends: []config.Backend{{Name: "local", OfferID: "wallet-offer", Kind: "ollama", URL: "http://127.0.0.1:11434", Model: "qwen", PriceVersion: 4, Enabled: true}}}
+	if err := config.Save(path, initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := runBackendWithDependencies([]string{"add", "--replace", "--config", path, "--name", "local", "--kind", "ollama", "--model", "qwen", "--url", "http://127.0.0.1:11435"}, &bytes.Buffer{}, backendCommandDependencies{}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Backends[0].OfferID != "wallet-offer" || loaded.Backends[0].PriceVersion != 4 {
+		t.Fatalf("same shape lost attachment: %+v", loaded.Backends[0])
+	}
+	if err := runBackendWithDependencies([]string{"add", "--replace", "--config", path, "--name", "local", "--kind", "ollama", "--model", "llama", "--url", "http://127.0.0.1:11435"}, &bytes.Buffer{}, backendCommandDependencies{}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Backends[0].OfferID != "" || loaded.Backends[0].PriceVersion != 0 {
+		t.Fatalf("changed shape retained attachment: %+v", loaded.Backends[0])
+	}
+}
+
 func TestBackendAddNativeCodexRequiresReplaceForDuplicate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1", Backends: []config.Backend{{Name: "code", Kind: "openai", Model: "code", Enabled: true}}}); err != nil {
@@ -285,7 +313,7 @@ func TestConfigureLocalHostDiscoversOllamaAndIsIdempotent(t *testing.T) {
 	}))
 	defer server.Close()
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1"}); err != nil {
+	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1", Backends: []config.Backend{{Name: "machine-qwen", OfferID: "local-qwen", Kind: "ollama", URL: server.URL, Model: "qwen2.5:0.5b", PriceVersion: 3, Enabled: true}}}); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
@@ -301,7 +329,7 @@ func TestConfigureLocalHostDiscoversOllamaAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Backends) != 1 || loaded.Backends[0].Kind != "ollama" || loaded.Backends[0].Model != "qwen2.5:0.5b" || !loaded.Backends[0].Enabled {
+	if len(loaded.Backends) != 1 || loaded.Backends[0].Name != "machine-qwen" || loaded.Backends[0].OfferID != "local-qwen" || loaded.Backends[0].PriceVersion != 3 || loaded.Backends[0].Kind != "ollama" || loaded.Backends[0].Model != "qwen2.5:0.5b" || !loaded.Backends[0].Enabled {
 		t.Fatalf("backends=%+v", loaded.Backends)
 	}
 }
@@ -571,5 +599,13 @@ func TestOfferCapacityCarriesDeterministicMonadProofKeys(t *testing.T) {
 	}
 	if agent.EvidenceKind != "runtime_image" || agent.EvidenceDigest != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || agent.MeteringMode != "compute_only" {
 		t.Fatalf("command agent evidence is unsafe: %+v", agent)
+	}
+}
+
+func TestDiscoverBackendsRejectsUnpublishedEnabledBackend(t *testing.T) {
+	cfg := config.Config{MachineID: "machine", Backends: []config.Backend{{Name: "local", Kind: "ollama", URL: "http://127.0.0.1:1", Model: "qwen", Enabled: true}}}
+	_, _, err := discoverBackends(context.Background(), cfg, func(string, string) (string, error) { return "", nil })
+	if err == nil || !strings.Contains(err.Error(), "publish or attach") {
+		t.Fatalf("err=%v", err)
 	}
 }
