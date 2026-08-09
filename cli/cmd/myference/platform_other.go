@@ -18,7 +18,10 @@ func startPlatformProviderSession(context.Context, config.Config, io.Writer) (fu
 	return func() error { return nil }, nil
 }
 
-func runPlatformCommand(string, []string, io.Writer) error {
+func runPlatformCommand(command string, args []string, _ io.Writer) error {
+	if command != "service" || len(args) == 0 {
+		return errors.New("usage: myference service <install|start|stop|status|uninstall> [--config path]")
+	}
 	return errors.New("service lifecycle commands require Windows or macOS")
 }
 
