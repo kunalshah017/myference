@@ -34,6 +34,7 @@ import (
 	"github.com/kunalshah017/myference/cli/internal/credential"
 	hostservice "github.com/kunalshah017/myference/cli/internal/host"
 	"github.com/kunalshah017/myference/cli/internal/provider"
+	"github.com/kunalshah017/myference/cli/internal/providerops"
 	hostingtui "github.com/kunalshah017/myference/cli/internal/tui"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
@@ -148,8 +149,8 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer) erro
 			}, func(updated config.Config) error { return config.Save(path, updated) })
 			return err
 		},
-		Activate: func(parent context.Context, _ []hostservice.Selection) error {
-			return activateProviders(parent, path, environmentOr("MYFERENCE_WEB_URL", defaultWebURL), openBrowser, credential.Load)
+		Activate: func(context.Context, []hostservice.Selection) error {
+			return errors.New("set pricing from Offers & Pricing before starting the provider")
 		},
 		Start: func(parent context.Context) error {
 			if serveCancel != nil {
@@ -191,110 +192,6 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer) erro
 	return hostingtui.Run(input, output, dependencies, candidates)
 }
 
-func activateProviders(ctx context.Context, path, webURL string, open func(string) error, loadCredential func(string, string) (string, error)) error {
-	cfg, err := config.Load(path)
-	if err != nil {
-		return err
-	}
-	token, err := loadCredential(machineCredentialService, cfg.MachineID)
-	if err != nil {
-		return fmt.Errorf("load machine credential: %w", err)
-	}
-	client, err := account.NewClient(cfg.ServerURL, nil)
-	if err != nil {
-		return err
-	}
-	offers := activationOffers(cfg.Backends)
-	if len(offers) == 0 {
-		return errors.New("select at least one provider")
-	}
-	draft, err := client.CreateProviderActivation(ctx, token, offers)
-	if err != nil {
-		return fmt.Errorf("create provider activation: %w", err)
-	}
-	activationURL, err := providerActivationURL(webURL, draft.ID)
-	if err != nil {
-		return err
-	}
-	if open == nil || open(activationURL) != nil {
-		return fmt.Errorf("open this URL to publish the selected offers: %s", activationURL)
-	}
-	deadline := draft.Expires
-	if deadline.IsZero() {
-		deadline = time.Now().Add(15 * time.Minute)
-	}
-	pollContext, cancel := context.WithDeadline(ctx, deadline)
-	defer cancel()
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		confirmed, pollErr := client.ProviderActivation(pollContext, token, draft.ID)
-		if pollErr == nil && confirmed.Status == account.ActivationConfirmed {
-			latest, loadErr := config.Load(path)
-			if loadErr != nil {
-				return loadErr
-			}
-			if err := applyActivationVersions(&latest, confirmed.Versions); err != nil {
-				return err
-			}
-			return config.Save(path, latest)
-		}
-		select {
-		case <-pollContext.Done():
-			return fmt.Errorf("provider activation was not completed: %w", pollContext.Err())
-		case <-ticker.C:
-		}
-	}
-}
-
-func activationOffers(backends []config.Backend) []account.ActivationOffer {
-	offers := make([]account.ActivationOffer, 0, len(backends))
-	for _, item := range backends {
-		if item.Enabled {
-			commandAgent := item.Kind == "kimi" || ((item.Kind == "codex" || item.Kind == "claude") && item.Image != "")
-			capabilities := []string{"stream", "text"}
-			meteringMode := "tokens_and_compute"
-			if commandAgent {
-				capabilities = append(capabilities, "workspace")
-				meteringMode = "compute_only"
-			}
-			offers = append(offers, account.ActivationOffer{OfferID: item.Name, Model: item.Model, Kind: item.Kind, Capabilities: capabilities, MeteringMode: meteringMode})
-		}
-	}
-	return offers
-}
-
-func applyActivationVersions(cfg *config.Config, versions map[string]int) error {
-	for index := range cfg.Backends {
-		if !cfg.Backends[index].Enabled {
-			continue
-		}
-		version := versions[cfg.Backends[index].Name]
-		if version <= 0 {
-			return fmt.Errorf("activation did not publish offer %q", cfg.Backends[index].Name)
-		}
-		cfg.Backends[index].PriceVersion = uint64(version)
-	}
-	return nil
-}
-
-func providerActivationURL(webURL, activationID string) (string, error) {
-	parsed, err := url.Parse(webURL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !isLoopbackWebURL(parsed)) {
-		return "", errors.New("web URL must use HTTPS except on loopback")
-	}
-	parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/host"
-	query := parsed.Query()
-	query.Set("activation", activationID)
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), nil
-}
-
-func isLoopbackWebURL(parsed *url.URL) bool {
-	host := parsed.Hostname()
-	return parsed.Scheme == "http" && (host == "127.0.0.1" || host == "localhost" || host == "::1")
-}
-
 func environmentOr(name, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 		return value
@@ -325,7 +222,7 @@ func mergeConfiguredCandidates(discovered []hostservice.Candidate, backends []co
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference login | host | backend <add|list|start|stop|version> | capacity | status | serve | service <install|start|stop|status|uninstall> | windows <doctor|status|models|test|dashboard|focus|headless|restore>")
+		return errors.New("usage: myference login | host | backend <add|list|start|stop|version> | offer <publish|list|sync> | collateral <status|deposit|request-exit|finalize-exit> | capacity | status | serve | service <install|start|stop|status|uninstall> | windows <doctor|status|models|test|dashboard|focus|headless|restore>")
 	}
 	switch args[0] {
 	case "login":
@@ -334,6 +231,10 @@ func run(args []string, output io.Writer) error {
 		return runBackend(args[1:], output)
 	case "host":
 		return runHost(context.Background(), args[1:], output)
+	case "offer":
+		return runOffer(context.Background(), args[1:], output)
+	case "collateral":
+		return runCollateral(context.Background(), args[1:], output)
 	case "capacity", "publish":
 		path, err := parseConfigFlag(args[0], args[1:])
 		if err != nil {
@@ -389,6 +290,129 @@ func run(args []string, output io.Writer) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runOffer(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: myference offer <publish|list|sync>")
+	}
+	flags := flag.NewFlagSet("offer "+args[0], flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", defaultConfigPath(), "configuration path")
+	webURL := flags.String("web", environmentOr("MYFERENCE_WEB_URL", defaultWebURL), "Myference web URL")
+	backendName := flags.String("backend", "", "configured backend name")
+	inputPrice := flags.String("input-per-million", "", "input price in MON per million tokens")
+	outputPrice := flags.String("output-per-million", "", "output price in MON per million tokens")
+	computePrice := flags.String("compute-per-second", "", "compute price in MON per second")
+	noBrowser := flags.Bool("no-browser", false, "print the approval URL instead of opening it")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if args[0] == "publish" && (*backendName == "" || *inputPrice == "" || *outputPrice == "" || *computePrice == "") {
+		return errors.New("offer publish requires --backend, --input-per-million, --output-per-million, and --compute-per-second")
+	}
+	service, cfg, err := providerOperations(*path, *webURL, output, *noBrowser)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "publish":
+		index := slices.IndexFunc(cfg.Backends, func(item config.Backend) bool { return item.Name == *backendName })
+		if index < 0 {
+			return fmt.Errorf("backend %q not found", *backendName)
+		}
+		if err := service.Publish(ctx, cfg.Backends[index], providerops.Rates{InputPerMillionMON: *inputPrice, OutputPerMillionMON: *outputPrice, ComputePerSecondMON: *computePrice}); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(output, "Offer %s published and synchronized.\n", *backendName)
+		return err
+	case "list":
+		providerAccount, err := service.Account(ctx)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(output).Encode(providerAccount.Offers)
+	case "sync":
+		changed, err := service.SyncVersions(ctx)
+		if err != nil {
+			return err
+		}
+		if changed {
+			_, err = fmt.Fprintln(output, "Offer versions synchronized.")
+		} else {
+			_, err = fmt.Fprintln(output, "Offer versions already current.")
+		}
+		return err
+	default:
+		return fmt.Errorf("unknown offer action %q", args[0])
+	}
+}
+
+func runCollateral(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: myference collateral <status|deposit|request-exit|finalize-exit>")
+	}
+	flags := flag.NewFlagSet("collateral "+args[0], flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", defaultConfigPath(), "configuration path")
+	webURL := flags.String("web", environmentOr("MYFERENCE_WEB_URL", defaultWebURL), "Myference web URL")
+	amount := flags.String("amount", "", "deposit amount in MON")
+	noBrowser := flags.Bool("no-browser", false, "print the approval URL instead of opening it")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if args[0] == "deposit" && *amount == "" {
+		return errors.New("collateral deposit requires --amount")
+	}
+	service, _, err := providerOperations(*path, *webURL, output, *noBrowser)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "status":
+		providerAccount, err := service.Account(ctx)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(output).Encode(providerAccount)
+	case "deposit":
+		err = service.Deposit(ctx, *amount)
+	case "request-exit":
+		err = service.RequestExit(ctx)
+	case "finalize-exit":
+		err = service.FinalizeExit(ctx)
+	default:
+		return fmt.Errorf("unknown collateral action %q", args[0])
+	}
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(output, "Collateral action confirmed.")
+	return err
+}
+
+func providerOperations(path, webURL string, output io.Writer, noBrowser bool) (providerops.Service, config.Config, error) {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return providerops.Service{}, config.Config{}, err
+	}
+	token, err := credential.Load(machineCredentialService, cfg.MachineID)
+	if err != nil {
+		return providerops.Service{}, config.Config{}, fmt.Errorf("load machine credential: %w", err)
+	}
+	client, err := account.NewClient(cfg.ServerURL, nil)
+	if err != nil {
+		return providerops.Service{}, config.Config{}, err
+	}
+	open := openBrowser
+	if noBrowser {
+		open = func(approvalURL string) error {
+			_, err := fmt.Fprintf(output, "Approve the exact wallet transaction at %s\n", approvalURL)
+			return err
+		}
+	}
+	service := providerops.Service{API: client, Token: token, MachineID: cfg.MachineID, WebURL: webURL, LoadConfig: func() (config.Config, error) { return config.Load(path) }, SaveConfig: func(updated config.Config) error { return config.Save(path, updated) }, OpenURL: open}
+	return service, cfg, nil
 }
 
 func runHost(ctx context.Context, args []string, output io.Writer) error {

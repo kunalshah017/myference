@@ -427,28 +427,20 @@ func TestProductionDefaultsUseBrandedDomains(t *testing.T) {
 	}
 }
 
-func TestActivationOffersAndVersionsUseEnabledBackendNames(t *testing.T) {
-	cfg := config.Config{Backends: []config.Backend{
-		{Name: "ollama-qwen", Kind: "ollama", Model: "qwen2.5", Enabled: true, PriceVersion: 1},
-		{Name: "claude-sonnet", Kind: "claude", Model: "sonnet", Enabled: true, PriceVersion: 2},
-		{Name: "old", Kind: "openai", Model: "old", Enabled: false, PriceVersion: 7},
-	}}
-	offers := activationOffers(cfg.Backends)
-	if len(offers) != 2 || offers[0].OfferID != "ollama-qwen" || offers[0].Model != "qwen2.5" || offers[1].MeteringMode != "tokens_and_compute" || slices.Contains(offers[1].Capabilities, "workspace") {
-		t.Fatalf("offers=%+v", offers)
-	}
-	if err := applyActivationVersions(&cfg, map[string]int{"ollama-qwen": 4, "claude-sonnet": 5}); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Backends[0].PriceVersion != 4 || cfg.Backends[1].PriceVersion != 5 || cfg.Backends[2].PriceVersion != 7 {
-		t.Fatalf("backends=%+v", cfg.Backends)
-	}
-}
-
-func TestProviderActivationURLPreservesWebBaseAndEscapesDraft(t *testing.T) {
-	got, err := providerActivationURL("https://myference.example/app", "draft id")
-	if err != nil || got != "https://myference.example/app/host?activation=draft+id" {
-		t.Fatalf("url=%q err=%v", got, err)
+func TestProviderCommandsRequireExplicitActionInputs(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"offer"}, want: "offer <publish|list|sync>"},
+		{args: []string{"offer", "publish", "--backend", "qwen"}, want: "requires --backend"},
+		{args: []string{"collateral"}, want: "collateral <status|deposit|request-exit|finalize-exit>"},
+		{args: []string{"collateral", "deposit"}, want: "requires --amount"},
+	} {
+		err := run(test.args, &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("run(%v) error=%v", test.args, err)
+		}
 	}
 }
 

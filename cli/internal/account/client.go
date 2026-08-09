@@ -69,15 +69,34 @@ func (c *Client) ExchangeDeviceAuthorization(ctx context.Context, deviceCode str
 }
 
 func (c *Client) post(ctx context.Context, path string, input, output any) error {
+	return c.request(ctx, http.MethodPost, path, "", input, output)
+}
+
+func (c *Client) authorizedRequest(ctx context.Context, method, path, token string, input, output any) error {
+	return c.request(ctx, method, path, strings.TrimSpace(token), input, output)
+}
+
+func (c *Client) request(ctx context.Context, method, path, token string, input, output any) error {
 	var body bytes.Buffer
-	if err := json.NewEncoder(&body).Encode(input); err != nil {
-		return err
+	if input != nil {
+		if err := json.NewEncoder(&body).Encode(input); err != nil {
+			return err
+		}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, &body)
+	var reader io.Reader
+	if input != nil {
+		reader = &body
+	}
+	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Content-Type", "application/json")
+	if input != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
 	response, err := c.http.Do(request)
 	if err != nil {
 		return err
