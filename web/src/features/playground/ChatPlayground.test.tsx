@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ChatPlayground } from './ChatPlayground'
@@ -21,6 +21,8 @@ it('sends a real OpenAI-compatible chat request with the supplied key', async ()
     model: async () => ({ model: 'qwen', offers: [{ model: 'qwen', machine_id: 'machine', provider_address: '0x1111111111111111111111111111111111111111', offer_id: 'offer', capabilities: ['text', 'stream'], price_version: 1, input_per_million_wei: '1000000', output_per_million_wei: '2000000', compute_per_second_wei: '3', capacity: 1, latency_milliseconds: 1, success_basis_points: 9900, reputation: 1, evidence_kind: 'upstream_model', evidence_digest: 'qwen', metering_mode: 'tokens_and_compute', available: true, stale: false, updated_at: new Date().toISOString() }] }),
   } as unknown as MarketplaceAPI
   render(<QueryClientProvider client={new QueryClient()}><ChatPlayground marketplace={marketplace} /></QueryClientProvider>)
+  const transcript = screen.getByRole('region', { name: /chat transcript/i })
+  Object.defineProperty(transcript, 'scrollHeight', { configurable: true, value: 720 })
   const model = await screen.findByRole('combobox', { name: /model/i })
   await screen.findByRole('option', { name: 'qwen' })
   expect(model).toHaveDisplayValue('qwen')
@@ -37,6 +39,7 @@ it('sends a real OpenAI-compatible chat request with the supplied key', async ()
   await user.click(screen.getByRole('button', { name: /send request/i }))
 
   expect(await screen.findByText('Provider response')).toBeVisible()
+  await waitFor(() => expect(transcript.scrollTop).toBe(720))
   const [, init] = request.mock.calls[0]
   expect(init?.headers).toMatchObject({ authorization: 'Bearer mf_test_key', 'X-Myference-Max-Spend': '1000000000000000000' })
   expect(JSON.parse(String(init?.body))).toEqual({ model: 'qwen', stream: true, messages: [{ role: 'user', content: 'Hello provider' }], max_completion_tokens: 256 })

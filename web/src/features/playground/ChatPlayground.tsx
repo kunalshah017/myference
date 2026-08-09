@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatMON, parseMON } from '../../lib/amount'
 import { InferenceAPI, MarketplaceAPI, type ChatMessage, type MarketOffer } from '../../lib/api'
@@ -35,6 +35,10 @@ export function ChatPlayground({ api: supplied, marketplace: suppliedMarketplace
   const [conversation, setConversation] = useState<ChatMessage[]>([])
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
+  const transcript = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (conversation.length > 0 && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight
+  }, [conversation])
   const liveModels = inventory.data?.filter((item) => !item.stale && item.available_providers > 0 && item.total_capacity > 0) ?? []
   const selectedModelName = model || liveModels[0]?.model || ''
   const detail = useQuery({ queryKey: ['model', selectedModelName, 'playground-pricing'], queryFn: () => marketplace.model(selectedModelName), enabled: selectedModelName !== '', retry: false })
@@ -79,7 +83,7 @@ export function ChatPlayground({ api: supplied, marketplace: suppliedMarketplace
       <button type="submit" disabled={sending || detail.isPending}>{sending ? 'Routing request…' : detail.isPending ? 'Loading offer prices…' : 'Send request'}</button>
       {error && <p role="alert" className="inline-error">{error}</p>}
     </form>
-    <section className="chat-transcript" aria-label="Chat transcript">
+    <section ref={transcript} className="chat-transcript" aria-label="Chat transcript">
       {conversation.length === 0 ? <div className="dashboard-empty"><strong>No messages yet</strong><p>Choose a live model, enter an API key, and send a test prompt.</p></div> : conversation.map((item, index) => <article key={`${item.role}-${index}`} data-role={item.role}><span>{item.role}</span><p>{item.content}</p></article>)}
     </section>
   </div>
