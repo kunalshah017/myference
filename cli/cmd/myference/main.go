@@ -115,6 +115,20 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer) erro
 		candidates = append(candidates, result.Candidates...)
 	}
 	candidates = mergeConfiguredCandidates(candidates, cfg.Backends)
+	machineToken, err := credential.Load(machineCredentialService, cfg.MachineID)
+	if err != nil {
+		return fmt.Errorf("load machine credential: %w", err)
+	}
+	providerClient, err := account.NewClient(cfg.ServerURL, nil)
+	if err != nil {
+		return err
+	}
+	providerService := providerops.Service{
+		API: providerClient, Token: machineToken, MachineID: cfg.MachineID,
+		WebURL: environmentOr("MYFERENCE_WEB_URL", defaultWebURL), OpenURL: openBrowser,
+		LoadConfig: func() (config.Config, error) { return config.Load(path) },
+		SaveConfig: func(updated config.Config) error { return config.Save(path, updated) },
+	}
 
 	var serveCancel context.CancelFunc
 	var serveDone chan error
@@ -131,6 +145,19 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer) erro
 	}
 	defer stop()
 	dependencies := hostingtui.Dependencies{
+		Backends: cfg.Backends,
+		LoadBackends: func() []config.Backend {
+			latest, loadErr := config.Load(path)
+			if loadErr != nil {
+				return nil
+			}
+			return latest.Backends
+		},
+		Account:      providerService.Account,
+		Publish:      providerService.Publish,
+		Deposit:      providerService.Deposit,
+		RequestExit:  providerService.RequestExit,
+		FinalizeExit: providerService.FinalizeExit,
 		ListModels: func(parent context.Context, baseURL, secret string) ([]string, error) {
 			queryCtx, cancel := context.WithTimeout(parent, 15*time.Second)
 			defer cancel()
@@ -148,9 +175,6 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer) erro
 				Delete:  credential.Delete,
 			}, func(updated config.Config) error { return config.Save(path, updated) })
 			return err
-		},
-		Activate: func(context.Context, []hostservice.Selection) error {
-			return errors.New("set pricing from Offers & Pricing before starting the provider")
 		},
 		Start: func(parent context.Context) error {
 			if serveCancel != nil {

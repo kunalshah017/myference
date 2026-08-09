@@ -6,9 +6,88 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kunalshah017/myference/cli/internal/account"
+	"github.com/kunalshah017/myference/cli/internal/config"
 	"github.com/kunalshah017/myference/cli/internal/host"
 	"github.com/kunalshah017/myference/cli/internal/provider"
+	"github.com/kunalshah017/myference/cli/internal/providerops"
 )
+
+func TestHomeExposesProviderOfferCollateralAndStatusWorkflows(t *testing.T) {
+	model := NewModel(Dependencies{}, nil)
+	view := model.ViewText()
+	for _, item := range []string{"Providers", "Offers & Pricing", "Collateral", "Live Status", "Quit"} {
+		if !strings.Contains(view, item) {
+			t.Fatalf("home=%q missing=%q", view, item)
+		}
+	}
+	model, _ = model.HandleKey("down")
+	model, _ = model.HandleKey("enter")
+	if model.Screen() != ScreenOffers {
+		t.Fatalf("screen=%v", model.Screen())
+	}
+}
+
+func TestOffersShowPublicationStateAndOpenMeteringAwarePricing(t *testing.T) {
+	backends := []config.Backend{{Name: "local-qwen", Kind: "ollama", Model: "qwen", PriceVersion: 0}, {Name: "agent", Kind: "codex", Model: "gpt", Image: "agent", PriceVersion: 3}}
+	model := NewModel(Dependencies{Backends: backends}, nil)
+	model.screen = ScreenOffers
+	view := model.ViewText()
+	if !strings.Contains(view, "Not published") || !strings.Contains(view, "v3") {
+		t.Fatalf("view=%q", view)
+	}
+	model, _ = model.HandleKey("enter")
+	if model.Screen() != ScreenPricing || !strings.Contains(model.ViewText(), "Input / million tokens") {
+		t.Fatalf("screen=%v view=%q", model.Screen(), model.ViewText())
+	}
+	model.screen, model.cursor = ScreenOffers, 1
+	model, _ = model.HandleKey("enter")
+	if !strings.Contains(model.ViewText(), "Compute / second") || strings.Contains(model.ViewText(), "Input / million tokens") {
+		t.Fatalf("compute-only view=%q", model.ViewText())
+	}
+}
+
+func TestCollateralRendersAccountAndRunsAvailableAction(t *testing.T) {
+	requested := false
+	model := NewModel(Dependencies{Account: func(context.Context) (account.ProviderAccount, error) {
+		return account.ProviderAccount{ProviderBondWei: "5000000000000000000", ClaimableWei: "2"}, nil
+	}, RequestExit: func(context.Context) error { requested = true; return nil }}, nil)
+	model.screen = ScreenCollateral
+	model.applyAccount(accountMsg{account: account.ProviderAccount{ProviderBondWei: "5000000000000000000", ClaimableWei: "2"}})
+	if view := model.ViewText(); !strings.Contains(view, "5 MON") || !strings.Contains(view, "Request exit") {
+		t.Fatalf("view=%q", view)
+	}
+	_, command := model.HandleKey("x")
+	if command == nil {
+		t.Fatal("request exit did not create command")
+	}
+	message := command().(providerOperationMsg)
+	if message.err != nil || !requested {
+		t.Fatalf("requested=%v err=%v", requested, message.err)
+	}
+}
+
+func TestPricingPublishDelegatesToProviderOperations(t *testing.T) {
+	called := false
+	backend := config.Backend{Name: "qwen", Kind: "ollama", Model: "qwen"}
+	model := NewModel(Dependencies{Backends: []config.Backend{backend}, Publish: func(_ context.Context, got config.Backend, rates providerops.Rates) error {
+		called = got.Name == "qwen" && rates.InputPerMillionMON == "1"
+		return nil
+	}}, nil)
+	model.openPricing(backend)
+	model.priceInput.SetValue("1")
+	model.priceOutput.SetValue("2")
+	model.priceCompute.SetValue("3")
+	model.priceStep = priceStepReview
+	_, command := model.HandleKey("enter")
+	if command == nil {
+		t.Fatal("publish did not create command")
+	}
+	message := command().(providerOperationMsg)
+	if message.err != nil || !called {
+		t.Fatalf("called=%v err=%v", called, message.err)
+	}
+}
 
 func TestHomeProvidersReviewNavigationAndMultiSelection(t *testing.T) {
 	candidates := []host.Candidate{
@@ -103,17 +182,16 @@ func TestStartPassesAllSelectionsAndSecrets(t *testing.T) {
 	}
 }
 
-func TestStartConfiguresActivatesThenConnects(t *testing.T) {
+func TestStartConfiguresThenConnects(t *testing.T) {
 	candidate := host.Candidate{ID: "ollama||qwen", Kind: "ollama", Name: "Ollama", Model: "qwen", State: host.StateReady}
 	var calls []string
 	model := NewModel(Dependencies{
 		Configure: func(context.Context, []host.Selection) error { calls = append(calls, "configure"); return nil },
-		Activate:  func(context.Context, []host.Selection) error { calls = append(calls, "activate"); return nil },
 		Start:     func(context.Context) error { calls = append(calls, "start"); return nil },
 	}, []host.Candidate{candidate})
 	model.selected[candidate.ID] = true
 	message := model.startCommand()().(startedMsg)
-	if message.err != nil || strings.Join(calls, ",") != "configure,activate,start" {
+	if message.err != nil || strings.Join(calls, ",") != "configure,start" {
 		t.Fatalf("calls=%v err=%v", calls, message.err)
 	}
 }
