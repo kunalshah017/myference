@@ -41,9 +41,83 @@ func TestOffersShowPublicationStateAndOpenMeteringAwarePricing(t *testing.T) {
 		t.Fatalf("screen=%v view=%q", model.Screen(), model.ViewText())
 	}
 	model.screen, model.cursor = ScreenOffers, 1
-	model, _ = model.HandleKey("enter")
+	model, _ = model.HandleKey("e")
 	if !strings.Contains(model.ViewText(), "Compute / second") || strings.Contains(model.ViewText(), "Input / million tokens") {
 		t.Fatalf("compute-only view=%q", model.ViewText())
+	}
+}
+
+func TestOffersRenderEveryWalletOffer(t *testing.T) {
+	backend := config.Backend{Name: "ollama-qwen", OfferID: "local-qwen", Kind: "ollama", Model: "qwen2.5:0.5b", PriceVersion: 1, Enabled: true}
+	model := NewModel(Dependencies{Backends: []config.Backend{backend}}, nil)
+	model.screen = ScreenOffers
+	model.applyAccount(accountMsg{account: account.ProviderAccount{Offers: []account.EditableOffer{
+		{OfferID: "local-qwen", Model: backend.Model, BackendKind: backend.Kind, Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1},
+		{OfferID: "gpt-5.6-terra", Model: "gpt-5.6-terra", BackendKind: "openai", Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1},
+	}}})
+	view := model.ViewText()
+	for _, expected := range []string{"This machine", "Wallet offers", "local-qwen", "Attached here", "gpt-5.6-terra", "No matching local provider"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("view=%q missing=%q", view, expected)
+		}
+	}
+}
+
+func TestAttachedOfferSelectionDoesNotOpenPricing(t *testing.T) {
+	backend := config.Backend{Name: "ollama-qwen", OfferID: "local-qwen", Kind: "ollama", Model: "qwen", PriceVersion: 1, Enabled: true}
+	offer := account.EditableOffer{OfferID: "local-qwen", Model: backend.Model, BackendKind: backend.Kind, Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1}
+	model := NewModel(Dependencies{Backends: []config.Backend{backend}}, nil)
+	model.screen = ScreenOffers
+	model.applyAccount(accountMsg{account: account.ProviderAccount{Offers: []account.EditableOffer{offer}}})
+	model, command := model.HandleKey("enter")
+	if command != nil || model.Screen() != ScreenOffers || !strings.Contains(model.ViewText(), "Already attached") {
+		t.Fatalf("screen=%v command=%v view=%q", model.Screen(), command, model.ViewText())
+	}
+	model, _ = model.HandleKey("down")
+	model, command = model.HandleKey("enter")
+	if command != nil || model.Screen() != ScreenOffers || !strings.Contains(model.ViewText(), "Already attached") {
+		t.Fatalf("wallet screen=%v command=%v view=%q", model.Screen(), command, model.ViewText())
+	}
+}
+
+func TestWalletOfferSelectionAttachesOrExplainsUnavailable(t *testing.T) {
+	backend := config.Backend{Name: "ollama-qwen", Kind: "ollama", Model: "qwen", Enabled: true}
+	qwen := account.EditableOffer{OfferID: "local-qwen", Model: backend.Model, BackendKind: backend.Kind, Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1}
+	gpt := account.EditableOffer{OfferID: "gpt", Model: "gpt", BackendKind: "openai", Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1}
+	attached := ""
+	model := NewModel(Dependencies{Backends: []config.Backend{backend}, Attach: func(_ context.Context, backendName, offerID string) error {
+		attached = backendName + ":" + offerID
+		return nil
+	}}, nil)
+	model.screen = ScreenOffers
+	model.applyAccount(accountMsg{account: account.ProviderAccount{Offers: []account.EditableOffer{qwen, gpt}}})
+	model, _ = model.HandleKey("down")
+	if model.cursor != 1 {
+		t.Fatalf("cursor=%d want wallet row 1", model.cursor)
+	}
+	model, command := model.HandleKey("enter")
+	if command == nil {
+		t.Fatal("attachable wallet offer did not return an attachment command")
+	}
+	message := command().(providerOperationMsg)
+	if message.err != nil || attached != "ollama-qwen:local-qwen" {
+		t.Fatalf("attached=%q err=%v", attached, message.err)
+	}
+	model.busy = false
+	model, _ = model.HandleKey("down")
+	model, command = model.HandleKey("enter")
+	if command != nil || !strings.Contains(model.ViewText(), "Configure a matching provider first") {
+		t.Fatalf("command=%v view=%q", command, model.ViewText())
+	}
+}
+
+func TestExplicitRepricingOpensPricing(t *testing.T) {
+	backend := config.Backend{Name: "ollama-qwen", OfferID: "local-qwen", Kind: "ollama", Model: "qwen", PriceVersion: 1, Enabled: true}
+	model := NewModel(Dependencies{Backends: []config.Backend{backend}}, nil)
+	model.screen = ScreenOffers
+	model, command := model.HandleKey("e")
+	if command != nil || model.Screen() != ScreenPricing {
+		t.Fatalf("screen=%v command=%v", model.Screen(), command)
 	}
 }
 

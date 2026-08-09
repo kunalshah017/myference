@@ -122,6 +122,12 @@ type providerOperationMsg struct {
 	err    error
 }
 
+type offerRow struct {
+	backend config.Backend
+	offer   account.EditableOffer
+	wallet  bool
+}
+
 func NewModel(dependencies Dependencies, candidates []host.Candidate) Model {
 	urlInput := textinput.New()
 	urlInput.Placeholder = "https://provider.example"
@@ -377,10 +383,13 @@ func (model Model) ViewText() string {
 		}
 	case ScreenOffers:
 		output.WriteString("Offers & Pricing\n\n")
+		rows := model.offerRows()
 		backends := model.currentBackends()
+		output.WriteString("This machine\n")
 		if len(backends) == 0 {
-			output.WriteString("Configure a provider first.\n")
+			output.WriteString("  Configure a provider first.\n")
 		}
+		rowIndex := 0
 		for index, item := range backends {
 			state := "Not published"
 			if item.PriceVersion > 0 {
@@ -391,6 +400,16 @@ func (model Model) ViewText() string {
 				state = fmt.Sprintf("%d compatible offers", len(matches))
 			}
 			output.WriteString(menuRow(index == model.cursor, fmt.Sprintf("%-18s %-20s %s", item.Name, item.Model, state)))
+			rowIndex++
+		}
+		output.WriteString("\nWallet offers\n")
+		if len(model.account.Offers) == 0 && !model.busy {
+			output.WriteString("  No wallet offers found.\n")
+		}
+		for _, row := range rows[len(backends):] {
+			offer := row.offer
+			output.WriteString(menuRow(rowIndex == model.cursor, fmt.Sprintf("%-18s %-20s v%d · %s", offer.OfferID, offer.Model, offer.Version, model.walletOfferState(offer))))
+			rowIndex++
 		}
 		if model.status != "" {
 			output.WriteString("\n" + model.status + "\n")
@@ -401,7 +420,7 @@ func (model Model) ViewText() string {
 		if model.busy {
 			output.WriteString("\nLoading wallet offers…\n")
 		}
-		output.WriteString("\nEnter attach or set pricing • s start hosting • Esc back\n")
+		output.WriteString("\nEnter select • e edit pricing • s start hosting • Esc back\n")
 	case ScreenOfferAttach:
 		fmt.Fprintf(&output, "Attach wallet offer · %s (%s)\n\n", model.attachBackend.Name, model.attachBackend.Model)
 		for index, offer := range model.attachOffers {
@@ -564,18 +583,47 @@ func (model Model) HandleKey(key string) (Model, tea.Cmd) {
 			return model, tea.Quit
 		}
 	case ScreenOffers:
-		backends := model.currentBackends()
-		model.cursor = move(model.cursor, key, len(backends))
+		rows := model.offerRows()
+		model.cursor = move(model.cursor, key, len(rows))
 		if key == "esc" {
 			model.screen, model.cursor = ScreenHome, 0
 		}
-		if key == "enter" && len(backends) > 0 && !model.busy {
-			item := backends[model.cursor]
+		if key == "e" && len(rows) > 0 && !model.busy {
+			if rows[model.cursor].wallet {
+				model.status = "Select a provider under This machine to edit pricing."
+			} else {
+				model.openPricing(rows[model.cursor].backend)
+			}
+		}
+		if key == "enter" && len(rows) > 0 && !model.busy {
+			row := rows[model.cursor]
+			if row.wallet {
+				if attached, ok := model.attachedBackend(row.offer.OfferID); ok {
+					model.status = fmt.Sprintf("Already attached to %s.", attached.Name)
+					return model, nil
+				}
+				matches := model.attachableBackends(row.offer)
+				switch len(matches) {
+				case 0:
+					model.status = "Configure a matching provider first."
+				case 1:
+					model.busy, model.err = true, nil
+					return model, model.attachCommand(matches[0], row.offer)
+				default:
+					model.status = "Multiple matching local providers; select one under This machine."
+				}
+				return model, nil
+			}
+			item := row.backend
+			if item.PriceVersion > 0 {
+				model.status = fmt.Sprintf("Already attached as %s v%d. Press e to edit pricing.", item.EffectiveOfferID(), item.PriceVersion)
+				return model, nil
+			}
 			matches := model.compatibleOffers(item)
-			switch {
-			case item.PriceVersion > 0 || len(matches) == 0:
+			switch len(matches) {
+			case 0:
 				model.openPricing(item)
-			case len(matches) == 1:
+			case 1:
 				model.busy, model.err = true, nil
 				return model, model.attachCommand(item, matches[0])
 			default:
@@ -583,6 +631,7 @@ func (model Model) HandleKey(key string) (Model, tea.Cmd) {
 			}
 		}
 		if key == "s" && !model.busy {
+			backends := model.currentBackends()
 			if slices.ContainsFunc(backends, func(item config.Backend) bool { return item.Enabled && item.PriceVersion == 0 }) {
 				model.err = errorsNew("Publish pricing for every enabled provider before starting")
 				return model, nil
@@ -835,10 +884,57 @@ func (model Model) currentBackends() []config.Backend {
 	return model.dependencies.Backends
 }
 
+func (model Model) offerRows() []offerRow {
+	backends := model.currentBackends()
+	rows := make([]offerRow, 0, len(backends)+len(model.account.Offers))
+	for _, item := range backends {
+		rows = append(rows, offerRow{backend: item})
+	}
+	for _, offer := range model.account.Offers {
+		rows = append(rows, offerRow{offer: offer, wallet: true})
+	}
+	return rows
+}
+
+func (model Model) walletOfferState(offer account.EditableOffer) string {
+	if attached, ok := model.attachedBackend(offer.OfferID); ok {
+		return "Attached here · " + attached.Name
+	}
+	matches := len(model.attachableBackends(offer))
+	if matches == 1 {
+		return "Ready to attach"
+	}
+	if matches > 1 {
+		return fmt.Sprintf("%d matching local providers", matches)
+	}
+	return "No matching local provider"
+}
+
+func (model Model) attachedBackend(offerID string) (config.Backend, bool) {
+	backends := model.currentBackends()
+	index := slices.IndexFunc(backends, func(item config.Backend) bool {
+		return item.PriceVersion > 0 && item.EffectiveOfferID() == offerID
+	})
+	if index < 0 {
+		return config.Backend{}, false
+	}
+	return backends[index], true
+}
+
+func (model Model) attachableBackends(offer account.EditableOffer) []config.Backend {
+	result := make([]config.Backend, 0)
+	for _, item := range model.currentBackends() {
+		if item.PriceVersion == 0 && providerops.Compatible(item, offer) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
 func (model Model) compatibleOffers(item config.Backend) []account.EditableOffer {
 	result := make([]account.EditableOffer, 0)
 	for _, offer := range model.account.Offers {
-		if providerops.Compatible(item, offer) {
+		if _, attached := model.attachedBackend(offer.OfferID); !attached && providerops.Compatible(item, offer) {
 			result = append(result, offer)
 		}
 	}
