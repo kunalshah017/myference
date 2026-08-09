@@ -42,7 +42,7 @@ func TestApplyStoresAPISecretOutsideConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(updated.Backends) != 1 || updated.Backends[0].URL != "https://api.openai.com" || updated.Backends[0].Name == "" {
+	if len(updated.Backends) != 1 || updated.Backends[0].URL != "https://api.openai.com" || updated.Backends[0].Name == "" || updated.Backends[0].PriceVersion != 0 {
 		t.Fatalf("backends=%+v", updated.Backends)
 	}
 	if service != "myference.backend" || account != "machine/"+updated.Backends[0].Name || secret != "top-secret" {

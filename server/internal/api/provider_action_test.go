@@ -102,3 +102,39 @@ func TestProviderActionValidatesKindsAndPreservesDraftAcrossCrossAccountReads(t 
 		t.Fatalf("invalid deposit status=%d", invalid.Code)
 	}
 }
+
+func TestProviderActionBindsMachineDraftReadsAndRequiresBrowserSubmission(t *testing.T) {
+	store := NewProviderActionStore(time.Now)
+	handler := NewProviderActions(store, ProviderActionDependencies{
+		MachineAuth: func(r *http.Request) (string, string, error) { return r.Header.Get("X-Machine"), "account", nil },
+		AccountAuth: func(*http.Request) (string, error) { return "account", nil },
+		Prepare: func(context.Context, string, string, string, ProviderActionInput) (string, ProviderActionBaseline, error) {
+			return "0x1111111111111111111111111111111111111111", ProviderActionBaseline{}, nil
+		},
+	})
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/provider/actions", bytes.NewBufferString(`{"kind":"deposit_collateral","amount_wei":"25"}`))
+	createRequest.Header.Set("Authorization", "Bearer owner")
+	createRequest.Header.Set("X-Machine", "machine-owner")
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, createRequest)
+	var action ProviderAction
+	_ = json.NewDecoder(created.Body).Decode(&action)
+
+	otherRead := httptest.NewRequest(http.MethodGet, "/api/provider/actions/"+action.ID, nil)
+	otherRead.Header.Set("Authorization", "Bearer other")
+	otherRead.Header.Set("X-Machine", "machine-other")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, otherRead)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("other machine read status=%d", response.Code)
+	}
+
+	machineSubmit := httptest.NewRequest(http.MethodPost, "/api/provider/actions/"+action.ID+"/submitted", bytes.NewBufferString(`{"transaction_hashes":["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}`))
+	machineSubmit.Header.Set("Authorization", "Bearer owner")
+	machineSubmit.Header.Set("X-Machine", "machine-owner")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, machineSubmit)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("machine submission status=%d", response.Code)
+	}
+}

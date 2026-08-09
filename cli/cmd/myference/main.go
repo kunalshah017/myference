@@ -1144,9 +1144,6 @@ func runBackendWithDependencies(args []string, output io.Writer, dependencies ba
 		if existingIndex >= 0 && !priceVersionSet {
 			effectivePriceVersion = cfg.Backends[existingIndex].PriceVersion
 		}
-		if effectivePriceVersion == 0 {
-			effectivePriceVersion = 1
-		}
 		item := config.Backend{Name: *name, Kind: *kind, Model: *model, PriceVersion: effectivePriceVersion, Enabled: true, Image: *image}
 		if *kind == "ollama" || *kind == "openai" {
 			item.URL = *endpoint

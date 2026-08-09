@@ -225,13 +225,17 @@ func (h *providerActionHandler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *providerActionHandler) get(w http.ResponseWriter, r *http.Request) {
-	_, _, accountID, err := h.identity(r)
+	source, machineID, accountID, err := h.identity(r)
 	if err != nil {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
 	action, err := h.store.GetForAccount(r.PathValue("id"), accountID)
 	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if source == ActionSourceMachine && action.MachineIDValue != machineID {
 		http.NotFound(w, r)
 		return
 	}
@@ -253,9 +257,13 @@ func (h *providerActionHandler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *providerActionHandler) submitted(w http.ResponseWriter, r *http.Request) {
-	_, _, accountID, err := h.identity(r)
+	source, _, accountID, err := h.identity(r)
 	if err != nil {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	if source != ActionSourceBrowser {
+		http.NotFound(w, r)
 		return
 	}
 	var input struct {

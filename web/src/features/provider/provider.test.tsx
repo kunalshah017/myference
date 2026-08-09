@@ -7,7 +7,7 @@ import type { ProviderAPI, ProviderAccount, ProviderAction, ProviderActionInput 
 import type { MarketWriter, OfferInput, SubmittedTransaction } from '../../lib/marketContract'
 import { ProviderConsole } from './ProviderConsole'
 import { ProviderApproval } from './ProviderApproval'
-import { executeProviderAction } from './providerAction'
+import { assertProviderWallet, executeProviderAction } from './providerAction'
 
 afterEach(cleanup)
 
@@ -65,4 +65,10 @@ it('renders the dedicated CLI approval page without exposing a hosting form', as
   expect(await screen.findByRole('heading', { name: /approve provider action/i })).toBeVisible()
   expect(screen.getByText(providerAccount.wallet_address)).toBeVisible()
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+})
+
+it('rejects the wrong connected wallet before sending a CLI action', async () => {
+  Object.assign(window, { ethereum: { request: vi.fn(async () => ['0x2222222222222222222222222222222222222222']) } })
+  await expect(assertProviderWallet(action({ kind: 'deposit_collateral', amount_wei: '5' }))).rejects.toThrow(/switch your wallet/i)
+  Object.assign(window, { ethereum: undefined })
 })

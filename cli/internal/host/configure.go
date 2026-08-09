@@ -57,16 +57,13 @@ func Apply(ctx context.Context, current config.Config, selections []Selection, s
 		index := slices.IndexFunc(updated.Backends, func(item config.Backend) bool {
 			return StableID(Candidate{Kind: item.Kind, URL: item.URL, Model: item.Model, Image: item.Image}) == identity
 		})
-		item := config.Backend{Name: BackendName(candidate), Kind: candidate.Kind, URL: candidate.URL, Model: candidate.Model, Image: candidate.Image, PriceVersion: 1, Enabled: true}
+		item := config.Backend{Name: BackendName(candidate), Kind: candidate.Kind, URL: candidate.URL, Model: candidate.Model, Image: candidate.Image, Enabled: true}
 		if candidate.Kind != "ollama" && candidate.Kind != "openai" {
 			item.URL = ""
 		}
 		if index >= 0 {
 			item.Name = updated.Backends[index].Name
 			item.PriceVersion = updated.Backends[index].PriceVersion
-			if item.PriceVersion == 0 {
-				item.PriceVersion = 1
-			}
 			updated.Backends[index] = item
 		} else {
 			item.Name = uniqueBackendName(item.Name, updated.Backends)
