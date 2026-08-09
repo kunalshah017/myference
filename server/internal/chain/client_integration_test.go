@@ -50,7 +50,7 @@ func TestClientDeploysAndSettlesActualMyferenceContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	terms, err := owner.ReceiptTerms(ctx)
-	if err != nil || terms.ChainID != 31337 || terms.Contract != address || terms.SettlementSigner != owner.Address() || terms.FeeBasisPoints != 500 || terms.FeeVersion != 1 {
+	if err != nil || terms.ChainID != 31337 || terms.Contract != address || terms.SettlementSigner != owner.Address() || terms.FeeBasisPoints != 500 || terms.FeeVersion != 1 || terms.MinimumBond == nil || terms.MinimumBond.Cmp(big.NewInt(100)) != 0 {
 		t.Fatalf("receipt terms=%+v err=%v", terms, err)
 	}
 	if err := owner.Deposit(ctx, big.NewInt(1_000)); err != nil {

@@ -33,6 +33,7 @@ func loadChainConfig(getenv func(string) string) (chainConfig, error) {
 
 type chainRuntime struct {
 	client      *chain.Client
+	terms       chain.ReceiptTerms
 	queue       *chain.SettlementQueue
 	indexer     *chain.Indexer
 	coordinator *settlement.Coordinator
@@ -72,7 +73,7 @@ func openChainRuntime(ctx context.Context, config chainConfig, databaseURL strin
 		return nil, err
 	}
 	closeClient = false
-	return &chainRuntime{client: client, queue: queue, indexer: indexer, coordinator: settlement.NewCoordinator(settlement.Config{SignatureTimeout: 10 * time.Second}, repository, hub, queue, client)}, nil
+	return &chainRuntime{client: client, terms: terms, queue: queue, indexer: indexer, coordinator: settlement.NewCoordinator(settlement.Config{SignatureTimeout: 10 * time.Second}, repository, hub, queue, client)}, nil
 }
 
 func (r *chainRuntime) Close() { r.indexer.Close(); r.queue.Close(); r.client.Close() }

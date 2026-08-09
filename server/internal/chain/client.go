@@ -24,6 +24,7 @@ type ReceiptTerms struct {
 	ChainID          uint64
 	Contract         common.Address
 	SettlementSigner common.Address
+	MinimumBond      *big.Int
 	FeeBasisPoints   uint16
 	FeeVersion       uint64
 }
@@ -80,7 +81,11 @@ func (c *Client) ReceiptTerms(ctx context.Context) (ReceiptTerms, error) {
 	if err != nil {
 		return ReceiptTerms{}, err
 	}
-	return ReceiptTerms{ChainID: c.chainID.Uint64(), Contract: c.contractAddress, SettlementSigner: settlementSigner, FeeBasisPoints: feeBasisPoints, FeeVersion: feeVersion}, nil
+	minimumBond, err := c.contract.MinimumBond(call)
+	if err != nil {
+		return ReceiptTerms{}, err
+	}
+	return ReceiptTerms{ChainID: c.chainID.Uint64(), Contract: c.contractAddress, SettlementSigner: settlementSigner, MinimumBond: minimumBond, FeeBasisPoints: feeBasisPoints, FeeVersion: feeVersion}, nil
 }
 
 func (c *Client) Bind(address common.Address) error {
