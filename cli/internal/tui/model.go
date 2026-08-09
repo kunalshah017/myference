@@ -420,7 +420,7 @@ func (model Model) ViewText() string {
 		if model.busy {
 			output.WriteString("\nLoading wallet offers…\n")
 		}
-		output.WriteString("\nEnter select • e edit pricing • s start hosting • Esc back\n")
+		output.WriteString("\nEnter reuse/select • e create/edit offer • s start hosting • Esc back\n")
 	case ScreenOfferAttach:
 		fmt.Fprintf(&output, "Attach wallet offer · %s (%s)\n\n", model.attachBackend.Name, model.attachBackend.Model)
 		for index, offer := range model.attachOffers {
@@ -434,7 +434,11 @@ func (model Model) ViewText() string {
 		}
 		output.WriteString("\n\nEnter attach • Esc cancel\n")
 	case ScreenPricing:
-		fmt.Fprintf(&output, "Pricing · %s (%s)\n\n", model.pricingBackend.Name, model.pricingBackend.Model)
+		title := "Create new offer"
+		if model.pricingBackend.PriceVersion > 0 {
+			title = "Edit offer pricing"
+		}
+		fmt.Fprintf(&output, "%s · %s (%s)\n\n", title, model.pricingBackend.Name, model.pricingBackend.Model)
 		computeOnly := backendComputeOnly(model.pricingBackend)
 		switch model.priceStep {
 		case priceStepInput:
@@ -590,7 +594,7 @@ func (model Model) HandleKey(key string) (Model, tea.Cmd) {
 		}
 		if key == "e" && len(rows) > 0 && !model.busy {
 			if rows[model.cursor].wallet {
-				model.status = "Select a provider under This machine to edit pricing."
+				model.status = "Select a provider under This machine to create or edit an offer."
 			} else {
 				model.openPricing(rows[model.cursor].backend)
 			}

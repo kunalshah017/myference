@@ -116,8 +116,20 @@ func TestExplicitRepricingOpensPricing(t *testing.T) {
 	model := NewModel(Dependencies{Backends: []config.Backend{backend}}, nil)
 	model.screen = ScreenOffers
 	model, command := model.HandleKey("e")
-	if command != nil || model.Screen() != ScreenPricing {
-		t.Fatalf("screen=%v command=%v", model.Screen(), command)
+	if command != nil || model.Screen() != ScreenPricing || !strings.Contains(model.ViewText(), "Edit offer pricing") {
+		t.Fatalf("screen=%v command=%v view=%q", model.Screen(), command, model.ViewText())
+	}
+}
+
+func TestExplicitNewOfferBypassesCompatibleWalletOffer(t *testing.T) {
+	backend := config.Backend{Name: "ollama-qwen", Kind: "ollama", Model: "qwen", Enabled: true}
+	offer := account.EditableOffer{OfferID: "existing-qwen", Model: backend.Model, BackendKind: backend.Kind, Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1}
+	model := NewModel(Dependencies{Backends: []config.Backend{backend}}, nil)
+	model.screen = ScreenOffers
+	model.applyAccount(accountMsg{account: account.ProviderAccount{Offers: []account.EditableOffer{offer}}})
+	model, command := model.HandleKey("e")
+	if command != nil || model.Screen() != ScreenPricing || !strings.Contains(model.ViewText(), "Create new offer") {
+		t.Fatalf("screen=%v command=%v view=%q", model.Screen(), command, model.ViewText())
 	}
 }
 

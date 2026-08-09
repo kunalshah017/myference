@@ -4,7 +4,7 @@
 
 **Goal:** Show every wallet-owned offer in the hosting TUI and prevent selection of an existing offer from opening the new-offer pricing flow.
 
-**Architecture:** Reuse the account data already fetched by `Model.accountCommand` and the existing `providerops.Compatible` predicate. Build one small flattened selection model for local-backend and wallet-offer rows so rendering and keyboard handling use the same ordering; keep repricing behind an explicit `e` key.
+**Architecture:** Reuse the account data already fetched by `Model.accountCommand` and the existing `providerops.Compatible` predicate. Build one small flattened selection model for local-backend and wallet-offer rows so rendering and keyboard handling use the same ordering; keep new-offer creation and repricing behind an explicit `e` key.
 
 **Tech Stack:** Go, Bubble Tea, existing `account`, `config`, and `providerops` packages.
 
@@ -44,7 +44,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Write failing interaction tests**
 
-Add tests proving: Enter on an attached machine or wallet row stays on `ScreenOffers` and does not return a pricing command; Enter on an attachable wallet row returns the existing attachment command; Enter on an unavailable wallet row remains on the screen with `Configure a matching provider first`; and `e` on a public machine row opens `ScreenPricing`.
+Add tests proving: Enter on an attached machine or wallet row stays on `ScreenOffers` and does not return a pricing command; Enter on an attachable wallet row returns the existing attachment command; Enter on an unavailable wallet row remains on the screen with `Configure a matching provider first`; `e` on an unpublished machine row opens **Create new offer** even when a compatible wallet offer exists; and `e` on a public machine row opens **Edit offer pricing**.
 
 - [ ] **Step 2: Run the interaction tests and verify RED**
 

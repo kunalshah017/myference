@@ -25,7 +25,7 @@ If one compatible offer exists, the TUI recommends it. If several exist, the use
 
 Selecting an attachable wallet offer attaches it directly when exactly one compatible local backend exists. If several local backends match, the user selects the desired machine row and then chooses the offer through the existing attachment chooser. Selecting an already attached wallet offer reports its local backend and never opens pricing. Selecting an unavailable wallet offer explains that a matching provider must be configured first.
 
-On a machine row, Enter attaches a compatible existing offer, opens pricing only when no reusable offer exists and the backend is unpublished, and otherwise reports the existing attachment. Repricing an existing public offer is an explicit `e` action so inspecting or selecting an existing offer never asks for input and output prices.
+On a machine row, Enter attaches a compatible existing offer, opens pricing only when no reusable offer exists and the backend is unpublished, and otherwise reports the existing attachment. The explicit `e` action always lets the user choose the alternative: it opens **Create new offer** for an unpublished backend even when reusable offers exist, or **Edit offer pricing** for an existing public offer. Inspecting or selecting an existing offer never asks for input and output prices.
 
 ## Command Surface
 
