@@ -153,6 +153,7 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer) erro
 			return latest.Backends
 		},
 		Account:      providerService.Account,
+		Attach:       providerService.Attach,
 		Publish:      providerService.Publish,
 		Deposit:      providerService.Deposit,
 		RequestExit:  providerService.RequestExit,

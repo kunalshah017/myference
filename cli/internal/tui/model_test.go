@@ -47,6 +47,65 @@ func TestOffersShowPublicationStateAndOpenMeteringAwarePricing(t *testing.T) {
 	}
 }
 
+func TestOffersFetchAndAttachCompatibleWalletOffer(t *testing.T) {
+	backend := config.Backend{Name: "ollama-qwen", Kind: "ollama", Model: "qwen2.5:0.5b", Enabled: true}
+	offer := account.EditableOffer{OfferID: "local-qwen", Model: backend.Model, BackendKind: backend.Kind, Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1}
+	attached := ""
+	model := NewModel(Dependencies{
+		Backends: []config.Backend{backend},
+		Account: func(context.Context) (account.ProviderAccount, error) {
+			return account.ProviderAccount{Offers: []account.EditableOffer{offer}}, nil
+		},
+		Attach: func(_ context.Context, backendName, offerID string) error {
+			attached = backendName + ":" + offerID
+			return nil
+		},
+	}, nil)
+	model, _ = model.HandleKey("down")
+	updated, teaCommand := model.HandleKey("enter")
+	model = updated
+	if teaCommand == nil {
+		t.Fatal("offers did not fetch provider account")
+	}
+	message := teaCommand().(accountMsg)
+	model.applyAccount(message)
+	if view := model.ViewText(); !strings.Contains(view, "Attach local-qwen v1") {
+		t.Fatalf("view=%q", view)
+	}
+	model, teaCommand = model.HandleKey("enter")
+	if teaCommand == nil {
+		t.Fatal("compatible offer did not create attachment command")
+	}
+	result := teaCommand().(providerOperationMsg)
+	if result.err != nil || attached != "ollama-qwen:local-qwen" {
+		t.Fatalf("attached=%q err=%v", attached, result.err)
+	}
+}
+
+func TestOffersRequireSelectionWhenSeveralWalletOffersAreCompatible(t *testing.T) {
+	backend := config.Backend{Name: "ollama-qwen", Kind: "ollama", Model: "qwen", Enabled: true}
+	offer := func(id string) account.EditableOffer {
+		return account.EditableOffer{OfferID: id, Model: backend.Model, BackendKind: backend.Kind, Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1}
+	}
+	attached := ""
+	model := NewModel(Dependencies{Backends: []config.Backend{backend}, Attach: func(_ context.Context, _, offerID string) error { attached = offerID; return nil }}, nil)
+	model.screen = ScreenOffers
+	model.applyAccount(accountMsg{account: account.ProviderAccount{Offers: []account.EditableOffer{offer("first"), offer("second")}}})
+	model, command := model.HandleKey("enter")
+	if command != nil || model.Screen() != ScreenOfferAttach || !strings.Contains(model.ViewText(), "first") || !strings.Contains(model.ViewText(), "second") {
+		t.Fatalf("screen=%v view=%q", model.Screen(), model.ViewText())
+	}
+	model, _ = model.HandleKey("down")
+	_, command = model.HandleKey("enter")
+	if command == nil {
+		t.Fatal("selected offer did not create attachment command")
+	}
+	result := command().(providerOperationMsg)
+	if result.err != nil || attached != "second" {
+		t.Fatalf("attached=%q err=%v", attached, result.err)
+	}
+}
+
 func TestCollateralRendersAccountAndRunsAvailableAction(t *testing.T) {
 	requested := false
 	model := NewModel(Dependencies{Account: func(context.Context) (account.ProviderAccount, error) {

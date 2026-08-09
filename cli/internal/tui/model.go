@@ -27,6 +27,7 @@ const (
 	ScreenReview
 	ScreenStatus
 	ScreenOffers
+	ScreenOfferAttach
 	ScreenPricing
 	ScreenCollateral
 	ScreenCollateralDeposit
@@ -58,6 +59,7 @@ type Dependencies struct {
 	Backends     []config.Backend
 	LoadBackends func() []config.Backend
 	Account      func(context.Context) (account.ProviderAccount, error)
+	Attach       func(context.Context, string, string) error
 	Publish      func(context.Context, config.Backend, providerops.Rates) error
 	Deposit      func(context.Context, string) error
 	RequestExit  func(context.Context) error
@@ -94,6 +96,8 @@ type Model struct {
 	priceCompute   textinput.Model
 	depositAmount  textinput.Model
 	account        account.ProviderAccount
+	attachBackend  config.Backend
+	attachOffers   []account.EditableOffer
 }
 
 type catalogMsg struct {
@@ -183,7 +187,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case configuredMsg:
 		model.busy, model.err = false, message.err
 		if message.err == nil {
-			model.screen, model.cursor, model.status = ScreenOffers, 0, "Providers saved. Publish pricing before starting."
+			model.screen, model.cursor, model.status, model.busy = ScreenOffers, 0, "Providers saved. Publish pricing before starting.", true
+			return model, model.accountCommand()
 		}
 		return model, nil
 	case snapshotMsg:
@@ -205,6 +210,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.err = message.err
 		if message.err == nil {
 			model.status = "Provider action confirmed."
+			if model.screen == ScreenOfferAttach {
+				model.screen, model.cursor = ScreenOffers, 0
+				model.attachOffers = nil
+			}
 			if model.screen == ScreenPricing {
 				model.screen = ScreenOffers
 				model.clearPricing()
@@ -366,7 +375,11 @@ func (model Model) ViewText() string {
 		for index, item := range backends {
 			state := "Not published"
 			if item.PriceVersion > 0 {
-				state = fmt.Sprintf("v%d", item.PriceVersion)
+				state = fmt.Sprintf("Public as %s v%d", item.EffectiveOfferID(), item.PriceVersion)
+			} else if matches := model.compatibleOffers(item); len(matches) == 1 {
+				state = fmt.Sprintf("Attach %s v%d", matches[0].OfferID, matches[0].Version)
+			} else if len(matches) > 1 {
+				state = fmt.Sprintf("%d compatible offers", len(matches))
 			}
 			output.WriteString(menuRow(index == model.cursor, fmt.Sprintf("%-18s %-20s %s", item.Name, item.Model, state)))
 		}
@@ -376,7 +389,22 @@ func (model Model) ViewText() string {
 		if model.err != nil {
 			output.WriteString("\nAction required: " + model.err.Error() + "\n")
 		}
-		output.WriteString("\nEnter set pricing • s start hosting • Esc back\n")
+		if model.busy {
+			output.WriteString("\nLoading wallet offers…\n")
+		}
+		output.WriteString("\nEnter attach or set pricing • s start hosting • Esc back\n")
+	case ScreenOfferAttach:
+		fmt.Fprintf(&output, "Attach wallet offer · %s (%s)\n\n", model.attachBackend.Name, model.attachBackend.Model)
+		for index, offer := range model.attachOffers {
+			output.WriteString(menuRow(index == model.cursor, fmt.Sprintf("%-20s v%d", offer.OfferID, offer.Version)))
+		}
+		if model.busy {
+			output.WriteString("\nSaving attachment…")
+		}
+		if model.err != nil {
+			output.WriteString("\nAction required: " + model.err.Error())
+		}
+		output.WriteString("\n\nEnter attach • Esc cancel\n")
 	case ScreenPricing:
 		fmt.Fprintf(&output, "Pricing · %s (%s)\n\n", model.pricingBackend.Name, model.pricingBackend.Model)
 		computeOnly := backendComputeOnly(model.pricingBackend)
@@ -465,7 +493,8 @@ func (model Model) HandleKey(key string) (Model, tea.Cmd) {
 			case 0:
 				model.screen, model.cursor = ScreenProviders, 0
 			case 1:
-				model.screen, model.cursor = ScreenOffers, 0
+				model.screen, model.cursor, model.busy, model.err = ScreenOffers, 0, true, nil
+				return model, model.accountCommand()
 			case 2:
 				model.screen, model.cursor, model.busy, model.err = ScreenCollateral, 0, true, nil
 				return model, model.accountCommand()
@@ -531,8 +560,18 @@ func (model Model) HandleKey(key string) (Model, tea.Cmd) {
 		if key == "esc" {
 			model.screen, model.cursor = ScreenHome, 0
 		}
-		if key == "enter" && len(backends) > 0 {
-			model.openPricing(backends[model.cursor])
+		if key == "enter" && len(backends) > 0 && !model.busy {
+			item := backends[model.cursor]
+			matches := model.compatibleOffers(item)
+			switch {
+			case item.PriceVersion > 0 || len(matches) == 0:
+				model.openPricing(item)
+			case len(matches) == 1:
+				model.busy, model.err = true, nil
+				return model, model.attachCommand(item, matches[0])
+			default:
+				model.screen, model.cursor, model.attachBackend, model.attachOffers = ScreenOfferAttach, 0, item, matches
+			}
 		}
 		if key == "s" && !model.busy {
 			if slices.ContainsFunc(backends, func(item config.Backend) bool { return item.Enabled && item.PriceVersion == 0 }) {
@@ -541,6 +580,15 @@ func (model Model) HandleKey(key string) (Model, tea.Cmd) {
 			}
 			model.busy, model.err = true, nil
 			return model, model.startConfiguredCommand()
+		}
+	case ScreenOfferAttach:
+		model.cursor = move(model.cursor, key, len(model.attachOffers))
+		if key == "esc" && !model.busy {
+			model.screen, model.cursor, model.attachOffers, model.err = ScreenOffers, 0, nil, nil
+		}
+		if key == "enter" && len(model.attachOffers) > 0 && !model.busy {
+			model.busy, model.err = true, nil
+			return model, model.attachCommand(model.attachBackend, model.attachOffers[model.cursor])
 		}
 	case ScreenPricing:
 		if key == "esc" && !model.busy {
@@ -776,6 +824,25 @@ func (model Model) currentBackends() []config.Backend {
 		return model.dependencies.LoadBackends()
 	}
 	return model.dependencies.Backends
+}
+
+func (model Model) compatibleOffers(item config.Backend) []account.EditableOffer {
+	result := make([]account.EditableOffer, 0)
+	for _, offer := range model.account.Offers {
+		if providerops.Compatible(item, offer) {
+			result = append(result, offer)
+		}
+	}
+	return result
+}
+
+func (model Model) attachCommand(item config.Backend, offer account.EditableOffer) tea.Cmd {
+	return func() tea.Msg {
+		if model.dependencies.Attach == nil {
+			return providerOperationMsg{err: errorsNew("Offer attachment is unavailable")}
+		}
+		return providerOperationMsg{err: model.dependencies.Attach(context.Background(), item.Name, offer.OfferID)}
+	}
 }
 
 func (model *Model) openPricing(item config.Backend) {
