@@ -12,7 +12,7 @@ New offers default to the backend name unless the provider explicitly attaches a
 
 ## Account Offer Discovery and Attachment
 
-Opening **Offers & Pricing** fetches `/api/provider/account`. The screen keeps locally configured backends as its primary rows and annotates them with their attached offer or compatible wallet-owned offers.
+Opening **Offers & Pricing** fetches `/api/provider/account` and renders two sections: **This machine** lists locally configured backends, while **Wallet offers** lists every account-owned offer, including offers that cannot run on this machine. Wallet rows state whether they are attached here, attachable to a configured backend, or unavailable until a matching provider is configured.
 
 An existing offer is compatible only when all immutable runtime identity fields agree:
 
@@ -23,7 +23,9 @@ An existing offer is compatible only when all immutable runtime identity fields 
 
 If one compatible offer exists, the TUI recommends it. If several exist, the user chooses one. Attaching saves its `offer_id` and current finalized version locally and does not create a wallet transaction. An incompatible or missing offer continues through the existing new-offer pricing flow.
 
-Wallet-owned offers without a compatible local backend may be shown as unavailable on this machine, but cannot be attached until that provider is configured.
+Selecting an attachable wallet offer attaches it directly when exactly one compatible local backend exists. If several local backends match, the user selects the desired machine row and then chooses the offer through the existing attachment chooser. Selecting an already attached wallet offer reports its local backend and never opens pricing. Selecting an unavailable wallet offer explains that a matching provider must be configured first.
+
+On a machine row, Enter attaches a compatible existing offer, opens pricing only when no reusable offer exists and the backend is unpublished, and otherwise reports the existing attachment. Repricing an existing public offer is an explicit `e` action so inspecting or selecting an existing offer never asks for input and output prices.
 
 ## Command Surface
 
@@ -54,7 +56,7 @@ The initial attachment supplies the existing finalized version. Once the machine
 
 ## Testing
 
-Tests cover configuration fallback, effective offer identity, compatibility checks, successful and rejected attachment, command behavior, TUI account fetching and selection, capacity advertisement under a distinct offer ID, credential lookup under the unchanged backend name, and existing-config compatibility. Full Go, contract, web, installer, cross-platform build, and release verification remain required before publishing.
+Tests cover configuration fallback, effective offer identity, compatibility checks, successful and rejected attachment, command behavior, complete wallet-offer rendering, selection behavior for attached, attachable, and unavailable offers, explicit repricing, capacity advertisement under a distinct offer ID, credential lookup under the unchanged backend name, and existing-config compatibility. Full Go, contract, web, installer, cross-platform build, and release verification remain required before publishing.
 
 ## Non-goals
 
