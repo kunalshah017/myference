@@ -29,6 +29,7 @@ type Candidate struct {
 	URL    string
 	Model  string
 	Digest string
+	Image  string
 	State  string
 	Hint   string
 	Size   int64
