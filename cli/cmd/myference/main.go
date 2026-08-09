@@ -32,7 +32,9 @@ import (
 	openaiBackend "github.com/kunalshah017/myference/cli/internal/backend/openai"
 	"github.com/kunalshah017/myference/cli/internal/config"
 	"github.com/kunalshah017/myference/cli/internal/credential"
+	hostservice "github.com/kunalshah017/myference/cli/internal/host"
 	"github.com/kunalshah017/myference/cli/internal/provider"
+	hostingtui "github.com/kunalshah017/myference/cli/internal/tui"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
 
@@ -51,10 +53,160 @@ var version = "dev"
 var commit = "unknown"
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
+	if err := runApplication(context.Background(), os.Args[1:], os.Stdin, os.Stdout, isTerminalFile(os.Stdin), isTerminalFile(os.Stdout), runInteractive); err != nil {
 		fmt.Fprintln(os.Stderr, "myference:", err)
 		os.Exit(1)
 	}
+}
+
+type applicationEntryMode uint8
+
+const (
+	entryCommand applicationEntryMode = iota
+	entryTUI
+	entryUsage
+)
+
+type tuiRunner func(context.Context, io.Reader, io.Writer) error
+
+func entryMode(args []string, stdinTTY, stdoutTTY bool) applicationEntryMode {
+	if len(args) != 0 {
+		return entryCommand
+	}
+	if stdinTTY && stdoutTTY {
+		return entryTUI
+	}
+	return entryUsage
+}
+
+func runApplication(ctx context.Context, args []string, input io.Reader, output io.Writer, stdinTTY, stdoutTTY bool, launchTUI tuiRunner) error {
+	switch entryMode(args, stdinTTY, stdoutTTY) {
+	case entryTUI:
+		if launchTUI == nil {
+			return errors.New("interactive hosting UI is unavailable")
+		}
+		return launchTUI(ctx, input, output)
+	default:
+		return run(args, output)
+	}
+}
+
+func isTerminalFile(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func runInteractive(ctx context.Context, input io.Reader, output io.Writer) error {
+	path := defaultConfigPath()
+	cfg, err := config.Load(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := runLogin(ctx, []string{"--config", path}, output, defaultLoginDependencies()); err != nil {
+			return fmt.Errorf("connect this machine: %w", err)
+		}
+		cfg, err = config.Load(path)
+	}
+	if err != nil {
+		return fmt.Errorf("load hosting configuration: %w", err)
+	}
+
+	candidates := make([]hostservice.Candidate, 0)
+	for result := range hostservice.Discover(ctx, hostservice.DefaultDetectors("http://127.0.0.1:11434", nil)) {
+		candidates = append(candidates, result.Candidates...)
+	}
+	candidates = mergeConfiguredCandidates(candidates, cfg.Backends)
+
+	var serveCancel context.CancelFunc
+	var serveDone chan error
+	stop := func() {
+		if serveCancel == nil {
+			return
+		}
+		serveCancel()
+		select {
+		case <-serveDone:
+		case <-time.After(5 * time.Second):
+		}
+		serveCancel, serveDone = nil, nil
+	}
+	defer stop()
+	dependencies := hostingtui.Dependencies{
+		ListModels: func(parent context.Context, baseURL, secret string) ([]string, error) {
+			queryCtx, cancel := context.WithTimeout(parent, 15*time.Second)
+			defer cancel()
+			return hostservice.ListAPIModels(queryCtx, baseURL, secret, nil)
+		},
+		Configure: func(parent context.Context, selections []hostservice.Selection) error {
+			latest, err := config.Load(path)
+			if err != nil {
+				return err
+			}
+			_, err = hostservice.Apply(parent, latest, selections, hostservice.CredentialStore{
+				Service: backendCredentialService,
+				Load:    credential.Load,
+				Save:    credential.Save,
+				Delete:  credential.Delete,
+			}, func(updated config.Config) error { return config.Save(path, updated) })
+			return err
+		},
+		Start: func(parent context.Context) error {
+			if serveCancel != nil {
+				return nil
+			}
+			serveContext, cancel := context.WithCancel(parent)
+			serveCancel = cancel
+			serveDone = make(chan error, 1)
+			startedAfter := time.Now().Add(-time.Second)
+			go func() { serveDone <- runServe(serveContext, path, io.Discard) }()
+			ticker := time.NewTicker(25 * time.Millisecond)
+			defer ticker.Stop()
+			timeout := time.NewTimer(10 * time.Second)
+			defer timeout.Stop()
+			for {
+				select {
+				case err := <-serveDone:
+					serveCancel, serveDone = nil, nil
+					if errors.Is(err, context.Canceled) {
+						return nil
+					}
+					return err
+				case <-ticker.C:
+					status, err := provider.LoadStatusFile(providerStatusPath(path))
+					if err == nil && status.StartedAt.After(startedAfter) {
+						return nil
+					}
+				case <-timeout.C:
+					stop()
+					return errors.New("provider startup timed out")
+				}
+			}
+		},
+		Stop: stop,
+		Snapshot: func() (provider.StatusSnapshot, error) {
+			return provider.LoadStatusFile(providerStatusPath(path))
+		},
+	}
+	return hostingtui.Run(input, output, dependencies, candidates)
+}
+
+func mergeConfiguredCandidates(discovered []hostservice.Candidate, backends []config.Backend) []hostservice.Candidate {
+	result := append([]hostservice.Candidate(nil), discovered...)
+	for _, item := range backends {
+		candidate := hostservice.Candidate{Kind: item.Kind, Name: strings.ToUpper(item.Kind[:1]) + item.Kind[1:], URL: item.URL, Model: item.Model, Image: item.Image, State: hostservice.StateReady, Selected: item.Enabled}
+		candidate.ID = hostservice.StableID(candidate)
+		index := slices.IndexFunc(result, func(existing hostservice.Candidate) bool { return existing.ID == candidate.ID })
+		if index >= 0 {
+			result[index].Selected = item.Enabled
+		} else {
+			result = append(result, candidate)
+		}
+	}
+	slices.SortFunc(result, func(a, b hostservice.Candidate) int {
+		if compared := strings.Compare(a.Kind, b.Kind); compared != 0 {
+			return compared
+		}
+		return strings.Compare(a.Model, b.Model)
+	})
+	return result
 }
 
 func run(args []string, output io.Writer) error {

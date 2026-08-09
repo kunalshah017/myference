@@ -23,16 +23,17 @@ const (
 var ErrModelCatalogUnavailable = errors.New("provider model catalog unavailable")
 
 type Candidate struct {
-	ID     string
-	Kind   string
-	Name   string
-	URL    string
-	Model  string
-	Digest string
-	Image  string
-	State  string
-	Hint   string
-	Size   int64
+	ID       string
+	Kind     string
+	Name     string
+	URL      string
+	Model    string
+	Digest   string
+	Image    string
+	State    string
+	Hint     string
+	Size     int64
+	Selected bool
 }
 
 type Result struct {

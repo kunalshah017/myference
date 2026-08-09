@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kunalshah017/myference/cli/internal/host"
+	"github.com/kunalshah017/myference/cli/internal/provider"
 )
 
 func TestHomeProvidersReviewNavigationAndMultiSelection(t *testing.T) {
@@ -99,5 +100,17 @@ func TestStartPassesAllSelectionsAndSecrets(t *testing.T) {
 	started, ok := message.(startedMsg)
 	if !ok || started.err != nil || len(got) != 1 || got[0].Secret != "secret" {
 		t.Fatalf("message=%T %+v selection=%+v", message, message, got)
+	}
+}
+
+func TestLiveStatusRendersOfferHealthAndRequestCount(t *testing.T) {
+	model := NewModel(Dependencies{}, nil)
+	model.screen, model.running = ScreenStatus, true
+	model.applySnapshot(snapshotMsg{snapshot: provider.StatusSnapshot{Connected: true, Requests: 12, Offers: []provider.OfferStatus{{OfferID: "qwen", Model: "qwen2.5", Healthy: false, Error: "Ollama stopped"}}}})
+	view := model.ViewText()
+	for _, expected := range []string{"Connected", "12 completed requests", "qwen2.5", "Ollama stopped"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("view=%q missing=%q", view, expected)
+		}
 	}
 }

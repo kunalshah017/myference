@@ -11,6 +11,7 @@ cli/cmd/myference/             Shared Windows/macOS provider CLI
 cli/internal/backend/ollama/   Real loopback Ollama adapter
 cli/internal/backend/openai/   OpenAI-compatible cloud adapter
 cli/internal/backend/codex/    Model-only native Codex CLI adapter
+cli/internal/backend/claude/   Model-only native Claude CLI adapter
 cli/internal/backend/command/  Disposable image-based Codex/Claude/Kimi runner
 cli/internal/provider/         Authenticated outbound provider daemon
 cli/internal/platform/windows/ Native Windows provider lifecycle
@@ -37,7 +38,7 @@ curl -fsSL https://myference.xyz/install.sh | sh
 
 The Windows installer supports AMD64, atomically installs the CLI, Linux container proxy sidecar, and lifecycle script, and updates the user PATH. The macOS installer detects Intel or Apple Silicon and installs into `/usr/local/bin`. Manual release artifacts and `SHA256SUMS` remain available on GitHub; releases are not yet code-signed or notarized.
 
-Connect the machine to a wallet-bound account in the browser, configure one or more independently controlled backends, and start the outbound provider:
+Run `myference` with no arguments for the recommended full-screen hosting interface. It opens browser sign-in when needed, discovers every installed Ollama model plus Codex and Claude on `PATH`, supports OpenAI and OpenAI-compatible model catalogs, lets you select several providers, and shows live foreground status. Existing commands remain available for automation and recovery:
 
 ```text
 myference login --server https://api.myference.xyz
@@ -51,13 +52,13 @@ myference service install
 myference service start
 ```
 
-For the common unused-machine path, `myference host` replaces the Ollama add/list/capacity/serve sequence. It discovers installed models, records the runtime digest, opens the provider workspace for collateral and price activation, and serves in the foreground. Use `--model <name>` to choose a particular installed model or `--setup-only` before installing the background service.
+`myference host` remains the non-interactive Ollama shortcut. It discovers installed models, records the runtime digest, opens the provider workspace for collateral and price activation, and serves in the foreground. Use `--model <name>` to choose a particular installed model or `--setup-only` before installing the background service.
 
 Machine, backend, and EIP-712 signer secrets are loaded from Windows Credential Manager or macOS Keychain and never stored in JSON. Browser approval submits `setProviderSigner` on Monad before the machine can become routable. `backend start`, `backend stop`, and `backend remove` are detected by the running daemon and update advertised capacity without disconnecting other backends. Removing a credential-backed backend also deletes its vault credential.
 
-Ollama must use loopback. Cloud adapters require HTTPS except in loopback integration tests. Native Codex requires `codex` on `PATH` and an existing `codex login`; it uses neither Docker nor an OpenAI API key. Myference runs `codex exec` with a private provider home, an empty read-only job directory, hosted tools disabled, and a deny-all pre-tool hook. It rejects workspace input and any command, file, MCP, web, app, plugin, skill, or agent event, then exposes only buffered final text and Codex-reported usage. Use `backend add --replace` to migrate an existing offer in place without changing its name or price version.
+Ollama must use loopback. Cloud adapters require HTTPS except for loopback providers. Native Codex requires `codex` on `PATH` and an existing `codex login`; native Claude similarly reuses the installed Claude CLI login. Neither needs Docker or a separate API key. Both run in model-only mode with empty temporary workspaces and reject workspace input; Codex uses its deny-all hook and event filter, while Claude uses safe mode, strict empty MCP configuration, and an empty tool list. Only final text and reported usage reach marketplace clients. Use `backend add --replace` to migrate an existing offer in place without changing its name or price version.
 
-Claude, Kimi, and an explicitly image-backed Codex backend still require Docker Desktop, a digest-pinned agent image, and `--secret`; for example, `myference backend add --kind codex --name codex-image --model <supported-model> --image ghcr.io/kunalshah017/myference-codex@sha256:... --secret "$OPENAI_API_KEY"`. On Windows provider startup, Myference starts Docker Desktop when needed, waits up to two minutes for its Linux engine, pulls only missing immutable images, and verifies them before advertising capacity. Each image agent runs in an ephemeral, read-only, capability-dropped container on a unique internal Docker network and mounts only the disposable workspace—never the host home or Docker socket. A separately packaged Linux proxy sidecar is the only dual-homed peer: it permits only the configured upstream model and inference endpoints within the job's cumulative output-token budget. The agent sees only a random job token; the long-lived credential is mounted only into the proxy sidecar.
+Kimi and explicitly image-backed Codex or Claude backends still require Docker Desktop, a digest-pinned agent image, and `--secret`; for example, `myference backend add --kind codex --name codex-image --model <supported-model> --image ghcr.io/kunalshah017/myference-codex@sha256:... --secret "$OPENAI_API_KEY"`. On Windows provider startup, Myference starts Docker Desktop when needed, waits up to two minutes for its Linux engine, pulls only missing immutable images, and verifies them before advertising capacity. Each image agent runs in an ephemeral, read-only, capability-dropped container on a unique internal Docker network and mounts only the disposable workspace—never the host home or Docker socket. A separately packaged Linux proxy sidecar is the only dual-homed peer: it permits only the configured upstream model and inference endpoints within the job's cumulative output-token budget. The agent sees only a random job token; the long-lived credential is mounted only into the proxy sidecar.
 
 Marketplace prices are displayed as MON with a cached, informational USD reference. Billing and settlement always use the exact immutable integer MON rates published on-chain. Ollama, compatible APIs, and native Codex meter observed input, output, and compute usage. Image-based CLI agents are compute-only unless trustworthy upstream usage is available.
 

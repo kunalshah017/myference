@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -52,6 +53,37 @@ func TestBackendCommandsAddListStartStopAndStatus(t *testing.T) {
 	}
 	if len(loaded.Backends) != 1 || !loaded.Backends[0].Enabled || loaded.Backends[0].PriceVersion != 2 {
 		t.Fatalf("unexpected backend state: %+v", loaded.Backends)
+	}
+}
+
+func TestEntryModeChoosesTUIOnlyForInteractiveNoArgumentUse(t *testing.T) {
+	for _, test := range []struct {
+		name                string
+		args                []string
+		stdinTTY, stdoutTTY bool
+		want                applicationEntryMode
+	}{
+		{name: "interactive", stdinTTY: true, stdoutTTY: true, want: entryTUI},
+		{name: "piped input", stdinTTY: false, stdoutTTY: true, want: entryUsage},
+		{name: "piped output", stdinTTY: true, stdoutTTY: false, want: entryUsage},
+		{name: "command", args: []string{"status"}, want: entryCommand},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := entryMode(test.args, test.stdinTTY, test.stdoutTTY); got != test.want {
+				t.Fatalf("entryMode=%v want=%v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRunApplicationInvokesTUIForInteractiveNoArgumentUse(t *testing.T) {
+	called := false
+	err := runApplication(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, true, true, func(context.Context, io.Reader, io.Writer) error {
+		called = true
+		return nil
+	})
+	if err != nil || !called {
+		t.Fatalf("called=%v err=%v", called, err)
 	}
 }
 
@@ -274,6 +306,15 @@ func TestConfigureLocalHostDiscoversOllamaAndIsIdempotent(t *testing.T) {
 }
 
 func TestBackendAddSupportsCloudAndCommandAgentsWithoutPersistingSecrets(t *testing.T) {
+	dockerDirectory := t.TempDir()
+	dockerName := "docker"
+	if runtime.GOOS == "windows" {
+		dockerName = "docker.exe"
+	}
+	if err := os.WriteFile(filepath.Join(dockerDirectory, dockerName), []byte("test docker"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dockerDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
 	proxy := filepath.Join(t.TempDir(), "myference-agent-proxy")
 	if err := os.WriteFile(proxy, []byte("test proxy"), 0o700); err != nil {
 		t.Fatal(err)

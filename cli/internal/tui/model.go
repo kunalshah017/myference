@@ -6,10 +6,12 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/kunalshah017/myference/cli/internal/host"
+	"github.com/kunalshah017/myference/cli/internal/provider"
 )
 
 type Screen uint8
@@ -35,6 +37,7 @@ type Dependencies struct {
 	Configure  func(context.Context, []host.Selection) error
 	Start      func(context.Context) error
 	Stop       func()
+	Snapshot   func() (provider.StatusSnapshot, error)
 }
 
 type Model struct {
@@ -51,6 +54,7 @@ type Model struct {
 	busy         bool
 	status       string
 	err          error
+	snapshot     provider.StatusSnapshot
 
 	apiCompatible bool
 	apiStep       apiStep
@@ -67,6 +71,11 @@ type catalogMsg struct {
 }
 
 type startedMsg struct{ err error }
+type snapshotMsg struct {
+	snapshot provider.StatusSnapshot
+	err      error
+}
+type pollStatusMsg struct{}
 
 func NewModel(dependencies Dependencies, candidates []host.Candidate) Model {
 	urlInput := textinput.New()
@@ -83,7 +92,7 @@ func NewModel(dependencies Dependencies, candidates []host.Candidate) Model {
 	modelInput.Placeholder = "model-name"
 	modelInput.Prompt = "Model: "
 	modelInput.SetWidth(64)
-	return Model{
+	model := Model{
 		dependencies: dependencies,
 		screen:       ScreenHome,
 		candidates:   append([]host.Candidate(nil), candidates...),
@@ -93,6 +102,12 @@ func NewModel(dependencies Dependencies, candidates []host.Candidate) Model {
 		apiKey:       keyInput,
 		apiModel:     modelInput,
 	}
+	for _, candidate := range candidates {
+		if candidate.Selected {
+			model.selected[candidate.ID] = true
+		}
+	}
+	return model
 }
 
 func (model Model) Init() tea.Cmd { return nil }
@@ -107,6 +122,20 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return model, nil
 	case startedMsg:
 		model.applyStarted(message)
+		if model.running {
+			return model, model.snapshotCommand()
+		}
+		return model, nil
+	case snapshotMsg:
+		model.applySnapshot(message)
+		if model.running {
+			return model, tea.Tick(time.Second, func(time.Time) tea.Msg { return pollStatusMsg{} })
+		}
+		return model, nil
+	case pollStatusMsg:
+		if model.running {
+			return model, model.snapshotCommand()
+		}
 		return model, nil
 	case tea.KeyPressMsg:
 		key := message.String()
@@ -197,9 +226,27 @@ func (model Model) ViewText() string {
 	case ScreenStatus:
 		state := "Stopped"
 		if model.running {
-			state = "Running"
+			state = "Starting"
+			if model.snapshot.Connected {
+				state = "Connected"
+			}
 		}
 		output.WriteString("Hosting status: " + state + "\n\n")
+		if model.running {
+			fmt.Fprintf(&output, "%d completed requests\n", model.snapshot.Requests)
+			for _, offer := range model.snapshot.Offers {
+				health := "healthy"
+				if !offer.Healthy {
+					health = "unhealthy"
+				}
+				fmt.Fprintf(&output, "• %-16s %s", offer.Model, health)
+				if offer.Error != "" {
+					output.WriteString(" — " + offer.Error)
+				}
+				output.WriteByte('\n')
+			}
+			output.WriteByte('\n')
+		}
 		if model.status != "" {
 			output.WriteString(model.status + "\n")
 		}
@@ -423,6 +470,29 @@ func (model *Model) applyStarted(message startedMsg) {
 		}
 	} else {
 		model.running, model.status = false, "Hosting could not start."
+	}
+}
+
+func (model Model) snapshotCommand() tea.Cmd {
+	return func() tea.Msg {
+		if model.dependencies.Snapshot == nil {
+			return snapshotMsg{}
+		}
+		snapshot, err := model.dependencies.Snapshot()
+		return snapshotMsg{snapshot: snapshot, err: err}
+	}
+}
+
+func (model *Model) applySnapshot(message snapshotMsg) {
+	if message.err != nil {
+		model.status = "Live status is temporarily unavailable."
+		return
+	}
+	model.snapshot = message.snapshot
+	if message.snapshot.Connected {
+		model.status = "Provider relay connected."
+	} else {
+		model.status = "Connecting to provider relay…"
 	}
 }
 

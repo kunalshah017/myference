@@ -41,7 +41,7 @@ func New(baseURL, secret string, httpClient *http.Client) (*Client, error) {
 }
 
 func (c *Client) Models(ctx context.Context) ([]backend.Model, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/models", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint("/v1/models"), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (c *Client) Generate(ctx context.Context, input backend.Request, emit func(
 		maximumOutputTokens = 4096
 	}
 	body, _ := json.Marshal(map[string]any{"model": input.Model, "stream": true, "messages": []map[string]string{{"role": "user", "content": input.Prompt}}, "stream_options": map[string]bool{"include_usage": true}, "max_completion_tokens": maximumOutputTokens})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint("/v1/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		return backend.Usage{}, err
 	}
@@ -160,6 +160,13 @@ func (c *Client) Generate(ctx context.Context, input backend.Request, emit func(
 
 func (c *Client) authorize(request *http.Request) {
 	request.Header.Set("authorization", "Bearer "+c.secret)
+}
+
+func (c *Client) endpoint(path string) string {
+	if strings.HasSuffix(c.baseURL, "/v1") && strings.HasPrefix(path, "/v1/") {
+		return c.baseURL + strings.TrimPrefix(path, "/v1")
+	}
+	return c.baseURL + path
 }
 func statusError(response *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
