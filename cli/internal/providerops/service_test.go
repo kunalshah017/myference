@@ -30,7 +30,7 @@ func TestPublishCreatesExactActionOpensApprovalAndAppliesConfirmedVersion(t *tes
 		{ID: "action-1", Status: account.ActionPendingWallet, ExpiresAt: time.Now().Add(time.Minute)},
 		{ID: "action-1", Status: account.ActionConfirmed, Versions: map[string]uint64{"local-qwen": 7}},
 	}}
-	cfg := config.Config{MachineID: "machine-1", Backends: []config.Backend{{Name: "local-qwen", Kind: "ollama", Model: "qwen2.5", Enabled: true}}}
+	cfg := config.Config{MachineID: "machine-1", Backends: []config.Backend{{Name: "machine-qwen", OfferID: "local-qwen", Kind: "ollama", Model: "qwen2.5", Enabled: true}}}
 	opened := ""
 	saved := config.Config{}
 	service := Service{API: api, Token: "machine-token", WebURL: "https://myference.test/app", LoadConfig: func() (config.Config, error) { return cfg, nil }, SaveConfig: func(value config.Config) error { saved = value; return nil }, OpenURL: func(value string) error { opened = value; return nil }, Wait: noWait}
@@ -45,7 +45,7 @@ func TestPublishCreatesExactActionOpensApprovalAndAppliesConfirmedVersion(t *tes
 		t.Fatalf("saved=%+v", saved.Backends)
 	}
 	input := api.created
-	if input.Kind != account.ActionPublishOffer || input.Offers[0].InputPerMillionWei != "100000000000000000" || input.Offers[0].OutputPerMillionWei != "200000000000000000" || input.Offers[0].ComputePerSecondWei != "100000000000000" {
+	if input.Kind != account.ActionPublishOffer || input.Offers[0].OfferID != "local-qwen" || input.Offers[0].InputPerMillionWei != "100000000000000000" || input.Offers[0].OutputPerMillionWei != "200000000000000000" || input.Offers[0].ComputePerSecondWei != "100000000000000" {
 		t.Fatalf("input=%+v", input)
 	}
 }
@@ -64,8 +64,8 @@ func TestDepositParsesAmountAndBrowserFailureReturnsCopyableURL(t *testing.T) {
 }
 
 func TestSyncVersionsAppliesOnlyCompatibleMachineOffers(t *testing.T) {
-	api := &providerAPIStub{versions: map[string]uint64{"local": 9, "other-machine": 12}}
-	cfg := config.Config{MachineID: "machine-1", Backends: []config.Backend{{Name: "local", PriceVersion: 2}, {Name: "unchanged", PriceVersion: 4}}}
+	api := &providerAPIStub{versions: map[string]uint64{"wallet-offer": 9, "other-machine": 12}}
+	cfg := config.Config{MachineID: "machine-1", Backends: []config.Backend{{Name: "local", OfferID: "wallet-offer", PriceVersion: 2}, {Name: "unchanged", PriceVersion: 4}}}
 	saved := config.Config{}
 	service := Service{API: api, Token: "token", MachineID: "machine-1", LoadConfig: func() (config.Config, error) { return cfg, nil }, SaveConfig: func(value config.Config) error { saved = value; return nil }}
 	changed, err := service.SyncVersions(context.Background())
@@ -77,14 +77,51 @@ func TestSyncVersionsAppliesOnlyCompatibleMachineOffers(t *testing.T) {
 	}
 }
 
+func TestAttachPersistsCompatibleWalletOffer(t *testing.T) {
+	backend := config.Backend{Name: "ollama-qwen2-5", Kind: "ollama", Model: "qwen2.5:0.5b", Enabled: true}
+	offer := account.EditableOffer{OfferID: "local-qwen", Model: backend.Model, BackendKind: "ollama", Capabilities: []string{"text", "stream"}, MeteringMode: "tokens_and_compute", Version: 3}
+	api := &providerAPIStub{account: account.ProviderAccount{Offers: []account.EditableOffer{offer}}}
+	cfg := config.Config{MachineID: "machine", Backends: []config.Backend{backend}}
+	var saved config.Config
+	service := Service{API: api, Token: "token", LoadConfig: func() (config.Config, error) { return cfg, nil }, SaveConfig: func(value config.Config) error { saved = value; return nil }}
+	if err := service.Attach(context.Background(), backend.Name, offer.OfferID); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Backends[0].Name != backend.Name || saved.Backends[0].OfferID != offer.OfferID || saved.Backends[0].PriceVersion != 3 {
+		t.Fatalf("saved=%+v", saved.Backends[0])
+	}
+}
+
+func TestAttachRejectsIncompatibleWalletOffer(t *testing.T) {
+	backend := config.Backend{Name: "local", Kind: "ollama", Model: "qwen", Enabled: true}
+	compatible := account.EditableOffer{OfferID: "offer", Model: "qwen", BackendKind: "ollama", Capabilities: []string{"stream", "text"}, MeteringMode: "tokens_and_compute", Version: 1}
+	tests := map[string]account.EditableOffer{
+		"model":        func() account.EditableOffer { item := compatible; item.Model = "other"; return item }(),
+		"kind":         func() account.EditableOffer { item := compatible; item.BackendKind = "openai"; return item }(),
+		"capabilities": func() account.EditableOffer { item := compatible; item.Capabilities = []string{"text"}; return item }(),
+		"metering":     func() account.EditableOffer { item := compatible; item.MeteringMode = "compute_only"; return item }(),
+		"version":      func() account.EditableOffer { item := compatible; item.Version = 0; return item }(),
+	}
+	for name, offer := range tests {
+		t.Run(name, func(t *testing.T) {
+			saved := false
+			service := Service{API: &providerAPIStub{account: account.ProviderAccount{Offers: []account.EditableOffer{offer}}}, Token: "token", LoadConfig: func() (config.Config, error) { return config.Config{Backends: []config.Backend{backend}}, nil }, SaveConfig: func(config.Config) error { saved = true; return nil }}
+			if err := service.Attach(context.Background(), backend.Name, offer.OfferID); err == nil || saved {
+				t.Fatalf("err=%v saved=%v", err, saved)
+			}
+		})
+	}
+}
+
 type providerAPIStub struct {
 	created  account.ProviderActionInput
 	actions  []account.ProviderAction
 	versions map[string]uint64
+	account  account.ProviderAccount
 }
 
 func (s *providerAPIStub) ProviderAccount(context.Context, string) (account.ProviderAccount, error) {
-	return account.ProviderAccount{}, nil
+	return s.account, nil
 }
 func (s *providerAPIStub) CreateProviderAction(_ context.Context, _ string, input account.ProviderActionInput) (account.ProviderAction, error) {
 	s.created = input

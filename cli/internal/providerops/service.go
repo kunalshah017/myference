@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -100,7 +101,8 @@ func (s Service) Publish(ctx context.Context, backend config.Backend, rates Rate
 		return fmt.Errorf("compute price: %w", err)
 	}
 	capabilities, metering := offerShape(backend)
-	offer := account.ProviderOffer{OfferID: backend.Name, Model: backend.Model, Kind: backend.Kind, Capabilities: capabilities, MeteringMode: metering, InputPerMillionWei: inputWei, OutputPerMillionWei: outputWei, ComputePerSecondWei: computeWei}
+	offerID := backend.EffectiveOfferID()
+	offer := account.ProviderOffer{OfferID: offerID, Model: backend.Model, Kind: backend.Kind, Capabilities: capabilities, MeteringMode: metering, InputPerMillionWei: inputWei, OutputPerMillionWei: outputWei, ComputePerSecondWei: computeWei}
 	action, err := s.execute(ctx, account.ProviderActionInput{Kind: account.ActionPublishOffer, Offers: []account.ProviderOffer{offer}})
 	if err != nil {
 		return err
@@ -114,15 +116,53 @@ func (s Service) Publish(ctx context.Context, backend config.Backend, rates Rate
 	}
 	for index := range cfg.Backends {
 		if cfg.Backends[index].Name == backend.Name {
-			version := action.Versions[backend.Name]
+			version := action.Versions[offerID]
 			if version == 0 {
-				return fmt.Errorf("confirmed action did not publish offer %q", backend.Name)
+				return fmt.Errorf("confirmed action did not publish offer %q", offerID)
 			}
 			cfg.Backends[index].PriceVersion = version
 			return s.SaveConfig(cfg)
 		}
 	}
 	return fmt.Errorf("backend %q is no longer configured", backend.Name)
+}
+
+func Compatible(backend config.Backend, offer account.EditableOffer) bool {
+	capabilities, metering := offerShape(backend)
+	want := append([]string(nil), capabilities...)
+	got := append([]string(nil), offer.Capabilities...)
+	slices.Sort(want)
+	slices.Sort(got)
+	return backend.Model == offer.Model && backend.Kind == offer.BackendKind && slices.Equal(want, got) && metering == offer.MeteringMode && offer.Version > 0
+}
+
+func (s Service) Attach(ctx context.Context, backendName, offerID string) error {
+	if s.LoadConfig == nil || s.SaveConfig == nil {
+		return errors.New("configuration persistence is unavailable")
+	}
+	cfg, err := s.LoadConfig()
+	if err != nil {
+		return err
+	}
+	backendIndex := slices.IndexFunc(cfg.Backends, func(item config.Backend) bool { return item.Name == backendName })
+	if backendIndex < 0 {
+		return fmt.Errorf("backend %q not found", backendName)
+	}
+	providerAccount, err := s.Account(ctx)
+	if err != nil {
+		return err
+	}
+	offerIndex := slices.IndexFunc(providerAccount.Offers, func(item account.EditableOffer) bool { return item.OfferID == offerID })
+	if offerIndex < 0 {
+		return fmt.Errorf("wallet offer %q not found", offerID)
+	}
+	offer := providerAccount.Offers[offerIndex]
+	if !Compatible(cfg.Backends[backendIndex], offer) {
+		return fmt.Errorf("wallet offer %q is incompatible with backend %q", offerID, backendName)
+	}
+	cfg.Backends[backendIndex].OfferID = offer.OfferID
+	cfg.Backends[backendIndex].PriceVersion = offer.Version
+	return s.SaveConfig(cfg)
 }
 
 func (s Service) Deposit(ctx context.Context, amountMON string) error {
@@ -168,7 +208,7 @@ func (s Service) SyncVersions(ctx context.Context) (bool, error) {
 	}
 	changed := false
 	for index := range cfg.Backends {
-		if version := versions[cfg.Backends[index].Name]; version > 0 && version != cfg.Backends[index].PriceVersion {
+		if version := versions[cfg.Backends[index].EffectiveOfferID()]; version > 0 && version != cfg.Backends[index].PriceVersion {
 			cfg.Backends[index].PriceVersion = version
 			changed = true
 		}
