@@ -11,21 +11,6 @@ import (
 	"time"
 )
 
-func TestParseOllamaPSModels(t *testing.T) {
-	input := `NAME ID SIZE PROCESSOR UNTIL
-qwen2.5:7b abc 5.2 GB 100% GPU 4 minutes from now
-llama3:latest def 4.7 GB 40%/60% CPU/GPU Forever
-`
-	got, err := ParseOllamaPS(strings.NewReader(input))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []LoadedModel{{Name: "qwen2.5:7b", ID: "abc"}, {Name: "llama3:latest", ID: "def"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ParseOllamaPS() = %+v, want %+v", got, want)
-	}
-}
-
 func TestSelectInstalledModel(t *testing.T) {
 	models := []string{"zeta:latest", "alpha:latest"}
 	if got, err := SelectInstalledModel(models, ""); err != nil || got != "alpha:latest" {

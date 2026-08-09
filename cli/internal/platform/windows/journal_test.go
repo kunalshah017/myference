@@ -36,24 +36,6 @@ func TestJournalSaveLoadRecordsRequiredRecoveryState(t *testing.T) {
 	}
 }
 
-func TestJournalSaveLoadPreservesAbsentShellPolicy(t *testing.T) {
-	store := NewJournalStore(t.TempDir())
-	want := recoveryJournalFixture()
-	want.HadShellPolicy = false
-	want.ShellPolicy = ""
-
-	if err := store.Save(want); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	got, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Load() = %+v, want absent shell policy %+v", got, want)
-	}
-}
-
 func TestJournalSaveRefusesReplacementOfActiveRecovery(t *testing.T) {
 	store := NewJournalStore(t.TempDir())
 	first := recoveryJournalFixture()
@@ -116,54 +98,6 @@ func TestJournalCompleteStagePersistsAndIsIdempotent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.AppliedStages, []string{"power"}) {
 		t.Fatalf("AppliedStages = %v, want [power]", got.AppliedStages)
-	}
-}
-
-func TestJournalUpdateAppendsFocusStateWithoutReplacingProviderSession(t *testing.T) {
-	store := NewJournalStore(t.TempDir())
-	want := recoveryJournalFixture()
-	if err := store.Save(want); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Update(func(journal *RecoveryJournal) error {
-		journal.StoppedProcesses = append(journal.StoppedProcesses, `C:\\Tools\\Optional.exe`)
-		journal.StoppedServices = append(journal.StoppedServices, "Spooler")
-		journal.AppliedStages = append(journal.AppliedStages, "focus:process:42", "focus:service:Spooler")
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := store.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.SessionKind != "provider" || got.OwnerPID != 1234 {
-		t.Fatalf("provider ownership changed: %+v", got)
-	}
-	if !reflect.DeepEqual(got.AppliedStages, []string{"focus:process:42", "focus:service:Spooler"}) {
-		t.Fatalf("stages=%v", got.AppliedStages)
-	}
-	if err := store.Save(recoveryJournalFixture()); !errors.Is(err, ErrActiveRecoveryJournal) {
-		t.Fatalf("second Save()=%v", err)
-	}
-}
-
-func TestJournalRemoveStagesKeepsProviderTuning(t *testing.T) {
-	store := NewJournalStore(t.TempDir())
-	journal := recoveryJournalFixture()
-	journal.AppliedStages = []string{"power-plan", "focus:process:42", "focus:service:Spooler", "keep-awake"}
-	if err := store.Save(journal); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.RemoveStages("focus:"); err != nil {
-		t.Fatal(err)
-	}
-	got, err := store.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got.AppliedStages, []string{"power-plan", "keep-awake"}) {
-		t.Fatalf("stages=%v", got.AppliedStages)
 	}
 }
 
@@ -254,12 +188,6 @@ func recoveryJournalFixture() RecoveryJournal {
 		SessionKind:       "provider",
 		OwnerPID:          1234,
 		ActivePowerScheme: "11111111-1111-1111-1111-111111111111",
-		ACLidAction:       0,
-		DCLidAction:       1,
-		HadShellPolicy:    true,
-		ShellPolicy:       "explorer.exe",
-		StoppedProcesses:  []string{`C:\\Program Files\\Discord\\Discord.exe`},
-		StoppedServices:   []string{"Spooler"},
 		Ollama: OllamaProcessSettings{
 			Executable: `C:\\Users\\example\\AppData\\Local\\Programs\\Ollama\\ollama.exe`,
 			Priority:   "Normal",
@@ -268,7 +196,6 @@ func recoveryJournalFixture() RecoveryJournal {
 				"OLLAMA_KV_CACHE_TYPE": nil,
 			},
 		},
-		InstalledTaskNames: []string{"Myference Provider", "Myference Headless"},
 	}
 }
 

@@ -12,8 +12,8 @@ import (
 
 const recoveryJournalFileName = "recovery.json"
 
-// ErrActiveRecoveryJournal prevents a later provider, focus, or headless session from
-// hiding the state that an earlier session still needs to restore.
+// ErrActiveRecoveryJournal prevents a later provider session from hiding the
+// state that an earlier session still needs to restore.
 var ErrActiveRecoveryJournal = errors.New("an active Myference recovery journal already exists")
 
 // OllamaProcessSettings captures the process settings that a later restore must
@@ -25,20 +25,13 @@ type OllamaProcessSettings struct {
 }
 
 // RecoveryJournal is the complete pre-mutation snapshot for reversible Windows
-// host controls. Zero lid-action values are meaningful ("do nothing").
+// provider tuning.
 type RecoveryJournal struct {
-	SessionKind        string                `json:"sessionKind"`
-	OwnerPID           int                   `json:"ownerPid"`
-	ActivePowerScheme  string                `json:"activePowerScheme"`
-	ACLidAction        int                   `json:"acLidAction"`
-	DCLidAction        int                   `json:"dcLidAction"`
-	HadShellPolicy     bool                  `json:"hadShellPolicy"`
-	ShellPolicy        string                `json:"shellPolicy"`
-	StoppedProcesses   []string              `json:"stoppedProcesses"`
-	StoppedServices    []string              `json:"stoppedServices"`
-	Ollama             OllamaProcessSettings `json:"ollama"`
-	InstalledTaskNames []string              `json:"installedTaskNames"`
-	AppliedStages      []string              `json:"appliedStages"`
+	SessionKind       string                `json:"sessionKind"`
+	OwnerPID          int                   `json:"ownerPid"`
+	ActivePowerScheme string                `json:"activePowerScheme"`
+	Ollama            OllamaProcessSettings `json:"ollama"`
+	AppliedStages     []string              `json:"appliedStages"`
 }
 
 // JournalStore persists one active recovery journal in StateDir. Its zero value
@@ -138,43 +131,6 @@ func (store JournalStore) CompleteStage(stage string) error {
 	return store.replaceExisting(journal)
 }
 
-func (store JournalStore) Update(mutate func(*RecoveryJournal) error) error {
-	if mutate == nil {
-		return errors.New("journal update callback is required")
-	}
-	journal, err := store.Load()
-	if err != nil {
-		return err
-	}
-	if err := mutate(&journal); err != nil {
-		return err
-	}
-	return store.replaceExisting(journal)
-}
-
-func (store JournalStore) RemoveStages(prefixes ...string) error {
-	if len(prefixes) == 0 {
-		return errors.New("at least one recovery stage prefix is required")
-	}
-	return store.Update(func(journal *RecoveryJournal) error {
-		kept := journal.AppliedStages[:0]
-		for _, stage := range journal.AppliedStages {
-			remove := false
-			for _, prefix := range prefixes {
-				if prefix != "" && strings.HasPrefix(stage, prefix) {
-					remove = true
-					break
-				}
-			}
-			if !remove {
-				kept = append(kept, stage)
-			}
-		}
-		journal.AppliedStages = kept
-		return nil
-	})
-}
-
 // RollbackStages returns completed setup stages in the only safe restoration
 // order: the newest applied mutation is restored first. The returned slice is
 // independent of the journal so callers cannot alter durable recovery state.
@@ -264,7 +220,7 @@ func (store JournalStore) path() string {
 }
 
 func (journal RecoveryJournal) validate() error {
-	if journal.SessionKind != "provider" && journal.SessionKind != "headless" {
+	if journal.SessionKind != "provider" {
 		return fmt.Errorf("recovery session kind %q is not supported", journal.SessionKind)
 	}
 	if journal.OwnerPID <= 0 {
@@ -273,17 +229,7 @@ func (journal RecoveryJournal) validate() error {
 	if strings.TrimSpace(journal.ActivePowerScheme) == "" {
 		return errors.New("active power scheme is required")
 	}
-	for _, taskName := range journal.InstalledTaskNames {
-		if !isMyferenceTask(taskName) {
-			return fmt.Errorf("task %q is not Myference-owned", taskName)
-		}
-	}
 	return nil
-}
-
-func isMyferenceTask(taskName string) bool {
-	name := strings.ToLower(strings.TrimSpace(taskName))
-	return name == "myference" || strings.HasPrefix(name, "myference ") || strings.HasPrefix(name, "myference-") || strings.HasPrefix(name, "myference\\") || strings.HasPrefix(name, "\\myference\\")
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {

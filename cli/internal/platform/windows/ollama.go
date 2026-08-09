@@ -1,7 +1,6 @@
 package windows
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -17,11 +16,6 @@ import (
 )
 
 const defaultOllamaTimeout = 5 * time.Minute
-
-type LoadedModel struct {
-	Name string
-	ID   string
-}
 
 type OllamaHostClient struct {
 	baseURL string
@@ -119,27 +113,6 @@ func (client *OllamaHostClient) Preload(ctx context.Context, model string, confi
 		return errors.New(result.Error)
 	}
 	return nil
-}
-
-func ParseOllamaPS(input io.Reader) ([]LoadedModel, error) {
-	scanner := bufio.NewScanner(input)
-	models := make([]LoadedModel, 0)
-	line := 0
-	for scanner.Scan() {
-		line++
-		fields := strings.Fields(scanner.Text())
-		if len(fields) == 0 || strings.EqualFold(fields[0], "NAME") {
-			continue
-		}
-		if len(fields) < 2 {
-			return nil, fmt.Errorf("parse ollama ps line %d: expected name and ID", line)
-		}
-		models = append(models, LoadedModel{Name: fields[0], ID: fields[1]})
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return models, nil
 }
 
 func SelectInstalledModel(installed []string, requested string) (string, error) {
