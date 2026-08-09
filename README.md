@@ -47,6 +47,7 @@ myference backend add --kind codex --name codex-cli-terra --model gpt-5.6-terra
 myference backend list
 myference backend remove --name <retired-backend>
 myference offer publish --backend local-qwen --input-per-million 0.1 --output-per-million 0.2 --compute-per-second 0.001
+myference offer attach --backend <local-backend> --offer <wallet-offer-id>
 myference offer list
 myference collateral status
 myference collateral deposit --amount 5
@@ -58,6 +59,8 @@ myference service start
 ```
 
 `myference host` remains the non-interactive Ollama shortcut. It discovers installed models and records the runtime digest without using the provider web console as a hosting control plane. Pass all three pricing flags to publish before foreground serving, or use `--setup-only` and run `myference offer publish` separately.
+
+The Offers & Pricing screen fetches offers already owned by the signed-in wallet. A compatible offer created on another machine can be attached to the local backend without renaming it or approving another transaction; the CLI validates the exact model, backend kind, capabilities, and metering mode before saving the existing offer ID and version.
 
 Machine, backend, and EIP-712 signer secrets are loaded from Windows Credential Manager or macOS Keychain and never stored in JSON. Browser approval submits `setProviderSigner` on Monad before the machine can become routable. `backend start`, `backend stop`, and `backend remove` are detected by the running daemon and update advertised capacity without disconnecting other backends. Removing a credential-backed backend also deletes its vault credential.
 

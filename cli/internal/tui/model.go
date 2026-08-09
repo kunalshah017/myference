@@ -117,7 +117,10 @@ type accountMsg struct {
 	account account.ProviderAccount
 	err     error
 }
-type providerOperationMsg struct{ err error }
+type providerOperationMsg struct {
+	status string
+	err    error
+}
 
 func NewModel(dependencies Dependencies, candidates []host.Candidate) Model {
 	urlInput := textinput.New()
@@ -209,7 +212,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.busy = false
 		model.err = message.err
 		if message.err == nil {
-			model.status = "Provider action confirmed."
+			model.status = message.status
+			if model.status == "" {
+				model.status = "Provider action confirmed."
+			}
 			if model.screen == ScreenOfferAttach {
 				model.screen, model.cursor = ScreenOffers, 0
 				model.attachOffers = nil
@@ -841,7 +847,7 @@ func (model Model) attachCommand(item config.Backend, offer account.EditableOffe
 		if model.dependencies.Attach == nil {
 			return providerOperationMsg{err: errorsNew("Offer attachment is unavailable")}
 		}
-		return providerOperationMsg{err: model.dependencies.Attach(context.Background(), item.Name, offer.OfferID)}
+		return providerOperationMsg{status: "Offer attached.", err: model.dependencies.Attach(context.Background(), item.Name, offer.OfferID)}
 	}
 }
 

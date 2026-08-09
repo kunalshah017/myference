@@ -77,8 +77,8 @@ func TestOffersFetchAndAttachCompatibleWalletOffer(t *testing.T) {
 		t.Fatal("compatible offer did not create attachment command")
 	}
 	result := teaCommand().(providerOperationMsg)
-	if result.err != nil || attached != "ollama-qwen:local-qwen" {
-		t.Fatalf("attached=%q err=%v", attached, result.err)
+	if result.err != nil || result.status != "Offer attached." || attached != "ollama-qwen:local-qwen" {
+		t.Fatalf("attached=%q status=%q err=%v", attached, result.status, result.err)
 	}
 }
 
