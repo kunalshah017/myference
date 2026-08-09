@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/kunalshah017/myference/cli/internal/account"
 	"github.com/kunalshah017/myference/cli/internal/backend"
+	claudebackend "github.com/kunalshah017/myference/cli/internal/backend/claude"
 	codexbackend "github.com/kunalshah017/myference/cli/internal/backend/codex"
 	commandbackend "github.com/kunalshah017/myference/cli/internal/backend/command"
 	"github.com/kunalshah017/myference/cli/internal/backend/ollama"
@@ -634,12 +635,20 @@ type backendCommandDependencies struct {
 	SaveCredential   func(string, string, string) error
 	DeleteCredential func(string, string) error
 	NewNativeCodex   func(string, time.Duration) (backend.Backend, error)
+	NewNativeClaude  func(string, time.Duration) (backend.Backend, error)
 }
 
 func defaultBackendCommandDependencies() backendCommandDependencies {
-	return backendCommandDependencies{SaveCredential: credential.Save, DeleteCredential: credential.Delete, NewNativeCodex: func(model string, timeout time.Duration) (backend.Backend, error) {
-		return codexbackend.New(model, timeout)
-	}}
+	return backendCommandDependencies{
+		SaveCredential:   credential.Save,
+		DeleteCredential: credential.Delete,
+		NewNativeCodex: func(model string, timeout time.Duration) (backend.Backend, error) {
+			return codexbackend.New(model, timeout)
+		},
+		NewNativeClaude: func(model string, timeout time.Duration) (backend.Backend, error) {
+			return claudebackend.New(model, timeout)
+		},
+	}
 }
 
 func runBackendWithDependencies(args []string, output io.Writer, dependencies backendCommandDependencies) error {
@@ -714,6 +723,32 @@ func runBackendWithDependencies(args []string, output io.Writer, dependencies ba
 			} else {
 				if *secret == "" {
 					return errors.New("--secret is required with a pinned Codex --image")
+				}
+				if _, err := commandbackend.New(*image, commandArguments(*kind, *model), *kind, *model, *secret, 2*time.Minute); err != nil {
+					return err
+				}
+			}
+		case "claude":
+			if *image == "" {
+				if *secret != "" {
+					return errors.New("native Claude uses the existing Claude CLI login; omit --secret")
+				}
+				if dependencies.NewNativeClaude == nil {
+					return errors.New("native Claude backend is unavailable")
+				}
+				client, err := dependencies.NewNativeClaude(*model, 2*time.Minute)
+				if err != nil {
+					return err
+				}
+				validationCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, err = client.Models(validationCtx)
+				cancel()
+				if err != nil {
+					return err
+				}
+			} else {
+				if *secret == "" {
+					return errors.New("--secret is required with a pinned Claude --image")
 				}
 				if _, err := commandbackend.New(*image, commandArguments(*kind, *model), *kind, *model, *secret, 2*time.Minute); err != nil {
 					return err
@@ -828,7 +863,7 @@ func runBackendWithDependencies(args []string, output io.Writer, dependencies ba
 }
 
 func backendUsesCredential(kind, image string) bool {
-	return kind == "openai" || kind == "claude" || kind == "kimi" || (kind == "codex" && image != "")
+	return kind == "openai" || kind == "kimi" || ((kind == "codex" || kind == "claude") && image != "")
 }
 
 func commandArguments(kind, model string) []string {
@@ -845,12 +880,20 @@ func commandArguments(kind, model string) []string {
 }
 
 func configuredBackend(item config.Backend, machineID string, loadCredential func(string, string) (string, error)) (backend.Backend, error) {
-	return configuredBackendWithNative(item, machineID, loadCredential, func(model string, timeout time.Duration) (backend.Backend, error) {
+	return configuredBackendWithNatives(item, machineID, loadCredential, func(model string, timeout time.Duration) (backend.Backend, error) {
 		return codexbackend.New(model, timeout)
+	}, func(model string, timeout time.Duration) (backend.Backend, error) {
+		return claudebackend.New(model, timeout)
 	})
 }
 
 func configuredBackendWithNative(item config.Backend, machineID string, loadCredential func(string, string) (string, error), newNativeCodex func(string, time.Duration) (backend.Backend, error)) (backend.Backend, error) {
+	return configuredBackendWithNatives(item, machineID, loadCredential, newNativeCodex, func(model string, timeout time.Duration) (backend.Backend, error) {
+		return claudebackend.New(model, timeout)
+	})
+}
+
+func configuredBackendWithNatives(item config.Backend, machineID string, loadCredential func(string, string) (string, error), newNativeCodex, newNativeClaude func(string, time.Duration) (backend.Backend, error)) (backend.Backend, error) {
 	switch item.Kind {
 	case "ollama":
 		return ollama.New(item.URL, nil)
@@ -872,7 +915,19 @@ func configuredBackendWithNative(item config.Backend, machineID string, loadCred
 			return nil, fmt.Errorf("load backend credential: %w", err)
 		}
 		return commandbackend.New(item.Image, commandArguments(item.Kind, item.Model), item.Kind, item.Model, secret, 2*time.Minute)
-	case "claude", "kimi":
+	case "claude":
+		if item.Image == "" {
+			if newNativeClaude == nil {
+				return nil, errors.New("native Claude backend is unavailable")
+			}
+			return newNativeClaude(item.Model, 2*time.Minute)
+		}
+		secret, err := loadCredential(backendCredentialService, machineID+"/"+item.Name)
+		if err != nil {
+			return nil, fmt.Errorf("load backend credential: %w", err)
+		}
+		return commandbackend.New(item.Image, commandArguments(item.Kind, item.Model), item.Kind, item.Model, secret, 2*time.Minute)
+	case "kimi":
 		secret, err := loadCredential(backendCredentialService, machineID+"/"+item.Name)
 		if err != nil {
 			return nil, fmt.Errorf("load backend credential: %w", err)
@@ -943,7 +998,7 @@ func offerCapacity(item config.Backend, discovered backend.Model) v1.OfferCapaci
 	if version == 0 {
 		version = 1
 	}
-	commandAgent := item.Kind == "claude" || item.Kind == "kimi" || (item.Kind == "codex" && item.Image != "")
+	commandAgent := item.Kind == "kimi" || ((item.Kind == "codex" || item.Kind == "claude") && item.Image != "")
 	capabilities := []string{"stream", "text"}
 	if commandAgent {
 		capabilities = append(capabilities, "workspace")

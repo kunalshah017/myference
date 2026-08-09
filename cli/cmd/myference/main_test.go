@@ -177,6 +177,45 @@ func TestConfiguredBackendSelectsNativeCodexWithoutCredential(t *testing.T) {
 	}
 }
 
+func TestConfiguredBackendSelectsNativeClaudeWithoutCredential(t *testing.T) {
+	called := false
+	result, err := configuredBackendWithNatives(config.Backend{Name: "claude", Kind: "claude", Model: "sonnet"}, "machine", func(string, string) (string, error) {
+		t.Fatal("native Claude loaded a backend credential")
+		return "", nil
+	}, func(string, time.Duration) (backend.Backend, error) {
+		return staticBackend{}, nil
+	}, func(model string, _ time.Duration) (backend.Backend, error) {
+		called = model == "sonnet"
+		return staticBackend{}, nil
+	})
+	if err != nil || result == nil || !called {
+		t.Fatalf("result=%v called=%v err=%v", result, called, err)
+	}
+}
+
+func TestBackendAddNativeClaudeUsesExistingLogin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1"}); err != nil {
+		t.Fatal(err)
+	}
+	dependencies := backendCommandDependencies{
+		SaveCredential: func(string, string, string) error { t.Fatal("native Claude stored a credential"); return nil },
+		NewNativeClaude: func(model string, _ time.Duration) (backend.Backend, error) {
+			if model != "sonnet" {
+				t.Fatalf("model=%q", model)
+			}
+			return staticBackend{}, nil
+		},
+	}
+	if err := runBackendWithDependencies([]string{"add", "--config", path, "--name", "claude", "--kind", "claude", "--model", "sonnet"}, &bytes.Buffer{}, dependencies); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil || len(loaded.Backends) != 1 || loaded.Backends[0].Image != "" || loaded.Backends[0].Kind != "claude" {
+		t.Fatalf("backends=%+v err=%v", loaded.Backends, err)
+	}
+}
+
 func TestCodexDenyToolCreatesMarkerWithoutEchoingInput(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "tool-attempted")
 	t.Setenv("MYFERENCE_CODEX_TOOL_MARKER", marker)
@@ -452,6 +491,10 @@ func TestOfferCapacityCarriesDeterministicMonadProofKeys(t *testing.T) {
 	}
 	if err := nativeCodex.Validate(); err != nil {
 		t.Fatalf("native Codex offer is invalid: %v", err)
+	}
+	nativeClaude := offerCapacity(config.Backend{Name: "native-claude", Kind: "claude", Model: "sonnet", PriceVersion: 1, Enabled: true}, backend.Model{Name: "sonnet"})
+	if !slices.Equal(nativeClaude.Capabilities, []string{"stream", "text"}) || nativeClaude.EvidenceKind != "upstream_model" || nativeClaude.MeteringMode != "tokens_and_compute" {
+		t.Fatalf("native Claude evidence is invalid: %+v", nativeClaude)
 	}
 	agent := offerCapacity(config.Backend{Name: "agent", Kind: "codex", Model: "codex", Image: "codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", PriceVersion: 1, Enabled: true}, backend.Model{Name: "codex"})
 	if !slices.Equal(agent.Capabilities, []string{"stream", "text", "workspace"}) {
