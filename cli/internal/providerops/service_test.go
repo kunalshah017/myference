@@ -63,6 +63,20 @@ func TestDepositParsesAmountAndBrowserFailureReturnsCopyableURL(t *testing.T) {
 	}
 }
 
+func TestSyncVersionsAppliesOnlyCompatibleMachineOffers(t *testing.T) {
+	api := &providerAPIStub{versions: map[string]uint64{"local": 9, "other-machine": 12}}
+	cfg := config.Config{MachineID: "machine-1", Backends: []config.Backend{{Name: "local", PriceVersion: 2}, {Name: "unchanged", PriceVersion: 4}}}
+	saved := config.Config{}
+	service := Service{API: api, Token: "token", MachineID: "machine-1", LoadConfig: func() (config.Config, error) { return cfg, nil }, SaveConfig: func(value config.Config) error { saved = value; return nil }}
+	changed, err := service.SyncVersions(context.Background())
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if saved.Backends[0].PriceVersion != 9 || saved.Backends[1].PriceVersion != 4 {
+		t.Fatalf("saved=%+v", saved.Backends)
+	}
+}
+
 type providerAPIStub struct {
 	created  account.ProviderActionInput
 	actions  []account.ProviderAction

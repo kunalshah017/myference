@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -441,6 +442,23 @@ func TestProviderCommandsRequireExplicitActionInputs(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Fatalf("run(%v) error=%v", test.args, err)
 		}
+	}
+}
+
+func TestOfferVersionWatcherSynchronizesAndReportsFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	called := 0
+	var output bytes.Buffer
+	watchOfferVersions(ctx, time.Millisecond, func(context.Context) (bool, error) {
+		called++
+		if called == 1 {
+			return false, errors.New("offline")
+		}
+		cancel()
+		return true, nil
+	}, &output)
+	if called < 2 || !strings.Contains(output.String(), "offer version sync failed") || !strings.Contains(output.String(), "offer versions synchronized") {
+		t.Fatalf("called=%d output=%q", called, output.String())
 	}
 }
 

@@ -709,6 +709,11 @@ func runServe(ctx context.Context, path string, output io.Writer) (resultErr err
 	if err != nil {
 		return fmt.Errorf("load machine credential: %w", err)
 	}
+	providerClient, err := account.NewClient(cfg.ServerURL, nil)
+	if err != nil {
+		return err
+	}
+	versionService := providerops.Service{API: providerClient, Token: token, MachineID: cfg.MachineID, LoadConfig: func() (config.Config, error) { return config.Load(path) }, SaveConfig: func(updated config.Config) error { return config.Save(path, updated) }}
 	signerSecret, err := credential.Load(signerCredentialService, cfg.MachineID)
 	if err != nil {
 		return fmt.Errorf("load signer credential: %w", err)
@@ -770,6 +775,7 @@ func runServe(ctx context.Context, path string, output io.Writer) (resultErr err
 	watchContext, stopWatching := context.WithCancel(serveContext)
 	defer stopWatching()
 	go watchBackendConfig(watchContext, path, daemon, output)
+	go watchOfferVersions(watchContext, 15*time.Second, versionService.SyncVersions, output)
 	return serveWithReconnect(serveContext, output, time.Second, 30*time.Second, daemon.Serve)
 }
 
@@ -897,6 +903,32 @@ func watchBackendConfig(ctx context.Context, path string, daemon *provider.Daemo
 				_, _ = fmt.Fprintf(output, "backend reload failed: %v\n", err)
 			} else {
 				_, _ = fmt.Fprintf(output, "backend capacity updated\n")
+			}
+		}
+	}
+}
+
+func watchOfferVersions(ctx context.Context, interval time.Duration, syncVersions func(context.Context) (bool, error), output io.Writer) {
+	if syncVersions == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			changed, err := syncVersions(ctx)
+			if err != nil {
+				_, _ = fmt.Fprintf(output, "offer version sync failed: %v\n", err)
+				continue
+			}
+			if changed {
+				_, _ = fmt.Fprintln(output, "offer versions synchronized")
 			}
 		}
 	}
