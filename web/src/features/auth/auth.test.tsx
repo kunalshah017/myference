@@ -135,6 +135,21 @@ describe('account authentication', () => {
     expect(authorizedSigner).toBe('0x0000000000000000000000000000000000001234')
   })
 
+  it('prevents duplicate machine wallet approvals', async () => {
+    let release!: () => void
+    const pendingApproval = new Promise<void>((resolve) => { release = resolve })
+    const authorizeSigner = vi.fn(() => pendingApproval)
+    render(<DeviceApproval api={new AuthAPI(baseURL)} authorizeSigner={authorizeSigner} />)
+    await userEvent.type(screen.getByLabelText(/device code/i), 'ABCD1234')
+    await userEvent.click(screen.getByRole('button', { name: /review machine/i }))
+    const button = await screen.findByRole('button', { name: /approve studio-mac/i })
+    await userEvent.click(button)
+    await userEvent.click(button)
+    expect(authorizeSigner).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: /confirm approval in wallet/i })).toBeDisabled()
+    release()
+  })
+
   it('creates an all-model API key by default, reveals it once, and revokes it', async () => {
     createdModels = ['not-reset']
     render(<QueryClientProvider client={new QueryClient()}><ApiKeys api={new AuthAPI(baseURL)} marketplaceApi={new MarketplaceAPI(baseURL)} /></QueryClientProvider>)

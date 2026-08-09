@@ -128,3 +128,17 @@ it('uses the same output-token ceiling for the starter estimate and live request
   await userEvent.selectOptions(screen.getByRole('combobox', { name: /model/i }), 'costly')
   expect(await screen.findByRole('button', { name: /create replacement key/i })).toBeVisible()
 })
+
+it('prevents duplicate onboarding deposits while the wallet request is open', async () => {
+  let release!: (transaction: { hash: `0x${string}`; confirm: () => Promise<void> }) => void
+  const wallet = new Promise<{ hash: `0x${string}`; confirm: () => Promise<void> }>((resolve) => { release = resolve })
+  const deposit = vi.fn(() => wallet)
+  renderFlow({ session, initialRole: 'consumer', writer: { deposit } as unknown as import('../../lib/marketContract').MarketWriter })
+
+  const button = await screen.findByRole('button', { name: /deposit MON/i })
+  await userEvent.click(button)
+  await userEvent.click(button)
+  expect(deposit).toHaveBeenCalledOnce()
+  expect(screen.getByRole('button', { name: /confirm deposit in wallet/i })).toBeDisabled()
+  release({ hash: '0xabc', confirm: async () => undefined })
+})

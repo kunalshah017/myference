@@ -72,7 +72,9 @@ export function OnboardingFlow({ session, initialRole, authAPI: suppliedAuth, op
   const [answer, setAnswer] = useState('')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
+  const [transaction, setTransaction] = useState<{ action: 'deposit' | 'session'; phase: 'wallet' | 'chain' | 'refresh' }>()
   const [inferenceSucceeded, setInferenceSucceeded] = useState(false)
+  const transactionOpen = useRef(false)
   const completed = useRef<OnboardingRole | undefined>(undefined)
   const previousRecommendation = useRef(0n)
   const enabled = Boolean(session && role)
@@ -123,21 +125,25 @@ export function OnboardingFlow({ session, initialRole, authAPI: suppliedAuth, op
   if (!role) return <div className="onboarding-screen"><a className="wordmark" href="/" aria-label="Myference home"><span>M/</span> Myference</a><RoleChoice choose={choose} skip={onSkip} /></div>
 
   const marketWriter = suppliedWriter ?? (operations.data ? new ViemMarketWriter(operations.data, injectedProvider()) : undefined)
-  const transact = async (action: (writer: MarketWriter) => Promise<SubmittedTransaction>) => {
+  const transact = async (name: 'deposit' | 'session', action: (writer: MarketWriter) => Promise<SubmittedTransaction>) => {
     if (!marketWriter) { setError('Account operations are still loading.'); return }
-    setError('')
+    if (transactionOpen.current) return
+    transactionOpen.current = true; setTransaction({ action: name, phase: 'wallet' }); setError(''); setStatus(name === 'deposit' ? 'Confirm the deposit in your wallet.' : 'Confirm the spending session in your wallet.')
     try {
       const transaction = await action(marketWriter)
+      setTransaction({ action: name, phase: 'chain' })
       setStatus(`${transaction.hash} pending on Monad Testnet.`)
       await transaction.confirm()
-      setStatus('Transaction finalized. Waiting for the indexer to confirm this step…')
+      setTransaction({ action: name, phase: 'refresh' }); setStatus('Transaction finalized. Refreshing your account state…')
       await operations.refetch()
+      setStatus('Transaction confirmed and account state refreshed.')
     } catch (reason) { setStatus(''); setError(reason instanceof Error ? reason.message : 'Transaction failed.') }
+    finally { transactionOpen.current = false; setTransaction(undefined) }
   }
-  const deposit = async (event: FormEvent) => { event.preventDefault(); await transact((writer) => writer.deposit(parseMON(depositAmount))) }
+  const deposit = async (event: FormEvent) => { event.preventDefault(); await transact('deposit', (writer) => writer.deposit(parseMON(depositAmount))) }
   const openSession = async (event: FormEvent) => {
     event.preventDefault()
-    await transact((writer) => writer.openSession(hashLabel(crypto.randomUUID()), parseMON(sessionAllowance), BigInt(Math.floor(Date.now() / 1000) + 86_400)))
+    await transact('session', (writer) => writer.openSession(hashLabel(crypto.randomUUID()), parseMON(sessionAllowance), BigInt(Math.floor(Date.now() / 1000) + 86_400)))
   }
   const createKey = async (event: FormEvent) => {
     event.preventDefault(); setError('')
@@ -168,7 +174,7 @@ export function OnboardingFlow({ session, initialRole, authAPI: suppliedAuth, op
         {!accountSession ? <section className="onboarding-step"><p className="eyebrow">Step 1</p><h1>Connect your account</h1><p>{expired ? 'Your browser session expired. Sign again to continue from your on-chain state.' : 'Your wallet signs a login message. No MON moves until you approve a separate transaction.'}</p><ConnectWallet api={authAPI} analyticsSurface="onboarding" onConnected={onConnected} /></section>
         : loading ? <div className="dashboard-empty" role="status"><strong>Reading your account state…</strong><p>Checking Monad Testnet and the Myference indexer.</p></div>
         : operations.isError ? <section className="onboarding-step"><p className="eyebrow">Account state</p><h1>Try the indexer again</h1><p role="alert">Your account state could not be loaded. No transaction was sent.</p><button type="button" onClick={() => void operations.refetch()}><RefreshCw size={16} aria-hidden="true" /> Retry account state</button></section>
-        : role === 'consumer' ? <ConsumerSteps models={models} selectedModel={selectedModel} modelName={modelName} setModelName={setModelName} inventoryError={inventory.isError} refreshInventory={() => void inventory.refetch()} operationsError={operations.isError} operations={operations.data} keys={keys.data ?? []} keySecret={keySecret} recommended={recommended} usdPerMON={price.data?.usd_per_mon} depositAmount={depositAmount} setDepositAmount={setDepositAmount} deposit={deposit} sessionAllowance={sessionAllowance} setSessionAllowance={setSessionAllowance} openSession={openSession} keyMaximum={keyMaximum} setKeyMaximum={setKeyMaximum} createKey={createKey} prompt={prompt} setPrompt={setPrompt} infer={infer} answer={answer} progress={consumerProgress} finish={onSkip} />
+        : role === 'consumer' ? <ConsumerSteps models={models} selectedModel={selectedModel} modelName={modelName} setModelName={setModelName} inventoryError={inventory.isError} refreshInventory={() => void inventory.refetch()} operationsError={operations.isError} operations={operations.data} keys={keys.data ?? []} keySecret={keySecret} recommended={recommended} usdPerMON={price.data?.usd_per_mon} depositAmount={depositAmount} setDepositAmount={setDepositAmount} deposit={deposit} sessionAllowance={sessionAllowance} setSessionAllowance={setSessionAllowance} openSession={openSession} transaction={transaction} keyMaximum={keyMaximum} setKeyMaximum={setKeyMaximum} createKey={createKey} prompt={prompt} setPrompt={setPrompt} infer={infer} answer={answer} progress={consumerProgress} finish={onSkip} />
 		: <ProviderSteps authAPI={authAPI} progress={providerProgress} finish={onSkip} />}
         <TransactionStatus status={status} error={error} />
       </main>
@@ -203,6 +209,7 @@ type ConsumerProps = {
   operations?: Awaited<ReturnType<OperationsAPI['operations']>>; keys: APIKey[]; keySecret: string; recommended: bigint; usdPerMON?: string
   depositAmount: string; setDepositAmount: (value: string) => void; deposit: (event: FormEvent) => void
   sessionAllowance: string; setSessionAllowance: (value: string) => void; openSession: (event: FormEvent) => void
+  transaction?: { action: 'deposit' | 'session'; phase: 'wallet' | 'chain' | 'refresh' }
   keyMaximum: string; setKeyMaximum: (value: string) => void; createKey: (event: FormEvent) => void
   prompt: string; setPrompt: (value: string) => void; infer: (event: FormEvent) => void; answer: string; progress: OnboardingProgress; finish?: () => void
 }
@@ -212,11 +219,12 @@ function ConsumerSteps(props: ConsumerProps) {
   if (props.operationsError || !props.operations) return <section className="onboarding-step"><h1>Account state is unavailable</h1><p role="alert">Reconnect your wallet or wait for the indexer, then retry.</p></section>
   const next = props.progress.next?.id
   const activeSession = props.operations.sessions.find((item) => !item.finalized && item.expires_at > Date.now() / 1000 && BigInt(item.allowance_wei) > BigInt(item.spent_wei))
+  const transactionLabel = (action: 'deposit' | 'session', fallback: string) => props.transaction?.action === action ? props.transaction.phase === 'wallet' ? action === 'deposit' ? 'Confirm deposit in wallet…' : 'Confirm session in wallet…' : props.transaction.phase === 'chain' ? 'Confirming on Monad…' : 'Refreshing account…' : fallback
   return <>
     <section className="onboarding-model-picker"><label htmlFor="onboarding-model">Model</label><select id="onboarding-model" value={props.selectedModel?.model ?? ''} onChange={(event) => props.setModelName(event.target.value)}>{props.models.map((model) => <option key={model.model} value={model.model}>{model.model}</option>)}</select><span>{props.selectedModel?.model === props.models[0]?.model ? 'Lowest published live rate' : 'Your selected route'}</span></section>
     {props.keys.length > 0 && !props.keySecret && <p className="onboarding-notice">An existing key's secret cannot be recovered. Create a replacement key below for this browser test.</p>}
-    {next === 'deposit' && <section className="onboarding-step"><p className="eyebrow">Fund requests</p><h1>Deposit a small MON budget</h1><p>Funds stay in your contract balance until a settled request spends them or you withdraw them.</p><div className="onboarding-proof"><span>Recommended starter amount</span><strong><Money wei={props.recommended} /></strong>{props.usdPerMON && <small>Live USD reference: 1 MON = ${props.usdPerMON}</small>}</div><form onSubmit={props.deposit}><label htmlFor="onboarding-deposit">Deposit amount (MON)</label><input id="onboarding-deposit" inputMode="decimal" value={props.depositAmount} onChange={(event) => props.setDepositAmount(event.target.value)} required/><button type="submit"><WalletCards size={17} aria-hidden="true" /> Deposit MON</button></form></section>}
-    {next === 'session' && <section className="onboarding-step"><p className="eyebrow">Set a limit</p><h1>Open a 24-hour spending session</h1><p>This is the maximum the router may reserve and settle during the session. It cannot exceed your escrow balance.</p><form onSubmit={props.openSession}><label htmlFor="onboarding-allowance">Session allowance (MON)</label><input id="onboarding-allowance" inputMode="decimal" value={props.sessionAllowance} onChange={(event) => props.setSessionAllowance(event.target.value)} required/><button type="submit">Open spending session</button></form></section>}
+    {next === 'deposit' && <section className="onboarding-step"><p className="eyebrow">Fund requests</p><h1>Deposit a small MON budget</h1><p>Funds stay in your contract balance until a settled request spends them or you withdraw them.</p><div className="onboarding-proof"><span>Recommended starter amount</span><strong><Money wei={props.recommended} /></strong>{props.usdPerMON && <small>Live USD reference: 1 MON = ${props.usdPerMON}</small>}</div><form onSubmit={props.deposit}><label htmlFor="onboarding-deposit">Deposit amount (MON)</label><input id="onboarding-deposit" inputMode="decimal" value={props.depositAmount} onChange={(event) => props.setDepositAmount(event.target.value)} disabled={Boolean(props.transaction)} required/><button type="submit" disabled={Boolean(props.transaction)}><WalletCards size={17} aria-hidden="true" /> {transactionLabel('deposit', 'Deposit MON')}</button></form></section>}
+    {next === 'session' && <section className="onboarding-step"><p className="eyebrow">Set a limit</p><h1>Open a 24-hour spending session</h1><p>This is the maximum the router may reserve and settle during the session. It cannot exceed your escrow balance.</p><form onSubmit={props.openSession}><label htmlFor="onboarding-allowance">Session allowance (MON)</label><input id="onboarding-allowance" inputMode="decimal" value={props.sessionAllowance} onChange={(event) => props.setSessionAllowance(event.target.value)} disabled={Boolean(props.transaction)} required/><button type="submit" disabled={Boolean(props.transaction)}>{transactionLabel('session', 'Open spending session')}</button></form></section>}
     {(next === 'key' || (props.keys.length > 0 && !props.keySecret)) && <section className="onboarding-step"><p className="eyebrow">Create access</p><h1>{props.keys.length ? 'Create a replacement key' : 'Create your API key'}</h1><p>This starter key works with every model, so you can switch routes without creating another key. Its request limit stays capped by the amount below, and its secret appears once.</p><form onSubmit={props.createKey}><label htmlFor="onboarding-key-max">Key maximum spend (MON)</label><input id="onboarding-key-max" inputMode="decimal" value={props.keyMaximum} onChange={(event) => props.setKeyMaximum(event.target.value)} required/><button type="submit">{props.keys.length ? 'Create replacement key' : 'Create API key'}</button></form></section>}
     {next === 'inference' && props.keySecret && <section className="onboarding-step"><p className="eyebrow">Live test</p><h1>Run your first inference</h1><div className="secret-proof"><span>Copy now — shown once</span><code>{props.keySecret}</code></div><form onSubmit={props.infer}><label htmlFor="onboarding-prompt">Message</label><textarea id="onboarding-prompt" rows={5} value={props.prompt} onChange={(event) => props.setPrompt(event.target.value)} required/><button type="submit">Send live request</button></form>{props.answer && <div className="onboarding-answer" role="status"><span>Provider response</span><p>{props.answer}</p></div>}</section>}
     {props.progress.complete && <section className="onboarding-step onboarding-complete"><Check aria-hidden="true" /><p className="eyebrow">Route complete</p><h1>Your account is ready</h1><p>Your inference ran through a real provider and the usage record will appear after settlement is indexed.</p>{props.answer && <div className="onboarding-answer" role="status"><span>Provider response</span><p>{props.answer}</p></div>}{props.finish && <button type="button" onClick={props.finish}>Open dashboard</button>}</section>}

@@ -39,12 +39,32 @@ it('shows collateral and only reprices account-owned existing offers', async () 
   const input = screen.getByLabelText(/input tokens/i)
   const output = screen.getByLabelText(/output tokens/i)
   const compute = screen.getByLabelText(/compute time/i)
+  await waitFor(() => expect(input).toBeEnabled())
   await userEvent.clear(input); await userEvent.type(input, '1')
   await userEvent.clear(output); await userEvent.type(output, '2')
   await userEvent.clear(compute); await userEvent.type(compute, '3')
   await userEvent.click(screen.getByRole('button', { name: /publish price version/i }))
   await waitFor(() => expect(published).toEqual({ offerID: 'local-qwen', model: 'qwen', capabilities: ['text', 'stream'], inputPerMillion: 1_000_000_000_000_000_000n, outputPerMillion: 2_000_000_000_000_000_000n, computePerSecond: 3_000_000_000_000_000_000n }))
   expect(created.at(-1)?.offers?.[0]).toMatchObject({ offer_id: 'local-qwen', model: 'qwen', kind: 'ollama' })
+})
+
+it('prevents duplicate provider wallet actions and shows their phase', async () => {
+  let releaseWallet!: (transaction: SubmittedTransaction) => void
+  const wallet = new Promise<SubmittedTransaction>((resolve) => { releaseWallet = resolve })
+  const create = vi.fn(async (input: ProviderActionInput) => action(input))
+  const depositBond = vi.fn(() => wallet)
+  const api = { account: async () => providerAccount, create, submitted: vi.fn(), get: vi.fn() } as unknown as ProviderAPI
+  render(<QueryClientProvider client={new QueryClient()}><ProviderConsole api={api} writer={{ depositBond } as unknown as MarketWriter}/></QueryClientProvider>)
+
+  await userEvent.type(await screen.findByLabelText(/bond amount/i), '2')
+  const button = screen.getByRole('button', { name: /deposit collateral/i })
+  await userEvent.click(button)
+  await userEvent.click(button)
+  await waitFor(() => expect(depositBond).toHaveBeenCalledOnce())
+  expect(screen.getByRole('button', { name: /confirm deposit in wallet/i })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /request collateral exit/i })).toBeDisabled()
+
+  releaseWallet({ hash: '0x1111111111111111111111111111111111111111111111111111111111111111', confirm: async () => undefined })
 })
 
 it('executes a CLI draft exactly and waits for indexed confirmation', async () => {
@@ -65,6 +85,22 @@ it('renders the dedicated CLI approval page without exposing a hosting form', as
   expect(await screen.findByRole('heading', { name: /approve provider action/i })).toBeVisible()
   expect(screen.getByText(providerAccount.wallet_address)).toBeVisible()
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+})
+
+it('keeps CLI wallet approval single-flight', async () => {
+  let releaseWallet!: (transaction: SubmittedTransaction) => void
+  const wallet = new Promise<SubmittedTransaction>((resolve) => { releaseWallet = resolve })
+  const draft = action({ kind: 'deposit_collateral', amount_wei: '5' })
+  const depositBond = vi.fn(() => wallet)
+  const api = { account: async () => providerAccount, get: async () => draft } as unknown as ProviderAPI
+  render(<QueryClientProvider client={new QueryClient()}><ProviderApproval actionID="action-1" api={api} writer={{ depositBond } as unknown as MarketWriter} checkWallet={async () => undefined}/></QueryClientProvider>)
+
+  const button = await screen.findByRole('button', { name: /approve in wallet/i })
+  await userEvent.click(button)
+  await userEvent.click(button)
+  expect(depositBond).toHaveBeenCalledOnce()
+  expect(screen.getByRole('button', { name: /confirm action in wallet/i })).toBeDisabled()
+  releaseWallet({ hash: '0x1111111111111111111111111111111111111111111111111111111111111111', confirm: async () => undefined })
 })
 
 it('rejects the wrong connected wallet before sending a CLI action', async () => {

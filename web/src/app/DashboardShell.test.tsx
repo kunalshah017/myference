@@ -7,10 +7,21 @@ import { captureEvent } from '../lib/analytics'
 import { DashboardShell } from './DashboardShell'
 
 vi.mock('../lib/analytics', () => ({ captureEvent: vi.fn() }))
+vi.mock('../features/analytics/ProviderAnalytics', () => ({ ProviderAnalytics: () => <div>provider analytics marker</div> }))
+vi.mock('../features/provider/ProviderConsole', () => ({ ProviderConsole: () => <div>provider console marker</div> }))
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.clearAllMocks() })
 
 const authAPI = { session: async () => undefined } as AuthAPI
+
+it('keeps collateral and offer pricing out of Earnings & stake', async () => {
+  localStorage.setItem('myference:onboarding-skipped', 'true')
+  const connected = { session: async () => ({ account_id: 'acct-1', wallet_address: '0x1111111111111111111111111111111111111111', expires_at: '2026-09-01T00:00:00Z' }) } as unknown as AuthAPI
+  render(<QueryClientProvider client={new QueryClient()}><DashboardShell authAPI={connected} initialView="earnings" /></QueryClientProvider>)
+
+  expect(await screen.findByText('provider analytics marker')).toBeVisible()
+  expect(screen.queryByText('provider console marker')).not.toBeInTheDocument()
+})
 
 it('lets one account switch from consuming to hosting inference', async () => {
   const user = userEvent.setup()

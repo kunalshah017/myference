@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import type { Address } from 'viem'
 import { AuthAPI, OperationsAPI, type PendingDevice } from '../../lib/api'
 import { injectedProvider } from '../../lib/chain'
@@ -9,24 +9,31 @@ export function DeviceApproval({ api = new AuthAPI(), authorizeSigner }: { api?:
   const [pending, setPending] = useState<PendingDevice>()
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [phase, setPhase] = useState<'wallet' | 'chain' | 'register'>()
+  const approvalOpen = useRef(false)
   const inspect = async (event: FormEvent) => {
     event.preventDefault(); setError(''); setMessage('')
     try { setPending(await api.inspectDevice(code.trim().toUpperCase())) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Device code could not be checked.') }
   }
   const approve = async () => {
-    if (!pending) return
-    setError('')
+    if (!pending || approvalOpen.current) return
+    approvalOpen.current = true; setPhase('wallet'); setError('')
+    const approvalCode = code.trim().toUpperCase()
+    const signer = pending.signer_address
     try {
-      if (authorizeSigner) await authorizeSigner(pending.signer_address)
+      if (authorizeSigner) await authorizeSigner(signer)
       else {
         const operations = await new OperationsAPI().operations()
-        const transaction = await new ViemMarketWriter(operations, injectedProvider()).setProviderSigner(pending.signer_address, true)
+        const transaction = await new ViemMarketWriter(operations, injectedProvider()).setProviderSigner(signer, true)
+        setPhase('chain')
         await transaction.confirm()
       }
-      await api.approveDevice(code.trim().toUpperCase())
+      setPhase('register')
+      await api.approveDevice(approvalCode)
       setMessage('Machine approved. Its headless receipt signer is authorized on Monad.')
       setPending(undefined)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Machine approval failed.') }
+    finally { approvalOpen.current = false; setPhase(undefined) }
   }
   return <section className="auth-section device-approval" aria-labelledby="device-approval-title">
     <p className="eyebrow">Device code</p>
@@ -35,11 +42,11 @@ export function DeviceApproval({ api = new AuthAPI(), authorizeSigner }: { api?:
     <form onSubmit={inspect}>
       <label htmlFor="device-code">Device code from the CLI</label>
       <div className="inline-form">
-        <input id="device-code" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} required />
-        <button type="submit">Review machine</button>
+        <input id="device-code" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} disabled={Boolean(phase)} required />
+        <button type="submit" disabled={Boolean(phase)}>Review machine</button>
       </div>
     </form>
-    {pending && <div className="machine-proof"><span>Pending machine</span><strong>{pending.machine_name}</strong><code>{pending.signer_address}</code><time dateTime={pending.expires_at}>Code expires {new Date(pending.expires_at).toLocaleString()}</time><button type="button" onClick={approve}>Approve {pending.machine_name}</button></div>}
+    {pending && <div className="machine-proof"><span>Pending machine</span><strong>{pending.machine_name}</strong><code>{pending.signer_address}</code><time dateTime={pending.expires_at}>Code expires {new Date(pending.expires_at).toLocaleString()}</time><button type="button" onClick={approve} disabled={Boolean(phase)}>{phase === 'wallet' ? 'Confirm approval in wallet…' : phase === 'chain' ? 'Confirming on Monad…' : phase === 'register' ? 'Registering machine…' : `Approve ${pending.machine_name}`}</button></div>}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert" className="inline-error">{error}</p>}
   </section>
