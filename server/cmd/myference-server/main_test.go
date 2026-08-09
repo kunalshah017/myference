@@ -22,19 +22,22 @@ func TestRootHandlerMountsRelayInferenceAndAccountAPIs(t *testing.T) {
 	marker := func(name string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(name)) })
 	}
-	handler := newRootHandler(marker("relay"), marker("openai"), marker("anthropic"), marker("auth"), marker("market"), marker("operations"), marker("analytics"), marker("price"), marker("activation"), marker("events"))
+	handler := newRootHandler(marker("relay"), marker("openai"), marker("anthropic"), marker("auth"), marker("market"), marker("operations"), marker("analytics"), marker("price"), marker("provider-account"), marker("provider-actions"), marker("events"))
 	for path, expected := range map[string]string{
-		"/healthz":                  "ok\n",
-		"/relay":                    "relay",
-		"/v1/chat/completions":      "openai",
-		"/v1/messages":              "anthropic",
-		"/auth/session":             "auth",
-		"/api/models":               "market",
-		"/api/account/operations":   "operations",
-		"/api/account/analytics":    "analytics",
-		"/api/reference-price":      "price",
-		"/api/provider/activations": "activation",
-		"/events":                   "events",
+		"/healthz":                "ok\n",
+		"/relay":                  "relay",
+		"/v1/chat/completions":    "openai",
+		"/v1/messages":            "anthropic",
+		"/auth/session":           "auth",
+		"/api/models":             "market",
+		"/api/account/operations": "operations",
+		"/api/account/analytics":  "analytics",
+		"/api/reference-price":    "price",
+		"/api/provider/account":   "provider-account",
+		"/api/provider/machines/machine/offer-versions": "provider-account",
+		"/api/provider/actions":                         "provider-actions",
+		"/api/provider/actions/action":                  "provider-actions",
+		"/events":                                       "events",
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))

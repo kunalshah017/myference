@@ -105,11 +105,29 @@ func run() error {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
 	}
-	activations := api.NewProviderActivation(api.NewActivationStore(time.Now), func(request *http.Request) (string, string, error) {
+	machineAccount := func(request *http.Request) (string, string, error) {
 		token := strings.TrimSpace(strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "))
 		principal, err := authService.AuthenticateMachine(request.Context(), token)
 		return principal.MachineID, principal.AccountID, err
-	}, browserAccount)
+	}
+	providerConfig := store.ProviderAccountConfig{
+		ChainID:         10143,
+		ContractAddress: chainConfiguration.ContractAddress,
+		ExplorerURL:     envOr("MYFERENCE_EXPLORER_URL", "https://testnet.monadexplorer.com"),
+		Confirmations:   2,
+		MinimumBondWei:  chainState.terms.MinimumBond.String(),
+	}
+	providerAccount := api.NewProviderAccount(repository, machineAccount, browserAccount, providerConfig)
+	providerActions := api.NewProviderActions(api.NewProviderActionStore(time.Now), api.ProviderActionDependencies{
+		MachineAuth: machineAccount,
+		AccountAuth: browserAccount,
+		Prepare: func(ctx context.Context, source, machineID, accountID string, input api.ProviderActionInput) (string, api.ProviderActionBaseline, error) {
+			return prepareProviderAction(ctx, repository, providerConfig, source, machineID, accountID, input)
+		},
+		Verify: func(ctx context.Context, action api.ProviderAction) (map[string]uint64, bool, error) {
+			return verifyProviderAction(ctx, repository, providerConfig, action)
+		},
+	})
 	operations := api.NewOperations(repository, func(request *http.Request) (string, error) {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
@@ -126,7 +144,7 @@ func run() error {
 		return err
 	}
 	defer events.Close()
-	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, referencePrice, activations, events), webOrigin)
+	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, referencePrice, providerAccount, providerActions, events), webOrigin)
 	server := &http.Server{Addr: listenAddress(os.Getenv), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
@@ -156,7 +174,7 @@ func run() error {
 	}
 }
 
-func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, analyticsHandler, referencePriceHandler, activationHandler, eventsHandler http.Handler) http.Handler {
+func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, analyticsHandler, referencePriceHandler, providerAccountHandler, providerActionsHandler, eventsHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	mux.Handle("/relay", relayHandler)
@@ -166,8 +184,10 @@ func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, 
 	mux.Handle("/api/account/operations", operationsHandler)
 	mux.Handle("/api/account/analytics", analyticsHandler)
 	mux.Handle("/api/reference-price", referencePriceHandler)
-	mux.Handle("/api/provider/activations", activationHandler)
-	mux.Handle("/api/provider/activations/", activationHandler)
+	mux.Handle("/api/provider/account", providerAccountHandler)
+	mux.Handle("/api/provider/machines/", providerAccountHandler)
+	mux.Handle("/api/provider/actions", providerActionsHandler)
+	mux.Handle("/api/provider/actions/", providerActionsHandler)
 	mux.Handle("/api/", marketplaceHandler)
 	mux.Handle("/events", eventsHandler)
 	return mux

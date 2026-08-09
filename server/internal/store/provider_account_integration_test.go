@@ -73,4 +73,8 @@ func TestProviderAccountProjectionIsTenantIsolatedAndReturnsCompatibleVersions(t
 	if other, err := repository.MachineOfferVersions(ctx, "machine-two", "account-one", 10143, contract); err != nil || len(other) != 0 {
 		t.Fatalf("cross-account versions=%v err=%v", other, err)
 	}
+	evidence, err := repository.ProviderActionState(ctx, "account-one", ProviderAccountConfig{ChainID: 10143, ContractAddress: contract}, []ProviderOfferQuery{{OfferID: "local-qwen", OfferHash: offerHash, ModelHash: modelHash, CapabilityHash: capabilityHash, InputPerMillionWei: "10", OutputPerMillionWei: "10", ComputePerSecondWei: "10"}})
+	if err != nil || evidence.BondWei != "100" || evidence.LatestVersions["local-qwen"] != 2 || evidence.MatchingVersions["local-qwen"] != 2 {
+		t.Fatalf("evidence=%+v err=%v", evidence, err)
+	}
 }
