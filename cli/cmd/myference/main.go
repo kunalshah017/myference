@@ -245,7 +245,7 @@ func mergeConfiguredCandidates(discovered []hostservice.Candidate, backends []co
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference login | host | backend <add|list|start|stop|remove|version> | offer <publish|list|sync> | collateral <status|deposit|request-exit|finalize-exit> | capacity | status | serve | service <install|start|stop|status|uninstall>")
+		return errors.New("usage: myference login | host | backend <add|list|start|stop|remove|version> | offer <publish|attach|list|sync> | collateral <status|deposit|request-exit|finalize-exit> | capacity | status | serve | service <install|start|stop|status|uninstall>")
 	}
 	switch args[0] {
 	case "login":
@@ -313,13 +313,14 @@ func run(args []string, output io.Writer) error {
 
 func runOffer(ctx context.Context, args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference offer <publish|list|sync>")
+		return errors.New("usage: myference offer <publish|attach|list|sync>")
 	}
 	flags := flag.NewFlagSet("offer "+args[0], flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	path := flags.String("config", defaultConfigPath(), "configuration path")
 	webURL := flags.String("web", environmentOr("MYFERENCE_WEB_URL", defaultWebURL), "Myference web URL")
 	backendName := flags.String("backend", "", "configured backend name")
+	offerID := flags.String("offer", "", "wallet-owned offer ID")
 	inputPrice := flags.String("input-per-million", "", "input price in MON per million tokens")
 	outputPrice := flags.String("output-per-million", "", "output price in MON per million tokens")
 	computePrice := flags.String("compute-per-second", "", "compute price in MON per second")
@@ -329,6 +330,9 @@ func runOffer(ctx context.Context, args []string, output io.Writer) error {
 	}
 	if args[0] == "publish" && (*backendName == "" || *inputPrice == "" || *outputPrice == "" || *computePrice == "") {
 		return errors.New("offer publish requires --backend, --input-per-million, --output-per-million, and --compute-per-second")
+	}
+	if args[0] == "attach" && (*backendName == "" || *offerID == "") {
+		return errors.New("offer attach requires --backend and --offer")
 	}
 	service, cfg, err := providerOperations(*path, *webURL, output, *noBrowser)
 	if err != nil {
@@ -344,6 +348,12 @@ func runOffer(ctx context.Context, args []string, output io.Writer) error {
 			return err
 		}
 		_, err = fmt.Fprintf(output, "Offer %s published and synchronized.\n", *backendName)
+		return err
+	case "attach":
+		if err := service.Attach(ctx, *backendName, *offerID); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(output, "Attached %s to %s.\n", *offerID, *backendName)
 		return err
 	case "list":
 		providerAccount, err := service.Account(ctx)

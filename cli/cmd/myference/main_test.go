@@ -433,8 +433,9 @@ func TestProviderCommandsRequireExplicitActionInputs(t *testing.T) {
 		args []string
 		want string
 	}{
-		{args: []string{"offer"}, want: "offer <publish|list|sync>"},
+		{args: []string{"offer"}, want: "offer <publish|attach|list|sync>"},
 		{args: []string{"offer", "publish", "--backend", "qwen"}, want: "requires --backend"},
+		{args: []string{"offer", "attach", "--backend", "qwen"}, want: "requires --backend and --offer"},
 		{args: []string{"collateral"}, want: "collateral <status|deposit|request-exit|finalize-exit>"},
 		{args: []string{"collateral", "deposit"}, want: "requires --amount"},
 	} {
