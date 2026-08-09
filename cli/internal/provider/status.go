@@ -17,15 +17,31 @@ type OfferStatus struct {
 	Error   string `json:"error,omitempty"`
 }
 
+type RequestStatus struct {
+	RequestID           string    `json:"requestId"`
+	OfferID             string    `json:"offerId,omitempty"`
+	Model               string    `json:"model,omitempty"`
+	State               string    `json:"state"`
+	InputTokens         uint64    `json:"inputTokens,omitempty"`
+	OutputTokens        uint64    `json:"outputTokens,omitempty"`
+	ComputeMilliseconds uint64    `json:"computeMilliseconds,omitempty"`
+	EarningsWei         string    `json:"earningsWei,omitempty"`
+	Error               string    `json:"error,omitempty"`
+	StartedAt           time.Time `json:"startedAt,omitempty"`
+	CompletedAt         time.Time `json:"completedAt,omitempty"`
+}
+
 type StatusSnapshot struct {
-	Connected           bool          `json:"connected"`
-	StartedAt           time.Time     `json:"startedAt"`
-	UpdatedAt           time.Time     `json:"updatedAt"`
-	Requests            uint64        `json:"requests"`
-	InputTokens         uint64        `json:"inputTokens"`
-	OutputTokens        uint64        `json:"outputTokens"`
-	ComputeMilliseconds uint64        `json:"computeMilliseconds"`
-	Offers              []OfferStatus `json:"offers"`
+	Connected           bool            `json:"connected"`
+	StartedAt           time.Time       `json:"startedAt"`
+	UpdatedAt           time.Time       `json:"updatedAt"`
+	Requests            uint64          `json:"requests"`
+	InputTokens         uint64          `json:"inputTokens"`
+	OutputTokens        uint64          `json:"outputTokens"`
+	ComputeMilliseconds uint64          `json:"computeMilliseconds"`
+	RunEarningsWei      string          `json:"runEarningsWei,omitempty"`
+	RecentRequests      []RequestStatus `json:"recentRequests,omitempty"`
+	Offers              []OfferStatus   `json:"offers"`
 }
 
 func WriteStatusFile(path string, snapshot StatusSnapshot) error {

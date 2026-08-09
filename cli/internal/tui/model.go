@@ -96,6 +96,7 @@ type Model struct {
 	priceCompute   textinput.Model
 	depositAmount  textinput.Model
 	account        account.ProviderAccount
+	accountErr     error
 	attachBackend  config.Backend
 	attachOffers   []account.EditableOffer
 }
@@ -113,6 +114,7 @@ type snapshotMsg struct {
 	err      error
 }
 type pollStatusMsg struct{}
+type pollAccountMsg struct{}
 type accountMsg struct {
 	account account.ProviderAccount
 	err     error
@@ -190,7 +192,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case startedMsg:
 		model.applyStarted(message)
 		if model.running {
-			return model, model.snapshotCommand()
+			return model, tea.Batch(model.snapshotCommand(), model.accountCommand())
 		}
 		return model, nil
 	case configuredMsg:
@@ -213,6 +215,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return model, nil
 	case accountMsg:
 		model.applyAccount(message)
+		if model.screen == ScreenStatus {
+			return model, tea.Tick(15*time.Second, func(time.Time) tea.Msg { return pollAccountMsg{} })
+		}
+		return model, nil
+	case pollAccountMsg:
+		if model.screen == ScreenStatus {
+			return model, model.accountCommand()
+		}
 		return model, nil
 	case providerOperationMsg:
 		model.busy = false
@@ -355,8 +365,37 @@ func (model Model) ViewText() string {
 			}
 		}
 		output.WriteString("Hosting status: " + state + "\n\n")
+		if model.account.ProviderEarningsWei != "" {
+			fmt.Fprintf(&output, "Lifetime earnings: %s MON\nClaimable: %s MON\n", formatWei(model.account.ProviderEarningsWei), formatWei(model.account.ClaimableWei))
+		} else if model.accountErr != nil {
+			output.WriteString("Lifetime earnings unavailable: " + model.accountErr.Error() + "\n")
+		}
 		if model.running {
-			fmt.Fprintf(&output, "%d completed requests\n", model.snapshot.Requests)
+			fmt.Fprintf(&output, "This run: %d completed · %s MON earned\n", model.snapshot.Requests, formatWei(model.snapshot.RunEarningsWei))
+			requests := visibleRequests(model.snapshot.RecentRequests, 8)
+			if len(requests) > 0 {
+				output.WriteString("\nRequests\n")
+				for _, request := range requests {
+					fmt.Fprintf(&output, "• %-14s %-18s %-9s", short(request.RequestID, 14), short(request.Model, 18), request.State)
+					switch request.State {
+					case "completed":
+						fmt.Fprintf(&output, " %d in · %d out · %s MON earned", request.InputTokens, request.OutputTokens, formatWei(request.EarningsWei))
+					case "active":
+						output.WriteString(" earning pending")
+					case "settling":
+						output.WriteString(" settlement pending")
+					case "failed":
+						if request.Error != "" {
+							output.WriteString(" " + short(request.Error, 32))
+						}
+					}
+					output.WriteByte('\n')
+				}
+				if len(model.snapshot.RecentRequests) > len(requests) {
+					fmt.Fprintf(&output, "  … %d older requests hidden\n", len(model.snapshot.RecentRequests)-len(requests))
+				}
+			}
+			output.WriteString("\nProviders\n")
 			for _, offer := range model.snapshot.Offers {
 				health := "healthy"
 				if !offer.Healthy {
@@ -532,6 +571,7 @@ func (model Model) HandleKey(key string) (Model, tea.Cmd) {
 				return model, model.accountCommand()
 			case 3:
 				model.screen, model.cursor = ScreenStatus, 0
+				return model, model.accountCommand()
 			case 4:
 				return model, tea.Quit
 			}
@@ -1027,11 +1067,33 @@ func (model Model) accountCommand() tea.Cmd {
 }
 
 func (model *Model) applyAccount(message accountMsg) {
+	model.accountErr = message.err
+	if model.screen == ScreenStatus {
+		if message.err == nil {
+			model.account = message.account
+		}
+		return
+	}
 	model.busy = false
 	model.err = message.err
 	if message.err == nil {
 		model.account = message.account
 	}
+}
+
+func visibleRequests(requests []provider.RequestStatus, limit int) []provider.RequestStatus {
+	visible := make([]provider.RequestStatus, 0, min(limit, len(requests)))
+	for _, request := range requests {
+		if (request.State == "active" || request.State == "settling") && len(visible) < limit {
+			visible = append(visible, request)
+		}
+	}
+	for _, request := range requests {
+		if request.State != "active" && request.State != "settling" && len(visible) < limit {
+			visible = append(visible, request)
+		}
+	}
+	return visible
 }
 
 func backendComputeOnly(item config.Backend) bool {

@@ -357,7 +357,28 @@ func TestLiveStatusRendersOfferHealthAndRequestCount(t *testing.T) {
 	model.screen, model.running = ScreenStatus, true
 	model.applySnapshot(snapshotMsg{snapshot: provider.StatusSnapshot{Connected: true, Requests: 12, Offers: []provider.OfferStatus{{OfferID: "qwen", Model: "qwen2.5", Healthy: false, Error: "Ollama stopped"}}}})
 	view := model.ViewText()
-	for _, expected := range []string{"Connected", "12 completed requests", "qwen2.5", "Ollama stopped"} {
+	for _, expected := range []string{"Connected", "This run: 12 completed", "qwen2.5", "Ollama stopped"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("view=%q missing=%q", view, expected)
+		}
+	}
+}
+
+func TestLiveStatusRendersRequestsAndWalletAndRunEarnings(t *testing.T) {
+	model := NewModel(Dependencies{}, nil)
+	model.screen, model.running = ScreenStatus, true
+	model.applyAccount(accountMsg{account: account.ProviderAccount{ProviderEarningsWei: "1250000000000000000", ClaimableWei: "500000000000000000"}})
+	model.applySnapshot(snapshotMsg{snapshot: provider.StatusSnapshot{
+		Connected:      true,
+		Requests:       2,
+		RunEarningsWei: "950",
+		RecentRequests: []provider.RequestStatus{
+			{RequestID: "request-active", Model: "qwen2.5", State: "active"},
+			{RequestID: "request-complete", Model: "qwen2.5", State: "completed", InputTokens: 12, OutputTokens: 7, EarningsWei: "950"},
+		},
+	}})
+	view := model.ViewText()
+	for _, expected := range []string{"Lifetime earnings: 1.25 MON", "Claimable: 0.5 MON", "This run: 2 completed", "0.00000000000000095 MON earned", "qwen2.5", "active", "12 in · 7 out"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("view=%q missing=%q", view, expected)
 		}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -140,16 +141,17 @@ type Config struct {
 }
 
 type Daemon struct {
-	config     Config
-	backends   map[string]backend.Backend
-	backendsMu sync.RWMutex
-	state      *RequestState
-	writeMu    sync.Mutex
-	jobsMu     sync.Mutex
-	jobs       map[string]context.CancelFunc
-	wg         sync.WaitGroup
-	statusMu   sync.RWMutex
-	status     StatusSnapshot
+	config           Config
+	backends         map[string]backend.Backend
+	backendsMu       sync.RWMutex
+	state            *RequestState
+	writeMu          sync.Mutex
+	jobsMu           sync.Mutex
+	jobs             map[string]context.CancelFunc
+	wg               sync.WaitGroup
+	statusMu         sync.RWMutex
+	status           StatusSnapshot
+	earningsRecorded map[string]struct{}
 }
 
 func NewDaemon(config Config, backends map[string]backend.Backend) *Daemon {
@@ -160,7 +162,7 @@ func NewDaemon(config Config, backends map[string]backend.Backend) *Daemon {
 		config.DrainTimeout = 30 * time.Second
 	}
 	now := time.Now().UTC()
-	return &Daemon{config: config, backends: backends, state: NewRequestState(), jobs: make(map[string]context.CancelFunc), status: StatusSnapshot{StartedAt: now, UpdatedAt: now, Offers: offerStatuses(config.Offers)}}
+	return &Daemon{config: config, backends: backends, state: NewRequestState(), jobs: make(map[string]context.CancelFunc), earningsRecorded: make(map[string]struct{}), status: StatusSnapshot{StartedAt: now, UpdatedAt: now, Offers: offerStatuses(config.Offers)}}
 }
 
 func (d *Daemon) Serve(ctx context.Context) error {
@@ -251,6 +253,7 @@ func (d *Daemon) Serve(ctx context.Context) error {
 			if err := d.send(ctx, connection, v1.MessageReceiptSignature, &signature); err != nil {
 				return err
 			}
+			d.recordReceipt(proposal)
 		default:
 			return v1.ErrInvalidMessage
 		}
@@ -333,6 +336,7 @@ func (d *Daemon) StatusSnapshot() StatusSnapshot {
 	defer d.statusMu.RUnlock()
 	snapshot := d.status
 	snapshot.Offers = append([]OfferStatus(nil), d.status.Offers...)
+	snapshot.RecentRequests = append([]RequestStatus(nil), d.status.RecentRequests...)
 	return snapshot
 }
 
@@ -343,15 +347,101 @@ func (d *Daemon) setConnected(connected bool) {
 	d.statusMu.Unlock()
 }
 
-func (d *Daemon) recordCompletion(offerID string, usage backend.Usage) {
+func (d *Daemon) recordRequestStarted(offer v1.JobOffer) {
+	d.statusMu.Lock()
+	d.status.RecentRequests = append([]RequestStatus{{RequestID: offer.RequestID, OfferID: offer.OfferID, Model: offer.Model, State: "active", StartedAt: time.Now().UTC()}}, d.status.RecentRequests...)
+	d.trimRequestsLocked()
+	d.status.UpdatedAt = time.Now().UTC()
+	d.statusMu.Unlock()
+}
+
+func (d *Daemon) recordCompletion(requestID, offerID string, usage backend.Usage) {
 	d.statusMu.Lock()
 	d.status.Requests++
 	d.status.InputTokens += usage.InputTokens
 	d.status.OutputTokens += usage.OutputTokens
 	d.status.ComputeMilliseconds += usage.ComputeMilliseconds
+	d.updateRequestLocked(requestID, func(request *RequestStatus) {
+		request.State = "settling"
+		request.InputTokens = usage.InputTokens
+		request.OutputTokens = usage.OutputTokens
+		request.ComputeMilliseconds = usage.ComputeMilliseconds
+	})
 	d.setOfferHealthLocked(offerID, true, "")
 	d.status.UpdatedAt = time.Now().UTC()
 	d.statusMu.Unlock()
+}
+
+func (d *Daemon) recordRequestFailed(requestID, message string) {
+	d.statusMu.Lock()
+	d.updateRequestLocked(requestID, func(request *RequestStatus) {
+		request.State = "failed"
+		request.Error = message
+		request.CompletedAt = time.Now().UTC()
+	})
+	d.trimRequestsLocked()
+	d.status.UpdatedAt = time.Now().UTC()
+	d.statusMu.Unlock()
+}
+
+func (d *Daemon) recordReceipt(proposal v1.ReceiptProposal) {
+	receipt := proposal.Receipt
+	total := new(big.Int).SetUint64(receipt.TotalCharge)
+	fee := new(big.Int).Mul(new(big.Int).Set(total), new(big.Int).SetUint64(uint64(receipt.FeeBasisPoints)))
+	fee.Quo(fee, big.NewInt(10_000))
+	earnings := new(big.Int).Sub(total, fee)
+	d.statusMu.Lock()
+	d.updateRequestLocked(proposal.RequestID, func(request *RequestStatus) {
+		request.State = "completed"
+		request.InputTokens = receipt.InputTokens
+		request.OutputTokens = receipt.OutputTokens
+		request.ComputeMilliseconds = receipt.ComputeMilliseconds
+		request.EarningsWei = earnings.String()
+		request.CompletedAt = time.Unix(int64(receipt.CompletedAt), 0).UTC()
+	})
+	if _, recorded := d.earningsRecorded[proposal.RequestID]; !recorded {
+		run, _ := new(big.Int).SetString(d.status.RunEarningsWei, 10)
+		if run == nil {
+			run = new(big.Int)
+		}
+		d.status.RunEarningsWei = run.Add(run, earnings).String()
+		d.earningsRecorded[proposal.RequestID] = struct{}{}
+	}
+	d.trimRequestsLocked()
+	d.status.UpdatedAt = time.Now().UTC()
+	d.statusMu.Unlock()
+}
+
+func (d *Daemon) updateRequestLocked(requestID string, update func(*RequestStatus)) {
+	if requestID == "" {
+		return
+	}
+	for index := range d.status.RecentRequests {
+		if d.status.RecentRequests[index].RequestID == requestID {
+			update(&d.status.RecentRequests[index])
+			return
+		}
+	}
+	request := RequestStatus{RequestID: requestID}
+	update(&request)
+	d.status.RecentRequests = append([]RequestStatus{request}, d.status.RecentRequests...)
+}
+
+func (d *Daemon) trimRequestsLocked() {
+	const recentLimit = 20
+	trimmed := make([]RequestStatus, 0, len(d.status.RecentRequests))
+	terminal := 0
+	for _, request := range d.status.RecentRequests {
+		active := request.State == "active" || request.State == "settling"
+		if !active {
+			if terminal >= recentLimit {
+				continue
+			}
+			terminal++
+		}
+		trimmed = append(trimmed, request)
+	}
+	d.status.RecentRequests = trimmed
 }
 
 func (d *Daemon) recordOfferHealth(offerID string, healthy bool, message string) {
@@ -412,6 +502,7 @@ func (d *Daemon) startJob(parent context.Context, connection *websocket.Conn, of
 		d.removeJob(offer.RequestID)
 		return err
 	}
+	d.recordRequestStarted(offer)
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
@@ -421,6 +512,7 @@ func (d *Daemon) startJob(parent context.Context, connection *websocket.Conn, of
 		for _, file := range offer.Workspace {
 			content, decodeErr := base64.StdEncoding.DecodeString(file.ContentBase64)
 			if decodeErr != nil {
+				d.recordRequestFailed(offer.RequestID, "invalid workspace file")
 				return
 			}
 			workspace = append(workspace, backend.WorkspaceFile{Path: file.Path, Content: content})
@@ -432,14 +524,17 @@ func (d *Daemon) startJob(parent context.Context, connection *websocket.Conn, of
 		sequence++
 		if err != nil {
 			d.recordOfferHealth(offer.OfferID, false, err.Error())
+			d.recordRequestFailed(offer.RequestID, err.Error())
 			failureContext, stopFailure := context.WithTimeout(context.WithoutCancel(jobCtx), 5*time.Second)
 			defer stopFailure()
 			_ = d.sendChunk(failureContext, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, ErrorCode: "backend_failed"})
 			return
 		}
-		if err := d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ComputeMilliseconds: usage.ComputeMilliseconds}); err == nil {
-			d.recordCompletion(offer.OfferID, usage)
+		if err := d.sendChunk(jobCtx, connection, v1.OutputChunk{RequestID: offer.RequestID, Sequence: sequence, Done: true, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ComputeMilliseconds: usage.ComputeMilliseconds}); err != nil {
+			d.recordRequestFailed(offer.RequestID, err.Error())
+			return
 		}
+		d.recordCompletion(offer.RequestID, offer.OfferID, usage)
 	}()
 	return nil
 }
@@ -475,6 +570,7 @@ func (d *Daemon) cancel(requestID string) {
 	if cancel != nil {
 		cancel()
 		_ = d.state.Cancel(requestID)
+		d.recordRequestFailed(requestID, "cancelled")
 	}
 }
 

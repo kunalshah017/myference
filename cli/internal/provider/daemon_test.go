@@ -27,7 +27,7 @@ func TestStatusSnapshotIsConcurrentImmutableAndTracksOfferHealth(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			daemon.recordCompletion("one", backend.Usage{InputTokens: 2, OutputTokens: 3, ComputeMilliseconds: 4})
+			daemon.recordCompletion("", "one", backend.Usage{InputTokens: 2, OutputTokens: 3, ComputeMilliseconds: 4})
 		}()
 	}
 	wait.Wait()
@@ -51,6 +51,41 @@ func TestStatusSnapshotIsConcurrentImmutableAndTracksOfferHealth(t *testing.T) {
 	}
 	if got := daemon.StatusSnapshot().Offers; len(got) != 1 || got[0].OfferID != "two" || !got[0].Healthy {
 		t.Fatalf("reloaded offers=%+v", got)
+	}
+}
+
+func TestStatusTracksActiveRequestsAndExactProviderEarnings(t *testing.T) {
+	daemon := NewDaemon(Config{Offers: []v1.OfferCapacity{{OfferID: "local", Model: "qwen", PriceVersion: 1}}}, map[string]backend.Backend{"local": testBackend{}})
+	offer := v1.JobOffer{RequestID: "request-1", OfferID: "local", Model: "qwen"}
+	daemon.recordRequestStarted(offer)
+	active := daemon.StatusSnapshot()
+	if len(active.RecentRequests) != 1 || active.RecentRequests[0].State != "active" || active.RecentRequests[0].Model != "qwen" {
+		t.Fatalf("active snapshot=%+v", active)
+	}
+
+	daemon.recordCompletion("request-1", "local", backend.Usage{InputTokens: 12, OutputTokens: 7, ComputeMilliseconds: 450})
+	settling := daemon.StatusSnapshot()
+	if settling.Requests != 1 || settling.RecentRequests[0].State != "settling" || settling.RecentRequests[0].OutputTokens != 7 {
+		t.Fatalf("settling snapshot=%+v", settling)
+	}
+
+	receipt := validDaemonReceipt(v1.Address{19: 9})
+	receipt.TotalCharge = 1_000
+	receipt.MaximumCharge = 1_000
+	receipt.FeeBasisPoints = 500
+	receipt.InputTokens = 12
+	receipt.OutputTokens = 7
+	receipt.ComputeMilliseconds = 450
+	receipt.CompletedAt = uint64(time.Now().Unix())
+	daemon.recordReceipt(v1.ReceiptProposal{RequestID: "request-1", Receipt: receipt})
+	daemon.recordReceipt(v1.ReceiptProposal{RequestID: "request-1", Receipt: receipt})
+	completed := daemon.StatusSnapshot()
+	if completed.RunEarningsWei != "950" || completed.RecentRequests[0].State != "completed" || completed.RecentRequests[0].EarningsWei != "950" {
+		t.Fatalf("completed snapshot=%+v", completed)
+	}
+	completed.RecentRequests[0].Model = "mutated"
+	if daemon.StatusSnapshot().RecentRequests[0].Model != "qwen" {
+		t.Fatal("status snapshot shares request state")
 	}
 }
 
