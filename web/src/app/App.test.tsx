@@ -34,7 +34,7 @@ it('opens the machine approval workspace from the device verification link', asy
 
 it('serves complete public documentation for using and hosting inference', () => {
   window.history.pushState({}, '', '/docs')
-  render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>)
+  const { container } = render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>)
 
   expect(screen.getByRole('heading', { name: /build with myference/i })).toBeVisible()
   expect(screen.getByRole('heading', { name: /use hosted inference/i })).toBeVisible()
@@ -52,4 +52,7 @@ it('serves complete public documentation for using and hosting inference', () =>
   expect(screen.getAllByText(/public API exposes model responses only/i).length).toBeGreaterThan(0)
   expect(screen.getByText(/starts Docker Desktop and pulls missing digest-pinned images/i)).toBeInTheDocument()
   expect(screen.getByText(/Linux container proxy/i)).toBeVisible()
+  expect(container).not.toHaveTextContent(/myference windows/i)
+  expect(container).not.toHaveTextContent(/legacy-(start|status|stop)/i)
+  expect(screen.getAllByText(/myference service install/i).length).toBeGreaterThan(0)
 })

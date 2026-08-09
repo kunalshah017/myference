@@ -4,11 +4,20 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 installer="$root/web/public/install.sh"
 windows_installer="$root/web/public/install.ps1"
+service_installer="$root/packaging/windows/install.ps1"
 
 sh -n "$installer"
 test -f "$windows_installer"
 grep -F 'Get-FileHash' "$windows_installer" >/dev/null
 grep -F 'SetEnvironmentVariable' "$windows_installer" >/dev/null
+if grep -F 'Headless' "$service_installer" >/dev/null; then
+  echo 'Windows service installer still exposes headless mode' >&2
+  exit 1
+fi
+if grep -F 'windows headless' "$service_installer" >/dev/null; then
+  echo 'Windows service installer still invokes the removed command' >&2
+  exit 1
+fi
 
 fixture=$(mktemp -d "${TMPDIR:-/tmp}/myference-installer-test.XXXXXX")
 trap 'rm -rf "$fixture"' EXIT HUP INT TERM

@@ -47,7 +47,6 @@ const (
 	defaultWebURL            = "https://myference.xyz"
 )
 
-type platformSessionModeKey struct{}
 type platformAllowBatteryKey struct{}
 
 var version = "dev"
@@ -246,7 +245,7 @@ func mergeConfiguredCandidates(discovered []hostservice.Candidate, backends []co
 
 func run(args []string, output io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: myference login | host | backend <add|list|start|stop|version> | offer <publish|list|sync> | collateral <status|deposit|request-exit|finalize-exit> | capacity | status | serve | service <install|start|stop|status|uninstall> | windows <doctor|status|models|test|dashboard|focus|headless|restore>")
+		return errors.New("usage: myference login | host | backend <add|list|start|stop|remove|version> | offer <publish|list|sync> | collateral <status|deposit|request-exit|finalize-exit> | capacity | status | serve | service <install|start|stop|status|uninstall>")
 	}
 	switch args[0] {
 	case "login":
@@ -302,15 +301,11 @@ func run(args []string, output io.Writer) error {
 		return err
 	case "service":
 		return runPlatformCommand("service", args[1:], output)
-	case "windows":
-		return runPlatformCommand("windows", args[1:], output)
 	case "internal":
 		if len(args) == 2 && args[1] == "codex-deny-tool" {
 			return runCodexDenyTool(os.Stdin, output)
 		}
 		return errors.New("unknown internal command")
-	case "stop", "legacy-start", "legacy-stop", "legacy-status":
-		return runPlatformCommand(args[0], args[1:], output)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}

@@ -7,11 +7,11 @@ $temporary = Join-Path ([IO.Path]::GetTempPath()) ("myference-service-installer-
 $executable = Join-Path $temporary 'myference.exe'
 $config = Join-Path $temporary 'config.json'
 
-function Invoke-ServiceInstaller([switch]$Headless) {
-    $capture = [pscustomobject]@{ Principal = $null }
+function Invoke-ServiceInstaller {
+    $capture = [pscustomobject]@{ Principal = $null; Action = $null }
 
     & {
-        function New-ScheduledTaskAction { param($Execute, $Argument) [pscustomobject]@{ Execute = $Execute; Argument = $Argument } }
+        function New-ScheduledTaskAction { param($Execute, $Argument) $capture.Action = [pscustomobject]@{ Execute = $Execute; Argument = $Argument }; $capture.Action }
         function New-ScheduledTaskTrigger { param([switch]$AtLogOn, $User) [pscustomobject]@{ AtLogOn = $AtLogOn; User = $User } }
         function New-ScheduledTaskPrincipal {
             param($UserId, $LogonType, $RunLevel)
@@ -24,14 +24,10 @@ function Invoke-ServiceInstaller([switch]$Headless) {
         }
         function Register-ScheduledTask { param($TaskName, $Action, $Trigger, $Principal, $Settings, [switch]$Force) }
 
-        if ($Headless) {
-            & $installer -Executable $executable -Config $config -Headless
-        } else {
-            & $installer -Executable $executable -Config $config
-        }
+        & $installer -Executable $executable -Config $config
     }
 
-    return $capture.Principal
+    return [pscustomobject]@{ RunLevel = $capture.Principal.RunLevel; Argument = $capture.Action.Argument }
 }
 
 try {
@@ -40,12 +36,10 @@ try {
 
     $normal = Invoke-ServiceInstaller
     if ($normal.RunLevel -ne 'Limited') {
-        throw "Normal provider task run level was '$($normal.RunLevel)', expected 'Limited'"
+        throw "Provider task run level was '$($normal.RunLevel)', expected 'Limited'"
     }
-
-    $headless = Invoke-ServiceInstaller -Headless
-    if ($headless.RunLevel -ne 'Highest') {
-        throw "Headless provider task run level was '$($headless.RunLevel)', expected 'Highest'"
+    if ($normal.Argument -notmatch '^serve --config ') {
+        throw "Provider task argument was '$($normal.Argument)'"
     }
 } finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue

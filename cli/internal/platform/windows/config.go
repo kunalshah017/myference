@@ -113,23 +113,3 @@ func isProtectedService(name string) bool {
 	_, found := protected[strings.ToLower(strings.TrimSpace(name))]
 	return found
 }
-
-// Command identifies a Windows machine-control action. Its Args are retained for
-// the later action-specific implementations to parse.
-type Command struct {
-	Action string
-	Args   []string
-}
-
-// ParseCommand accepts only the native Windows command namespace.
-func ParseCommand(args []string) (Command, error) {
-	if len(args) == 0 {
-		return Command{}, fmt.Errorf("usage: myference windows <doctor|status|models|test|dashboard|focus|headless|restore>")
-	}
-	switch args[0] {
-	case "doctor", "status", "models", "test", "dashboard", "focus", "headless", "restore":
-		return Command{Action: args[0], Args: append([]string(nil), args[1:]...)}, nil
-	default:
-		return Command{}, fmt.Errorf("unknown Windows action %q", args[0])
-	}
-}

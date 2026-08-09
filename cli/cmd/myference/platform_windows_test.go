@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -19,69 +18,6 @@ import (
 	"github.com/kunalshah017/myference/cli/internal/provider"
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 )
-
-func TestWindowsStatusAndDashboardReadLocalProviderSnapshot(t *testing.T) {
-	configPath := t.TempDir() + `\myference.json`
-	status := provider.StatusSnapshot{Connected: true, StartedAt: time.Now().Add(-time.Minute), UpdatedAt: time.Now(), Requests: 4, Offers: []provider.OfferStatus{{OfferID: "one", Model: "qwen", Healthy: true}}}
-	if err := provider.WriteStatusFile(providerStatusPath(configPath), status); err != nil {
-		t.Fatal(err)
-	}
-	original := collectWindowsHostTelemetry
-	collectWindowsHostTelemetry = func(context.Context) (platform.HostTelemetry, error) {
-		return platform.HostTelemetry{CPUPercent: 5, MemoryUsedBytes: 4 << 30, MemoryTotalBytes: 8 << 30, OnACPower: true, BatteryPercent: 90}, nil
-	}
-	t.Cleanup(func() { collectWindowsHostTelemetry = original })
-	var output bytes.Buffer
-	if err := run([]string{"windows", "status", "--json", "--config", configPath}, &output); err != nil {
-		t.Fatal(err)
-	}
-	var document struct {
-		Provider provider.StatusSnapshot `json:"provider"`
-		Host     platform.HostTelemetry  `json:"host"`
-	}
-	if err := json.Unmarshal(output.Bytes(), &document); err != nil {
-		t.Fatal(err)
-	}
-	if document.Provider.Requests != 4 || document.Host.CPUPercent != 5 {
-		t.Fatalf("document=%+v", document)
-	}
-	output.Reset()
-	if err := run([]string{"windows", "dashboard", "--once", "--config", configPath}, &output); err != nil {
-		t.Fatal(err)
-	}
-	if got := output.String(); !strings.Contains(got, "requests 4") || !strings.Contains(got, "Offer one") || !strings.Contains(got, "qwen") {
-		t.Fatalf("dashboard:\n%s", got)
-	}
-}
-
-func TestWindowsModelsAndTestUseLoopbackOllama(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/api/tags":
-			_, _ = response.Write([]byte(`{"models":[{"name":"qwen:latest"}]}`))
-		case "/api/generate":
-			_, _ = response.Write([]byte(`{"response":"myference works","done":true}`))
-		default:
-			http.NotFound(response, request)
-		}
-	}))
-	defer server.Close()
-
-	var output bytes.Buffer
-	if err := run([]string{"windows", "models", "--ollama-url", server.URL}, &output); err != nil {
-		t.Fatal(err)
-	}
-	if got := output.String(); !strings.Contains(got, "qwen:latest") {
-		t.Fatalf("models output = %q", got)
-	}
-	output.Reset()
-	if err := run([]string{"windows", "test", "--ollama-url", server.URL, "--model", "qwen:latest"}, &output); err != nil {
-		t.Fatal(err)
-	}
-	if got := output.String(); !strings.Contains(got, "myference works") {
-		t.Fatalf("test output = %q", got)
-	}
-}
 
 func TestPrepareWindowsBackendsFailsBeforeReadinessWhenPreloadFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

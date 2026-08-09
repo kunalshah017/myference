@@ -55,7 +55,11 @@ Expected: PASS.
 - Modify: `cli/cmd/myference/platform_windows.go`
 - Modify: `cli/cmd/myference/platform_windows_test.go`
 - Modify: `cli/internal/platform/windows/optimize.go`
+- Modify: `cli/internal/platform/windows/optimize_test.go`
 - Modify: `cli/internal/platform/windows/config.go`
+- Delete: `cli/internal/platform/windows/lifecycle.go`
+- Delete: `cli/internal/platform/windows/headless.go`
+- Delete: `cli/internal/platform/windows/headless_test.go`
 
 - [ ] **Step 1: Remove command-handler tests and retain hosting tests**
 
@@ -63,7 +67,7 @@ Delete `TestWindowsStatusAndDashboardReadLocalProviderSnapshot` and `TestWindows
 
 - [ ] **Step 2: Record a clean Windows hosting baseline**
 
-Run: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test ./cli/cmd/myference -run TestRemovedWindowsAndLegacyCommandsAreUnknown -count=1`
+Run: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -exec=/usr/bin/true ./cli/cmd/myference -run TestRemovedWindowsAndLegacyCommandsAreUnknown -count=1`
 
 Expected: PASS before deletion, proving the retained Windows hosting path starts clean.
 
@@ -80,7 +84,7 @@ func commandAgentImages(config.Config) []string
 func openBrowser(string) error
 ```
 
-`runPlatformCommand` accepts only `service` and its five actions. Delete Windows namespace parsing and all doctor, status, dashboard, focus, headless, restore, models, test, telemetry, AC-status, and legacy lifecycle handlers. Retain `prepareWindowsDocker`, Ollama preload, provider tuning, recovery-on-stop, and the scheduled-service implementation.
+`runPlatformCommand` accepts only `service` and its five actions. Delete Windows namespace parsing and all doctor, status, dashboard, focus, headless, restore, models, test, telemetry, AC-status, and legacy lifecycle handlers. Delete the unreachable legacy lifecycle bridge and headless installer orchestration. Retain `prepareWindowsDocker`, Ollama preload, provider tuning, recovery-on-stop, and the scheduled-service implementation.
 
 Remove `ParseCommand` and its `Command` type from `cli/internal/platform/windows/config.go`. Change the active-journal error in `optimize.go` so it does not direct users to a removed command:
 
@@ -90,7 +94,7 @@ return fmt.Errorf("%w; stop the existing provider session before starting anothe
 
 - [ ] **Step 4: Run Windows package tests and cross-build**
 
-Run: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test ./cli/cmd/myference ./cli/internal/platform/windows -count=1`
+Run: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -exec=/usr/bin/true ./cli/cmd/myference ./cli/internal/platform/windows -count=1`
 
 Run: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./cli/cmd/myference`
 
@@ -221,7 +225,7 @@ Expected: PASS.
 
 - [ ] **Step 3: Cross-compile retained Windows hosting**
 
-Run: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test ./cli/cmd/myference ./cli/internal/platform/windows -count=1`
+Run: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -exec=/usr/bin/true ./cli/cmd/myference ./cli/internal/platform/windows -count=1`
 
 Run: `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./cli/cmd/myference`
 

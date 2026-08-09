@@ -87,35 +87,3 @@ func TestConfigRejectsTrailingJSON(t *testing.T) {
 		t.Fatal("Unmarshal accepted trailing JSON")
 	}
 }
-
-func TestParseCommandAcceptsWindowsActions(t *testing.T) {
-	for _, action := range []string{"doctor", "status", "models", "test", "dashboard", "focus", "headless", "restore"} {
-		t.Run(action, func(t *testing.T) {
-			command, err := ParseCommand([]string{action})
-			if err != nil {
-				t.Fatalf("ParseCommand(%q): %v", action, err)
-			}
-			if command.Action != action {
-				t.Fatalf("command.Action = %q, want %q", command.Action, action)
-			}
-		})
-	}
-}
-
-func TestParseCommandRejectsUnknownWindowsAction(t *testing.T) {
-	if _, err := ParseCommand([]string{"lan-check"}); err == nil {
-		t.Fatal("ParseCommand accepted removed LAN action")
-	}
-}
-
-func TestParseCommandUsesProviderOwnedFocusSurface(t *testing.T) {
-	command, err := ParseCommand([]string{"focus", "status"})
-	if err != nil || command.Action != "focus" {
-		t.Fatalf("ParseCommand(focus) = %+v, %v", command, err)
-	}
-	for _, removed := range []string{"optimize", "exclusive"} {
-		if _, err := ParseCommand([]string{removed}); err == nil {
-			t.Fatalf("ParseCommand accepted removed action %q", removed)
-		}
-	}
-}

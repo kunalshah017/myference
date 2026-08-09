@@ -30,8 +30,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($Config)) { throw 'Full acceptance requires -Config pointing to a real provider configuration' }
     $cli = Join-Path $root 'myference.exe'
     if (-not (Test-Path -LiteralPath $cli)) { throw 'Build myference.exe in the repository root before full acceptance' }
-    & $cli windows doctor --config $Config
-    & $cli windows status --json --config $Config
+    & $cli status --json --config $Config
     & $cli backend list --config $Config
     Write-Host 'Automated read-only checks passed. Complete every manual checkbox in docs/windows-acceptance.md.' -ForegroundColor Green
 } finally {

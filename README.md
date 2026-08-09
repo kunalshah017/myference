@@ -4,7 +4,7 @@ Myference is a Monad-native AI inference marketplace that turns unused computers
 
 ## Repository status
 
-The repository contains the shared Go provider CLI, broker, Monad contracts, web client, and preserved Windows host implementation. The working vertical slice uses browser wallet login, delegated machine receipt signers, indexed native-MON spending sessions, real provider streaming, EIP-712 co-signing, durable batch settlement, and realtime account/request projections.
+The repository contains the shared Go provider CLI, broker, Monad contracts, and web client. The working vertical slice uses browser wallet login, delegated machine receipt signers, indexed native-MON spending sessions, real provider streaming, EIP-712 co-signing, durable batch settlement, and realtime account/request projections.
 
 ```text
 cli/cmd/myference/             Shared Windows/macOS provider CLI
@@ -16,7 +16,6 @@ cli/internal/backend/command/  Disposable image-based Codex/Claude/Kimi runner
 cli/internal/provider/         Authenticated outbound provider daemon
 cli/internal/platform/windows/ Native Windows provider lifecycle
 cli/internal/platform/darwin/  Native launchd lifecycle
-cli/platform/windows/legacy/   Preserved Windows PowerShell and Go CLI
 server/internal/settlement/    Receipt signing and settlement coordinator
 web/                           Wallet, marketplace, billing, and provider console
 docs/superpowers/specs/        Approved system design
@@ -70,13 +69,9 @@ Marketplace prices are displayed as MON with a cached, informational USD referen
 
 When the CLI or focused web account page publishes a later immutable price version, the running machine polls its account-owned compatible versions every 15 seconds, saves the confirmed version atomically, and reloads capacity without interrupting other backends. The web page cannot discover providers, create an offer, or change its model identity.
 
-`myference service install|start|stop|status|uninstall` uses a Windows Scheduled Task or a per-user macOS LaunchAgent. A foreground `serve` process stops cleanly with Ctrl+C. `legacy-start`, `legacy-status`, and `legacy-stop` remain available only for the preserved Windows LAN host.
+`myference service install|start|stop|status|uninstall` uses a Windows Scheduled Task or a per-user macOS LaunchAgent. A foreground `serve` process stops cleanly with Ctrl+C. Windows uses the same shared CLI commands as macOS; provider startup automatically prepares configured Ollama and Docker backends and applies reversible host tuning without exposing a separate Windows command namespace. Complete the [physical Windows acceptance checklist](docs/windows-acceptance.md) on release builds.
 
-Windows provider management is native and outbound-only: `myference windows doctor|models|test|status|dashboard`, `windows focus start|status|restore`, `windows headless install|start|status|restore`, and the idempotent emergency `windows restore`. One `serve` owns every enabled laptop backend; focus and headless reuse it and never open a LAN management listener. Complete [the physical Windows acceptance checklist](docs/windows-acceptance.md) before removing the preserved legacy implementation.
-
-`myference windows doctor` and `myference windows headless status` inspect Docker readiness without starting it or pulling images. `windows headless start` signs out; the next login launches the same provider task without Explorer, and its startup path performs the bounded Docker start/pull preparation described above.
-
-Windows provider tuning requires AC power by default. For an intentional foreground battery session, use `myference serve --allow-battery` or `myference host --allow-battery`; scheduled service/headless sessions retain the safer AC-only policy.
+Windows provider tuning requires AC power by default. For an intentional foreground battery session, use `myference serve --allow-battery` or `myference host --allow-battery`; scheduled service sessions retain the safer AC-only policy.
 
 ## Broker server
 
@@ -124,10 +119,6 @@ Both API dialects are streaming-only and require `X-Myference-Max-Spend` in wei 
 ```
 
 Workspace paths must be normalized relative paths. The relay rejects traversal, absolute paths, invalid base64, excess files, and excess decoded bytes; cloud and Ollama backends reject workspace jobs. Command backends materialize files with private permissions, run them in the isolated container, remove the container and both job networks on cancellation, and delete the workspace on every exit.
-
-## Preserved Windows CLI
-
-The existing CLI is documented in [`cli/platform/windows/legacy/README.md`](cli/platform/windows/legacy/README.md). It runs Ollama on loopback and exposes the original private-LAN streaming gateway. That gateway is preserved for migration and recovery; marketplace traffic uses the authenticated outbound provider daemon above.
 
 ## Hackathon proof
 

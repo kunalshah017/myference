@@ -199,25 +199,6 @@ func (runner *NativeRunner) Restore(ctx context.Context, journal RecoveryJournal
 	return nil
 }
 
-func (runner *NativeRunner) Elevated(ctx context.Context) bool {
-	result, _, _ := syscall.NewLazyDLL("shell32.dll").NewProc("IsUserAnAdmin").Call()
-	return result != 0
-}
-
-func (runner *NativeRunner) SnapshotHeadless(ctx context.Context) (RecoveryJournal, error) {
-	snapshot, err := runner.Snapshot(ctx, DefaultConfig(), SnapshotOptions{Headless: true})
-	return snapshot.Journal, err
-}
-
-func (runner *NativeRunner) LaunchHeadless(ctx context.Context, signOut bool) error {
-	if signOut {
-		_, err := runWindowsCommand(ctx, "shutdown.exe", "/l")
-		return err
-	}
-	_, err := runWindowsCommand(ctx, "schtasks.exe", "/Run", "/TN", HeadlessProviderTask)
-	return err
-}
-
 func (runner *NativeRunner) startKeepAwake() error {
 	runner.keepMutex.Lock()
 	defer runner.keepMutex.Unlock()

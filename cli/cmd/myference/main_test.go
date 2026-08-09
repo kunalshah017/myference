@@ -462,27 +462,12 @@ func TestOfferVersionWatcherSynchronizesAndReportsFailure(t *testing.T) {
 	}
 }
 
-func TestWindowsCommandsReachTheNativeDispatchBoundary(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("native Windows dispatch is compiled only on Windows")
-	}
-	err := run([]string{"windows", "focus"}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "focus <start|status|restore>") {
-		t.Fatalf("run(windows focus) error = %v, want focus usage", err)
-	}
-	err = run([]string{"windows", "headless"}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "headless <install|start|status|restore>") {
-		t.Fatalf("run(windows headless) error = %v, want headless usage", err)
-	}
-}
-
-func TestWindowsCommandRejectsLANAction(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("native Windows dispatch is compiled only on Windows")
-	}
-	err := run([]string{"windows", "lan-check"}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "unknown Windows action") {
-		t.Fatalf("run(windows lan-check) error = %v, want unknown Windows action", err)
+func TestRemovedWindowsAndLegacyCommandsAreUnknown(t *testing.T) {
+	for _, command := range []string{"windows", "legacy-start", "legacy-status", "legacy-stop", "stop"} {
+		err := run([]string{command}, &bytes.Buffer{})
+		if err == nil || err.Error() != fmt.Sprintf("unknown command %q", command) {
+			t.Fatalf("run(%q) error=%v", command, err)
+		}
 	}
 }
 

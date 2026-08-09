@@ -61,54 +61,6 @@ type Operation struct {
 	Value       string
 }
 
-func StartHeadlessProviderSession(ctx context.Context, config Config, options TuningOptions, store JournalStore, runner OptimizationRunner) (func() error, error) {
-	active, err := store.Load()
-	if err != nil {
-		return nil, err
-	}
-	if active.SessionKind != "headless" {
-		return nil, fmt.Errorf("headless provider requires a headless recovery journal")
-	}
-	snapshot, err := runner.Snapshot(ctx, config, SnapshotOptions{})
-	if err != nil {
-		return nil, err
-	}
-	operations, err := PlanProviderTuning(config, options, snapshot)
-	if err != nil {
-		return nil, err
-	}
-	if err := store.Update(func(journal *RecoveryJournal) error {
-		journal.OwnerPID = os.Getpid()
-		journal.Ollama = snapshot.Journal.Ollama
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	for _, operation := range operations {
-		if err := applyJournaledOperation(ctx, store, runner, operation); err != nil {
-			_ = RestoreProviderTuning(ctx, store, runner)
-			return nil, err
-		}
-	}
-	// Provider tuning may activate a different power scheme. Apply the already
-	// journaled headless lid overlay to that active scheme as the last step.
-	for _, operation := range []Operation{
-		{Stage: "headless:lid:ac", Kind: OperationACLidAction, Program: "powercfg.exe", Args: []string{"/setacvalueindex", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION", "0"}},
-		{Stage: "headless:lid:dc", Kind: OperationDCLidAction, Program: "powercfg.exe", Args: []string{"/setdcvalueindex", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION", "0"}},
-	} {
-		if err := runner.Apply(ctx, operation); err != nil {
-			_ = RestoreProviderTuning(ctx, store, runner)
-			return nil, fmt.Errorf("apply %s: %w", operation.Stage, err)
-		}
-	}
-	var once sync.Once
-	var restoreErr error
-	return func() error {
-		once.Do(func() { restoreErr = RestoreProviderTuning(context.Background(), store, runner) })
-		return restoreErr
-	}, nil
-}
-
 type OptimizationRunner interface {
 	Snapshot(context.Context, Config, SnapshotOptions) (HostSnapshot, error)
 	Apply(context.Context, Operation) error
@@ -169,7 +121,7 @@ func StartProviderTuning(ctx context.Context, config Config, options TuningOptio
 	}
 	if err := store.Save(snapshot.Journal); err != nil {
 		if errors.Is(err, ErrActiveRecoveryJournal) {
-			return fmt.Errorf("%w; run `myference windows restore` before starting another provider", err)
+			return fmt.Errorf("%w; stop the existing provider session before starting another", err)
 		}
 		return err
 	}
