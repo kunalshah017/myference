@@ -471,6 +471,13 @@ func TestRemovedWindowsAndLegacyCommandsAreUnknown(t *testing.T) {
 	}
 }
 
+func TestSharedServiceCommandRemainsRouted(t *testing.T) {
+	err := run([]string{"service"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "service <install|start|stop|status|uninstall>") || strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("run(service) error=%v", err)
+	}
+}
+
 func TestHostLoginArgumentsPreserveNoBrowser(t *testing.T) {
 	got := hostLoginArgs("https://api.myference.xyz", "/tmp/myference.json", true)
 	if !slices.Contains(got, "--no-browser") {

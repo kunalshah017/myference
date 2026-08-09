@@ -60,6 +60,12 @@ Expected: PASS.
 - Delete: `cli/internal/platform/windows/lifecycle.go`
 - Delete: `cli/internal/platform/windows/headless.go`
 - Delete: `cli/internal/platform/windows/headless_test.go`
+- Delete: `cli/internal/platform/windows/diagnostics.go`
+- Delete: `cli/internal/platform/windows/diagnostics_test.go`
+- Delete: `cli/internal/platform/windows/telemetry.go`
+- Delete: `cli/internal/platform/windows/telemetry_test.go`
+- Delete: `cli/internal/platform/windows/telemetry_windows.go`
+- Delete: `cli/platform/windows/legacy/`
 
 - [ ] **Step 1: Remove command-handler tests and retain hosting tests**
 
@@ -84,7 +90,7 @@ func commandAgentImages(config.Config) []string
 func openBrowser(string) error
 ```
 
-`runPlatformCommand` accepts only `service` and its five actions. Delete Windows namespace parsing and all doctor, status, dashboard, focus, headless, restore, models, test, telemetry, AC-status, and legacy lifecycle handlers. Delete the unreachable legacy lifecycle bridge and headless installer orchestration. Retain `prepareWindowsDocker`, Ollama preload, provider tuning, recovery-on-stop, and the scheduled-service implementation.
+`runPlatformCommand` accepts only `service` and its five actions. Delete Windows namespace parsing and all doctor, status, dashboard, focus, headless, restore, models, test, telemetry, AC-status, and legacy lifecycle handlers. Delete the unreachable legacy lifecycle bridge, headless installer orchestration, command-only diagnostics/telemetry helpers, and preserved standalone legacy CLI. Retain `prepareWindowsDocker`, Ollama preload, provider tuning, recovery-on-stop, and the scheduled-service implementation.
 
 Remove `ParseCommand` and its `Command` type from `cli/internal/platform/windows/config.go`. Change the active-journal error in `optimize.go` so it does not direct users to a removed command:
 

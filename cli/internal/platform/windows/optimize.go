@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,25 +13,14 @@ import (
 type OperationKind string
 
 const (
-	OperationPowerPlan            OperationKind = "power-plan"
-	OperationKeepAwake            OperationKind = "keep-awake"
-	OperationOllamaEnvironment    OperationKind = "ollama-environment"
-	OperationProcessPriority      OperationKind = "process-priority"
-	OperationStopService          OperationKind = "stop-service"
-	OperationStopProcess          OperationKind = "stop-process"
-	OperationInstallHeadlessTasks OperationKind = "install-headless-tasks"
-	OperationHeadlessShell        OperationKind = "headless-shell"
-	OperationACLidAction          OperationKind = "ac-lid-action"
-	OperationDCLidAction          OperationKind = "dc-lid-action"
+	OperationPowerPlan         OperationKind = "power-plan"
+	OperationKeepAwake         OperationKind = "keep-awake"
+	OperationOllamaEnvironment OperationKind = "ollama-environment"
+	OperationProcessPriority   OperationKind = "process-priority"
 )
 
 type TuningOptions struct {
 	AllowBattery bool
-}
-
-type SnapshotOptions struct {
-	Focus    bool
-	Headless bool
 }
 
 type ProcessSnapshot struct {
@@ -42,10 +30,8 @@ type ProcessSnapshot struct {
 }
 
 type HostSnapshot struct {
-	OnACPower       bool
-	Processes       []ProcessSnapshot
-	RunningServices []string
-	Journal         RecoveryJournal
+	OnACPower bool
+	Journal   RecoveryJournal
 }
 
 type Operation struct {
@@ -53,16 +39,12 @@ type Operation struct {
 	Kind        OperationKind
 	Program     string
 	Args        []string
-	Name        string
-	PID         int
-	Executable  string
 	Environment map[string]string
 	Priority    string
-	Value       string
 }
 
 type OptimizationRunner interface {
-	Snapshot(context.Context, Config, SnapshotOptions) (HostSnapshot, error)
+	Snapshot(context.Context, Config) (HostSnapshot, error)
 	Apply(context.Context, Operation) error
 	Restore(context.Context, RecoveryJournal) error
 }
@@ -92,26 +74,8 @@ func PlanProviderTuning(config Config, options TuningOptions, snapshot HostSnaps
 	return operations, nil
 }
 
-func PlanFocus(config Config, snapshot HostSnapshot) ([]Operation, error) {
-	if err := config.Validate(); err != nil {
-		return nil, err
-	}
-	operations := make([]Operation, 0)
-	for _, service := range snapshot.RunningServices {
-		if containsFold(config.StopServices, service) {
-			operations = append(operations, Operation{Stage: "focus:service:" + service, Kind: OperationStopService, Program: "sc.exe", Args: []string{"stop", service}, Name: service})
-		}
-	}
-	for _, process := range snapshot.Processes {
-		if containsFold(config.StopProcesses, trimExecutableSuffix(process.Name)) {
-			operations = append(operations, Operation{Stage: "focus:process:" + strconv.Itoa(process.PID), Kind: OperationStopProcess, Program: "taskkill.exe", Args: []string{"/PID", strconv.Itoa(process.PID), "/T", "/F"}, Name: process.Name, PID: process.PID, Executable: process.Executable})
-		}
-	}
-	return operations, nil
-}
-
 func StartProviderTuning(ctx context.Context, config Config, options TuningOptions, store JournalStore, runner OptimizationRunner) error {
-	snapshot, err := runner.Snapshot(ctx, config, SnapshotOptions{})
+	snapshot, err := runner.Snapshot(ctx, config)
 	if err != nil {
 		return fmt.Errorf("capture Windows recovery state: %w", err)
 	}
@@ -153,88 +117,6 @@ func RestoreProviderTuning(ctx context.Context, store JournalStore, runner Optim
 	return store.CompleteRecovery(func(journal RecoveryJournal) error { return runner.Restore(ctx, journal) })
 }
 
-func StartFocus(ctx context.Context, config Config, store JournalStore, runner OptimizationRunner) error {
-	active, err := store.Load()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return errors.New("focus requires an active provider; start `myference serve` first")
-		}
-		return err
-	}
-	if active.SessionKind != "provider" {
-		return fmt.Errorf("focus requires a provider recovery journal, found %q", active.SessionKind)
-	}
-	if slices.ContainsFunc(active.AppliedStages, func(stage string) bool { return strings.HasPrefix(stage, "focus:") }) {
-		return errors.New("focus is already active")
-	}
-	snapshot, err := runner.Snapshot(ctx, config, SnapshotOptions{Focus: true})
-	if err != nil {
-		return fmt.Errorf("capture Windows focus state: %w", err)
-	}
-	operations, err := PlanFocus(config, snapshot)
-	if err != nil {
-		return err
-	}
-	if err := store.Update(func(journal *RecoveryJournal) error {
-		for _, operation := range operations {
-			switch operation.Kind {
-			case OperationStopProcess:
-				if operation.Executable != "" {
-					journal.StoppedProcesses = appendUniqueFold(journal.StoppedProcesses, operation.Executable)
-				}
-			case OperationStopService:
-				journal.StoppedServices = appendUniqueFold(journal.StoppedServices, operation.Name)
-			}
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("record Windows focus recovery state: %w", err)
-	}
-	for _, operation := range operations {
-		if err := applyJournaledOperation(ctx, store, runner, operation); err != nil {
-			if rollbackErr := RestoreFocus(ctx, store, runner); rollbackErr != nil {
-				return fmt.Errorf("%v; focus rollback failed: %w", err, rollbackErr)
-			}
-			return err
-		}
-	}
-	return nil
-}
-
-func RestoreFocus(ctx context.Context, store JournalStore, runner OptimizationRunner) error {
-	journal, err := store.Load()
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	focus := journal
-	focus.AppliedStages = focus.AppliedStages[:0]
-	for _, stage := range journal.AppliedStages {
-		if strings.HasPrefix(stage, "focus:") {
-			focus.AppliedStages = append(focus.AppliedStages, stage)
-		}
-	}
-	if len(focus.AppliedStages) > 0 {
-		if err := runner.Restore(ctx, focus); err != nil {
-			return err
-		}
-	}
-	return store.Update(func(active *RecoveryJournal) error {
-		active.StoppedProcesses = nil
-		active.StoppedServices = nil
-		kept := active.AppliedStages[:0]
-		for _, stage := range active.AppliedStages {
-			if !strings.HasPrefix(stage, "focus:") {
-				kept = append(kept, stage)
-			}
-		}
-		active.AppliedStages = kept
-		return nil
-	})
-}
-
 func applyJournaledOperation(ctx context.Context, store JournalStore, runner OptimizationRunner, operation Operation) error {
 	if err := runner.Apply(ctx, operation); err != nil {
 		return fmt.Errorf("apply %s: %w", operation.Stage, err)
@@ -260,17 +142,6 @@ func ReverseOperations(operations []Operation) []Operation {
 		reversed[len(operations)-1-index] = operation
 	}
 	return reversed
-}
-
-func appendUniqueFold(values []string, value string) []string {
-	if value == "" || containsFold(values, value) {
-		return values
-	}
-	return append(values, value)
-}
-
-func containsFold(values []string, target string) bool {
-	return slices.ContainsFunc(values, func(value string) bool { return strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) })
 }
 
 func trimExecutableSuffix(name string) string {

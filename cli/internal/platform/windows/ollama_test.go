@@ -77,24 +77,3 @@ func TestOllamaHostClientRejectsNonLoopback(t *testing.T) {
 		t.Fatal("non-loopback Ollama endpoint accepted")
 	}
 }
-
-func TestOllamaGenerateTestUsesNonStreamingLoopbackRequest(t *testing.T) {
-	var stream any
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		var payload map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			t.Fatal(err)
-		}
-		stream = payload["stream"]
-		_, _ = response.Write([]byte(`{"response":"myference works","done":true}`))
-	}))
-	defer server.Close()
-	client, err := NewOllamaHostClient(server.URL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := client.GenerateTest(context.Background(), "qwen:latest")
-	if err != nil || got != "myference works" || stream != false {
-		t.Fatalf("GenerateTest() = %q, %v, stream=%v", got, err, stream)
-	}
-}

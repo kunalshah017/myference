@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -38,44 +37,6 @@ func TestPlanProviderTuningEnforcesACPolicy(t *testing.T) {
 	}
 	if _, err := PlanProviderTuning(config, TuningOptions{AllowBattery: true}, HostSnapshot{OnACPower: false}); err != nil {
 		t.Fatalf("battery override rejected: %v", err)
-	}
-}
-
-func TestPlanFocusStopsOnlyConfiguredTargetsAndNeverExplorer(t *testing.T) {
-	config := DefaultConfig()
-	config.StopProcesses = []string{"Discord", "explorer"}
-	config.StopServices = []string{"Spooler"}
-	snapshot := HostSnapshot{OnACPower: true, Processes: []ProcessSnapshot{
-		{PID: 10, Name: "Discord.exe", Executable: `C:\Discord\Discord.exe`},
-		{PID: 11, Name: "notepad.exe", Executable: `C:\Windows\notepad.exe`},
-		{PID: 12, Name: "explorer.exe", Executable: `C:\Windows\explorer.exe`},
-	}, RunningServices: []string{"Spooler", "OtherService"}}
-	operations, err := PlanFocus(config, snapshot)
-	if err == nil || !strings.Contains(err.Error(), "Explorer") {
-		t.Fatalf("configured Explorer error=%v", err)
-	}
-	config.StopProcesses = []string{"Discord"}
-	operations, err = PlanFocus(config, snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stoppedProcesses, stoppedServices []string
-	for _, operation := range operations {
-		switch operation.Kind {
-		case OperationStopProcess:
-			stoppedProcesses = append(stoppedProcesses, operation.Name)
-			if operation.Stage != "focus:process:10" || !reflect.DeepEqual(operation.Args, []string{"/PID", "10", "/T", "/F"}) {
-				t.Fatalf("process=%+v", operation)
-			}
-		case OperationStopService:
-			stoppedServices = append(stoppedServices, operation.Name)
-			if operation.Stage != "focus:service:Spooler" || !reflect.DeepEqual(operation.Args, []string{"stop", "Spooler"}) {
-				t.Fatalf("service=%+v", operation)
-			}
-		}
-	}
-	if !reflect.DeepEqual(stoppedProcesses, []string{"Discord.exe"}) || !reflect.DeepEqual(stoppedServices, []string{"Spooler"}) {
-		t.Fatalf("processes=%v services=%v", stoppedProcesses, stoppedServices)
 	}
 }
 
@@ -116,39 +77,6 @@ func TestProviderSessionCleanupRestoresExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestFocusOverlayUsesActiveProviderJournalAndRestoresOnlyFocus(t *testing.T) {
-	store := NewJournalStore(t.TempDir())
-	journal := recoveryJournalFixture()
-	journal.AppliedStages = []string{"power-plan", "keep-awake"}
-	if err := store.Save(journal); err != nil {
-		t.Fatal(err)
-	}
-	runner := &recordingTuningRunner{store: &store, snapshot: HostSnapshot{OnACPower: true, Journal: journal, Processes: []ProcessSnapshot{{PID: 10, Name: "Discord.exe", Executable: `C:\Discord\Discord.exe`}}, RunningServices: []string{"Spooler"}}}
-	config := DefaultConfig()
-	config.StopProcesses = []string{"Discord"}
-	config.StopServices = []string{"Spooler"}
-	if err := StartFocus(context.Background(), config, store, runner); err != nil {
-		t.Fatal(err)
-	}
-	active, err := store.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(active.AppliedStages, []string{"power-plan", "keep-awake", "focus:service:Spooler", "focus:process:10"}) {
-		t.Fatalf("active stages=%v", active.AppliedStages)
-	}
-	if err := RestoreFocus(context.Background(), store, runner); err != nil {
-		t.Fatal(err)
-	}
-	active, err = store.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(active.AppliedStages, []string{"power-plan", "keep-awake"}) || len(active.StoppedProcesses) != 0 || len(active.StoppedServices) != 0 {
-		t.Fatalf("restored provider journal=%+v", active)
-	}
-}
-
 func operationKinds(operations []Operation) []OperationKind {
 	result := make([]OperationKind, len(operations))
 	for i := range operations {
@@ -167,7 +95,7 @@ type recordingTuningRunner struct {
 	restoreCalls           int
 }
 
-func (runner *recordingTuningRunner) Snapshot(context.Context, Config, SnapshotOptions) (HostSnapshot, error) {
+func (runner *recordingTuningRunner) Snapshot(context.Context, Config) (HostSnapshot, error) {
 	return runner.snapshot, nil
 }
 func (runner *recordingTuningRunner) Apply(_ context.Context, operation Operation) error {

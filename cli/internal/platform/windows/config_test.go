@@ -17,34 +17,6 @@ func TestDefaultConfigUsesSafeHostControls(t *testing.T) {
 	}
 }
 
-func TestConfigRejectsProtectedServices(t *testing.T) {
-	config := DefaultConfig()
-	config.StopServices = []string{"Spooler", "WinDefend"}
-
-	err := config.Validate()
-	if err == nil || !strings.Contains(err.Error(), "WinDefend") {
-		t.Fatalf("Validate() error = %v, want protected-service rejection", err)
-	}
-}
-
-func TestConfigProtectsWindowsUpdateServices(t *testing.T) {
-	for _, service := range []string{"UsoSvc", "DoSvc", "wuauserv", "WaaSMedicSvc"} {
-		t.Run(service, func(t *testing.T) {
-			config := DefaultConfig()
-			for _, configured := range config.StopServices {
-				if strings.EqualFold(configured, service) {
-					t.Fatalf("default config must not stop protected service %q", service)
-				}
-			}
-
-			config.StopServices = []string{service}
-			if err := config.Validate(); err == nil {
-				t.Fatalf("Validate() accepted protected service %q", service)
-			}
-		})
-	}
-}
-
 func TestConfigRequiresACPowerUnlessExplicitlyAllowed(t *testing.T) {
 	config := DefaultConfig()
 

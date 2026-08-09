@@ -47,7 +47,7 @@ The automatic recovery journal remains an implementation detail of a normal prov
 
 ## Code Removal
 
-The top-level router no longer dispatches `windows`, `stop`, or any `legacy-*` command. The Windows command parser and command-specific handlers are deleted. Command-only tests, acceptance-script calls, and documentation are updated or removed. Windows platform packages that implement automatic `serve` preparation, tuning, restoration, Docker readiness, and service lifecycle remain.
+The top-level router no longer dispatches `windows`, `stop`, or any `legacy-*` command. The Windows command parser, command-specific handlers, doctor/dashboard/focus/headless helpers, and preserved standalone legacy CLI are deleted. Command-only tests, acceptance-script calls, and documentation are updated or removed. Windows platform packages that implement automatic `serve` preparation, tuning, restoration, Docker readiness, and service lifecycle remain.
 
 ## Error Handling
 

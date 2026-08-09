@@ -4,27 +4,23 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // Config defines the Windows host controls that can be applied by Myference.
 // It deliberately excludes LAN listeners, firewall settings, and endpoint discovery.
 type Config struct {
-	KeepAlive            string   `json:"keepAlive"`
-	ContextLength        int      `json:"contextLength"`
-	MaxLoadedModels      int      `json:"maxLoadedModels"`
-	NumParallel          int      `json:"numParallel"`
-	FlashAttention       bool     `json:"flashAttention"`
-	KVCacheType          string   `json:"kvCacheType"`
-	PerformancePowerPlan bool     `json:"performancePowerPlan"`
-	ProcessPriority      string   `json:"processPriority"`
-	RequireACPower       bool     `json:"requireACPower"`
-	StopProcesses        []string `json:"stopProcesses"`
-	StopServices         []string `json:"stopServices"`
+	KeepAlive            string `json:"keepAlive"`
+	ContextLength        int    `json:"contextLength"`
+	MaxLoadedModels      int    `json:"maxLoadedModels"`
+	NumParallel          int    `json:"numParallel"`
+	FlashAttention       bool   `json:"flashAttention"`
+	KVCacheType          string `json:"kvCacheType"`
+	PerformancePowerPlan bool   `json:"performancePowerPlan"`
+	ProcessPriority      string `json:"processPriority"`
+	RequireACPower       bool   `json:"requireACPower"`
 }
 
-// DefaultConfig preserves the useful legacy tuning while keeping all changes
-// explicit, reversible, and restricted to nonessential applications/services.
+// DefaultConfig keeps provider-session tuning explicit and reversible.
 func DefaultConfig() Config {
 	return Config{
 		KeepAlive:            "-1",
@@ -36,12 +32,6 @@ func DefaultConfig() Config {
 		PerformancePowerPlan: true,
 		ProcessPriority:      "High",
 		RequireACPower:       true,
-		StopProcesses: []string{
-			"OneDrive", "ms-teams", "Teams", "Discord", "Spotify", "steam", "EpicGamesLauncher", "Dropbox", "Creative Cloud", "NVIDIA Broadcast",
-		},
-		StopServices: []string{
-			"AdobeUpdateService", "DiagTrack", "Everything", "MapsBroker", "PhoneSvc", "PCManager Service Store", "Spooler", "SysMain", "WSearch", "WSLService", "VMAuthdService", "VMnetDHCP", "VMUSBArbService", "VMware NAT Service",
-		},
 	}
 }
 
@@ -61,7 +51,7 @@ func (config *Config) UnmarshalJSON(data []byte) error {
 	return config.Validate()
 }
 
-// Validate prevents unsafe system service changes and invalid Ollama tuning.
+// Validate rejects invalid Ollama tuning.
 func (config Config) Validate() error {
 	if config.ContextLength < 512 {
 		return fmt.Errorf("context length must be at least 512")
@@ -82,16 +72,6 @@ func (config Config) Validate() error {
 	default:
 		return fmt.Errorf("process priority %q is not supported", config.ProcessPriority)
 	}
-	for _, service := range config.StopServices {
-		if isProtectedService(service) {
-			return fmt.Errorf("service %q is protected and cannot be stopped", service)
-		}
-	}
-	for _, process := range config.StopProcesses {
-		if strings.EqualFold(trimExecutableSuffix(process), "explorer") {
-			return fmt.Errorf("Windows Explorer cannot be stopped by focus mode")
-		}
-	}
 	return nil
 }
 
@@ -102,14 +82,4 @@ func (config Config) ValidatePower(onACPower, allowBattery bool) error {
 		return fmt.Errorf("AC power is required; connect AC power or use --allow-battery")
 	}
 	return nil
-}
-
-func isProtectedService(name string) bool {
-	protected := map[string]struct{}{
-		"bfe": {}, "bits": {}, "cryptsvc": {}, "dhcp": {}, "dnscache": {}, "eventlog": {},
-		"dosvc": {}, "mpssvc": {}, "nlasvc": {}, "rpcss": {}, "samss": {}, "schedule": {}, "sedsvc": {},
-		"securityhealthservice": {}, "trustedinstaller": {}, "usosvc": {}, "waasmedicsvc": {}, "windefend": {}, "wuauserv": {},
-	}
-	_, found := protected[strings.ToLower(strings.TrimSpace(name))]
-	return found
 }

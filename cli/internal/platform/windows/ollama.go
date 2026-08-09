@@ -121,45 +121,6 @@ func (client *OllamaHostClient) Preload(ctx context.Context, model string, confi
 	return nil
 }
 
-func (client *OllamaHostClient) GenerateTest(ctx context.Context, model string) (string, error) {
-	if strings.TrimSpace(model) == "" {
-		return "", errors.New("test model is required")
-	}
-	payload := struct {
-		Model  string `json:"model"`
-		Prompt string `json:"prompt"`
-		Stream bool   `json:"stream"`
-	}{Model: model, Prompt: "Reply with only: myference works", Stream: false}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/api/generate", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := client.http.Do(request)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return "", ollamaStatusError(response)
-	}
-	var result struct {
-		Response string `json:"response"`
-		Error    string `json:"error"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
-		return "", err
-	}
-	if result.Error != "" {
-		return "", errors.New(result.Error)
-	}
-	return strings.TrimSpace(result.Response), nil
-}
-
 func ParseOllamaPS(input io.Reader) ([]LoadedModel, error) {
 	scanner := bufio.NewScanner(input)
 	models := make([]LoadedModel, 0)
