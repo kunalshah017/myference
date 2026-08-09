@@ -899,7 +899,7 @@ func discoverBackends(ctx context.Context, cfg config.Config, loadCredential fun
 			return nil, nil, fmt.Errorf("configured model %q is not available", item.Model)
 		}
 		offers = append(offers, offerCapacity(item, models[modelIndex]))
-		backends[item.Name] = client
+		backends[item.EffectiveOfferID()] = client
 	}
 	return offers, backends, nil
 }
@@ -1364,6 +1364,7 @@ func printCapacity(ctx context.Context, path string, output io.Writer) error {
 }
 
 func offerCapacity(item config.Backend, discovered backend.Model) v1.OfferCapacity {
+	offerID := item.EffectiveOfferID()
 	version := item.PriceVersion
 	if version == 0 {
 		version = 1
@@ -1380,7 +1381,7 @@ func offerCapacity(item config.Backend, discovered backend.Model) v1.OfferCapaci
 	if commandAgent {
 		evidenceKind, evidenceDigest, meteringMode = "runtime_image", strings.TrimPrefix(item.Image[strings.LastIndex(item.Image, "@")+1:], "@"), "compute_only"
 	}
-	return v1.OfferCapacity{OfferID: item.Name, Model: item.Model, PriceVersion: version, BackendKind: item.Kind, OfferHash: crypto.Keccak256Hash([]byte(item.Name)).Hex(), ModelHash: crypto.Keccak256Hash([]byte(item.Model)).Hex(), CapabilityHash: crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex(), Capabilities: capabilities, EvidenceKind: evidenceKind, EvidenceDigest: evidenceDigest, MeteringMode: meteringMode}
+	return v1.OfferCapacity{OfferID: offerID, Model: item.Model, PriceVersion: version, BackendKind: item.Kind, OfferHash: crypto.Keccak256Hash([]byte(offerID)).Hex(), ModelHash: crypto.Keccak256Hash([]byte(item.Model)).Hex(), CapabilityHash: crypto.Keccak256Hash([]byte(strings.Join(capabilities, ","))).Hex(), Capabilities: capabilities, EvidenceKind: evidenceKind, EvidenceDigest: evidenceDigest, MeteringMode: meteringMode}
 }
 
 func parseConfigFlag(name string, args []string) (string, error) {

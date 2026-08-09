@@ -546,8 +546,8 @@ func TestStatusJSONProvidesPlatformAttestationWithoutSecrets(t *testing.T) {
 }
 
 func TestOfferCapacityCarriesDeterministicMonadProofKeys(t *testing.T) {
-	offer := offerCapacity(config.Backend{Name: "local", Kind: "ollama", Model: "qwen", PriceVersion: 4, Enabled: true}, backend.Model{Name: "qwen", Digest: "sha256:runtime"})
-	if offer.PriceVersion != 4 || len(offer.OfferHash) != 66 || len(offer.ModelHash) != 66 || len(offer.CapabilityHash) != 66 || offer.BackendKind != "ollama" || !slices.Equal(offer.Capabilities, []string{"stream", "text"}) {
+	offer := offerCapacity(config.Backend{Name: "ollama-qwen", OfferID: "local-qwen", Kind: "ollama", Model: "qwen", PriceVersion: 4, Enabled: true}, backend.Model{Name: "qwen", Digest: "sha256:runtime"})
+	if offer.OfferID != "local-qwen" || offer.OfferHash != crypto.Keccak256Hash([]byte("local-qwen")).Hex() || offer.PriceVersion != 4 || len(offer.ModelHash) != 66 || len(offer.CapabilityHash) != 66 || offer.BackendKind != "ollama" || !slices.Equal(offer.Capabilities, []string{"stream", "text"}) {
 		t.Fatalf("unexpected offer proof keys: %+v", offer)
 	}
 	if offer.EvidenceKind != "ollama_digest" || offer.EvidenceDigest != "sha256:runtime" || offer.MeteringMode != "tokens_and_compute" {

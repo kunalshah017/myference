@@ -19,12 +19,20 @@ type Config struct {
 
 type Backend struct {
 	Name         string `json:"name"`
+	OfferID      string `json:"offer_id,omitempty"`
 	Kind         string `json:"kind"`
 	URL          string `json:"url"`
 	Model        string `json:"model"`
 	PriceVersion uint64 `json:"price_version,omitempty"`
 	Enabled      bool   `json:"enabled"`
 	Image        string `json:"image,omitempty"`
+}
+
+func (b Backend) EffectiveOfferID() string {
+	if b.OfferID != "" {
+		return b.OfferID
+	}
+	return b.Name
 }
 
 func Load(path string) (Config, error) {

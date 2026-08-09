@@ -29,3 +29,12 @@ func TestSaveAndLoadNonSecretConfiguration(t *testing.T) {
 		t.Fatalf("configuration is accessible to other users: %o", info.Mode().Perm())
 	}
 }
+
+func TestBackendEffectiveOfferIDFallsBackToName(t *testing.T) {
+	if got := (Backend{Name: "local"}).EffectiveOfferID(); got != "local" {
+		t.Fatalf("effective offer=%q", got)
+	}
+	if got := (Backend{Name: "local", OfferID: "wallet-offer"}).EffectiveOfferID(); got != "wallet-offer" {
+		t.Fatalf("effective offer=%q", got)
+	}
+}
