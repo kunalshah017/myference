@@ -38,7 +38,7 @@ curl -fsSL https://myference.xyz/install.sh | sh
 
 The Windows installer supports AMD64, atomically installs the CLI, Linux container proxy sidecar, and lifecycle script, and updates the user PATH. The macOS installer detects Intel or Apple Silicon and installs into `/usr/local/bin`. Manual release artifacts and `SHA256SUMS` remain available on GitHub; releases are not yet code-signed or notarized.
 
-Run `myference` with no arguments for the recommended full-screen hosting interface. It opens browser sign-in when needed, discovers every installed Ollama model plus Codex and Claude on `PATH`, supports OpenAI and OpenAI-compatible model catalogs, lets you select several providers, and shows live foreground status. At activation, it opens one short-lived browser page for wallet-backed pricing and publication, then resumes in the terminal automatically. Existing commands remain available for automation and recovery:
+Run `myference` with no arguments for the recommended full-screen hosting interface. It opens browser sign-in when needed, discovers every installed Ollama model plus Codex and Claude on `PATH`, supports OpenAI and OpenAI-compatible model catalogs, and provides terminal screens for providers, offer pricing, collateral, and live status. Wallet-owned actions open a minimal short-lived approval page with the exact immutable values, then resume in the terminal after finalized indexed confirmation. The CLI never imports or stores a provider wallet key. Existing commands remain available for automation and recovery:
 
 ```text
 myference login --server https://api.myference.xyz
@@ -47,12 +47,18 @@ myference backend add --kind openai --name cloud-model --model provider-model --
 myference backend add --kind codex --name codex-cli-terra --model gpt-5.6-terra
 myference backend list
 myference backend remove --name <retired-backend>
+myference offer publish --backend local-qwen --input-per-million 0.1 --output-per-million 0.2 --compute-per-second 0.001
+myference offer list
+myference collateral status
+myference collateral deposit --amount 5
+myference collateral request-exit
+myference collateral finalize-exit
 myference capacity
 myference service install
 myference service start
 ```
 
-`myference host` remains the non-interactive Ollama shortcut. It discovers installed models, records the runtime digest, opens the provider workspace for collateral and price activation, and serves in the foreground. Use `--model <name>` to choose a particular installed model or `--setup-only` before installing the background service.
+`myference host` remains the non-interactive Ollama shortcut. It discovers installed models and records the runtime digest without using the provider web console as a hosting control plane. Pass all three pricing flags to publish before foreground serving, or use `--setup-only` and run `myference offer publish` separately.
 
 Machine, backend, and EIP-712 signer secrets are loaded from Windows Credential Manager or macOS Keychain and never stored in JSON. Browser approval submits `setProviderSigner` on Monad before the machine can become routable. `backend start`, `backend stop`, and `backend remove` are detected by the running daemon and update advertised capacity without disconnecting other backends. Removing a credential-backed backend also deletes its vault credential.
 
@@ -62,7 +68,7 @@ Kimi and explicitly image-backed Codex or Claude backends still require Docker D
 
 Marketplace prices are displayed as MON with a cached, informational USD reference. Billing and settlement always use the exact immutable integer MON rates published on-chain. Ollama, compatible APIs, and native Codex meter observed input, output, and compute usage. Image-based CLI agents are compute-only unless trustworthy upstream usage is available.
 
-When publishing a later immutable offer version for a price or runtime-digest change, select it on the running machine with `myference backend version --name <backend> --price-version <version>`. The daemon reloads this change without interrupting other backends.
+When the CLI or focused web account page publishes a later immutable price version, the running machine polls its account-owned compatible versions every 15 seconds, saves the confirmed version atomically, and reloads capacity without interrupting other backends. The web page cannot discover providers, create an offer, or change its model identity.
 
 `myference service install|start|stop|status|uninstall` uses a Windows Scheduled Task or a per-user macOS LaunchAgent. A foreground `serve` process stops cleanly with Ctrl+C. `legacy-start`, `legacy-status`, and `legacy-stop` remain available only for the preserved Windows LAN host.
 

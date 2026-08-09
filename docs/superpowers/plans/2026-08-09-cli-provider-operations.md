@@ -18,7 +18,7 @@
 - Modify: `server/internal/chain/client.go`
 - Modify: `server/cmd/myference-server/runtime.go`
 
-- [ ] **Step 1: Write the failing tenant-isolation integration test**
+- [x] **Step 1: Write the failing tenant-isolation integration test**
 
 Create two accounts, machines, routing rows, and colliding plaintext offer IDs. Insert finalized chain offers for each wallet and require `ProviderAccount` to return only the requested account and `MachineOfferVersions` to return only the authenticated machine.
 
@@ -33,13 +33,13 @@ if err != nil || versions["local-qwen"] != 2 {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `go test ./server/internal/store -run 'TestProviderAccount' -count=1 -v`
 
 Expected: FAIL because `ProviderAccount` and its types do not exist.
 
-- [ ] **Step 3: Implement the projection**
+- [x] **Step 3: Implement the projection**
 
 Define focused response types:
 
@@ -62,11 +62,11 @@ type ProviderAccount struct {
 
 Join `provider_routing_state` to `machines` with `m.account_id=$1`, then join `chain_offers` using the account wallet, offer hash, model hash, and capability hash. Select the newest compatible version per plaintext offer ID. Implement `MachineOfferVersions` with both machine ID and account ID in the ownership predicate.
 
-- [ ] **Step 4: Read the contract minimum bond once at server startup**
+- [x] **Step 4: Read the contract minimum bond once at server startup**
 
 Extend `chain.ReceiptTerms` with `MinimumBond *big.Int`, load `contract.MinimumBond`, and pass its decimal string into the provider-account API configuration. Do not add a database migration for a contract constant.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `gofmt -w server/internal/store/provider_account*.go server/internal/chain/client.go server/cmd/myference-server/runtime.go && go test ./server/internal/store ./server/internal/chain -count=1`
 
@@ -82,7 +82,7 @@ Commit: `git add server/internal/store server/internal/chain/client.go server/cm
 - Modify: `server/cmd/myference-server/main.go`
 - Modify: `server/cmd/myference-server/main_test.go`
 
-- [ ] **Step 1: Write failing draft-store tests**
+- [x] **Step 1: Write failing draft-store tests**
 
 Cover publish, deposit, exit request, and exit finalization. Require account binding, immutable values, baseline state, fifteen-minute expiry, bounded offer batches, and cross-account reads that do not remove the original draft.
 
@@ -93,13 +93,13 @@ if _, err := store.GetForAccount(draft.ID, "other"); !errors.Is(err, ErrActionNo
 if _, err := store.GetForAccount(draft.ID, "account"); err != nil { t.Fatal("cross-account read removed draft") }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./server/internal/api -run 'TestProviderAction' -count=1 -v`
 
 Expected: FAIL because provider actions are absent.
 
-- [ ] **Step 3: Implement typed drafts and validation**
+- [x] **Step 3: Implement typed drafts and validation**
 
 Use these public kinds and states:
 
@@ -117,7 +117,7 @@ const (
 
 Publish inputs contain exact offer identity and decimal wei rates. Deposit inputs contain one positive decimal wei amount. Exit actions accept no amount or offers. Store only public transaction hashes supplied by the browser; never store credentials or keys.
 
-- [ ] **Step 4: Add repository-backed evidence verification**
+- [x] **Step 4: Add repository-backed evidence verification**
 
 Define a small verifier callback injected into the handler. It compares current indexed state with the creation baseline:
 
@@ -128,7 +128,7 @@ Define a small verifier callback injected into the handler. It compares current 
 
 The browser submission endpoint changes state to `pending_chain`; GET calls the verifier and returns `confirmed` only on matching indexed evidence.
 
-- [ ] **Step 5: Mount the authenticated endpoints**
+- [x] **Step 5: Mount the authenticated endpoints**
 
 Mount:
 
@@ -142,7 +142,7 @@ GET  /api/provider/machines/{machine}/offer-versions
 
 Machine bearer authentication creates actions and reads machine versions. Matching browser authentication reads/submits actions and reads the provider account. Return not found for ownership mismatches.
 
-- [ ] **Step 6: Remove activation-specific endpoints and verify**
+- [x] **Step 6: Remove activation-specific endpoints and verify**
 
 Update the root-routing test and remove the now-unused activation store instead of maintaining two draft systems.
 
@@ -160,7 +160,7 @@ Commit: `git add server/internal/api server/cmd/myference-server && git commit -
 - Modify: `cli/cmd/myference/main.go`
 - Modify: `cli/cmd/myference/main_test.go`
 
-- [ ] **Step 1: Write failing API-client and money tests**
+- [x] **Step 1: Write failing API-client and money tests**
 
 Use a custom `http.RoundTripper` so tests require no listener. Verify bearer authentication, browser action URL generation, bounded polling, and that JSON never contains a backend secret.
 
@@ -179,13 +179,13 @@ for input, want := range map[string]string{
 
 Reject negatives, exponents, more than eighteen decimals, empty values, and values beyond 256 bits.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./cli/internal/account ./cli/internal/providerops -count=1 -v`
 
 Expected: FAIL because the provider action client and service do not exist.
 
-- [ ] **Step 3: Implement the minimal service**
+- [x] **Step 3: Implement the minimal service**
 
 The account client exposes `ProviderAccount`, `CreateProviderAction`, `ProviderAction`, and `MachineOfferVersions`. The provider operations service accepts config, machine credential loading, config saving, browser opening, and time functions as callbacks.
 
@@ -202,11 +202,11 @@ func (s Service) SyncVersions(ctx context.Context) (bool, error)
 
 Mutating methods create a draft, open `/provider/approve?action=<id>`, poll until indexed confirmation, and atomically apply confirmed offer versions. A browser-open error returns the full copyable URL.
 
-- [ ] **Step 4: Add command parsing**
+- [x] **Step 4: Add command parsing**
 
 Add `offer` and `collateral` to the existing command switch. Require explicit backend/offer and pricing flags for publication. `--no-browser` prints the URL while continuing to poll. Keep exact usage errors and avoid interactive prompts in command mode.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `gofmt -w cli/internal/account cli/internal/providerops cli/cmd/myference && go test ./cli/internal/account ./cli/internal/providerops ./cli/cmd/myference -count=1`
 
@@ -219,7 +219,7 @@ Commit: `git add cli/internal/account cli/internal/providerops cli/cmd/myference
 - Modify: `cli/internal/tui/model_test.go`
 - Modify: `cli/cmd/myference/main.go`
 
-- [ ] **Step 1: Write failing reducer tests**
+- [x] **Step 1: Write failing reducer tests**
 
 Require Home to expose Providers, Offers & Pricing, Collateral, Live Status, and Quit. Cover offer selection, metering-aware disabled fields, rate review, collateral deposit, exit-state actions, pending wallet/chain messages, cancel behavior, and masked secrets.
 
@@ -232,21 +232,21 @@ if model.Screen() != ScreenOffers || !strings.Contains(model.ViewText(), "Not pu
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./cli/internal/tui -run 'TestOffer|TestCollateral|TestHome' -count=1 -v`
 
 Expected: FAIL because the new screens and dependencies are absent.
 
-- [ ] **Step 3: Extend the state machine without duplicating services**
+- [x] **Step 3: Extend the state machine without duplicating services**
 
 Add `ScreenOffers`, `ScreenPricing`, and `ScreenCollateral`. Inject account loading and provider-action callbacks. Forms collect presentation strings only; parsing and validation stay in `providerops.Service`. Render exact MON review values returned by the service and one actionable error at a time.
 
-- [ ] **Step 4: Wire interactive dependencies**
+- [x] **Step 4: Wire interactive dependencies**
 
 Construct the provider operations service once in `runInteractive`. Refresh provider account state when entering Offers or Collateral and after a confirmed action. New offer publication uses configured backend identity, then the existing foreground start path.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `gofmt -w cli/internal/tui cli/cmd/myference && go test ./cli/internal/tui ./cli/cmd/myference -count=1`
 
@@ -260,21 +260,21 @@ Commit: `git add cli/internal/tui cli/cmd/myference && git commit -m "feat(cli):
 - Modify: `cli/cmd/myference/main.go`
 - Modify: `cli/cmd/myference/main_test.go`
 
-- [ ] **Step 1: Write failing synchronization tests**
+- [x] **Step 1: Write failing synchronization tests**
 
 Require a newer compatible server version to update only the matching enabled backend, preserve every other field, save atomically, and trigger daemon reload through the existing config watcher. Require equal, older, missing, and identity-incompatible versions to leave config unchanged.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./cli/internal/providerops ./cli/cmd/myference -run 'TestSync|TestWatchOffer' -count=1 -v`
 
 Expected: FAIL because the serve lifecycle does not poll versions.
 
-- [ ] **Step 3: Add the bounded watcher**
+- [x] **Step 3: Add the bounded watcher**
 
 Start a fifteen-second watcher beside `watchBackendConfig` in `runServe`. It calls `SyncVersions`, logs sanitized transient failures, and relies on atomic config replacement plus the existing watcher to reload daemon backends. Stop it with the serve context and never stop serving the current confirmed version on sync failure.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `gofmt -w cli/internal/providerops cli/cmd/myference && go test -race ./cli/internal/providerops ./cli/internal/provider ./cli/cmd/myference -count=1`
 
@@ -293,31 +293,31 @@ Commit: `git add cli/internal/providerops cli/cmd/myference && git commit -m "fe
 - Modify: `web/src/features/onboarding/OnboardingFlow.tsx`
 - Modify: `web/src/styles/global.css`
 
-- [ ] **Step 1: Write failing normal-console tests**
+- [x] **Step 1: Write failing normal-console tests**
 
 Render a provider account containing one editable offer and assert that collateral and locked offer pricing are present while machine names, backend/model dropdowns, discovered models, deployment controls, and new-offer controls are absent. With no offers, require the `myference` instruction.
 
-- [ ] **Step 2: Write failing approval-page tests**
+- [x] **Step 2: Write failing approval-page tests**
 
 For each action kind, render exact immutable values, reject a connected wallet different from `wallet_address`, submit transaction hashes, poll status, and show terminal-return copy only after server confirmation. Verify a multi-offer draft sequences one wallet transaction per offer.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run: `npm test --prefix web -- --run src/features/provider/provider.test.tsx`
 
 Expected: FAIL because the current console still renders discovered backends and the approval page is absent.
 
-- [ ] **Step 4: Add typed APIs and focused components**
+- [x] **Step 4: Add typed APIs and focused components**
 
 Add `ProviderAccountAPI` and `ProviderActionAPI`. Refactor `Offers` into an existing-offer price editor that locks identity and calls `publishOffer` only for a selected returned offer. `ProviderConsole` loads provider-account data rather than flattening `operations.machines`.
 
 Route `/provider/approve?action=<id>` directly to `ProviderApproval`. Use the existing `ViemMarketWriter`; before simulation require the injected wallet address to equal the draft wallet address. The page has no hosting configuration controls.
 
-- [ ] **Step 5: Remove web hosting controls and update copy**
+- [x] **Step 5: Remove web hosting controls and update copy**
 
 Remove the Machines component from provider pages and remove all discovered-backend language from dashboard, onboarding, and empty states. Keep collateral, earnings, existing-offer history, and repricing.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run: `npm test --prefix web -- --run && npm run build --prefix web`
 
@@ -330,11 +330,11 @@ Commit: `git add web/src && git commit -m "feat(web): focus provider console on 
 - Modify: `web/src/app/DocsPage.tsx`
 - Modify: `docs/superpowers/plans/2026-08-09-cli-provider-operations.md`
 
-- [ ] **Step 1: Document the final split**
+- [x] **Step 1: Document the final split**
 
 Make bare `myference` the provider entry point. Document `offer` and `collateral` commands, browser wallet approval, automatic compatible-version synchronization, and that new offers cannot be created in the web client.
 
-- [ ] **Step 2: Run complete verification**
+- [x] **Step 2: Run complete verification**
 
 Run:
 
@@ -351,6 +351,6 @@ git diff --check
 
 Expected: every command passes with no warnings or leaked secrets.
 
-- [ ] **Step 3: Mark this plan complete and commit**
+- [x] **Step 3: Mark this plan complete and commit**
 
 Commit: `git add README.md web/src/app/DocsPage.tsx docs/superpowers/plans/2026-08-09-cli-provider-operations.md && git commit -m "docs: explain CLI-owned provider workflow"`
