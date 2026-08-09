@@ -28,5 +28,19 @@ export function DeviceApproval({ api = new AuthAPI(), authorizeSigner }: { api?:
       setPending(undefined)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Machine approval failed.') }
   }
-  return <section className="auth-section" aria-labelledby="device-approval-title"><p className="eyebrow">Machine authorization</p><h2 id="device-approval-title">Approve this exact machine</h2><form onSubmit={inspect}><label htmlFor="device-code">Device code</label><div className="inline-form"><input id="device-code" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="one-time-code" required /><button type="submit">Review machine</button></div></form>{pending && <div className="machine-proof"><span>Pending machine</span><strong>{pending.machine_name}</strong><code>{pending.signer_address}</code><time dateTime={pending.expires_at}>Code expires {new Date(pending.expires_at).toLocaleString()}</time><button type="button" onClick={approve}>Approve {pending.machine_name}</button></div>}{message && <p role="status">{message}</p>}{error && <p role="alert" className="inline-error">{error}</p>}</section>
+  return <section className="auth-section device-approval" aria-labelledby="device-approval-title">
+    <p className="eyebrow">Device code</p>
+    <h2 id="device-approval-title">Review this machine</h2>
+    <p className="dashboard-intro">Codes expire quickly and authorize only the machine identity shown after review.</p>
+    <form onSubmit={inspect}>
+      <label htmlFor="device-code">Device code from the CLI</label>
+      <div className="inline-form">
+        <input id="device-code" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} required />
+        <button type="submit">Review machine</button>
+      </div>
+    </form>
+    {pending && <div className="machine-proof"><span>Pending machine</span><strong>{pending.machine_name}</strong><code>{pending.signer_address}</code><time dateTime={pending.expires_at}>Code expires {new Date(pending.expires_at).toLocaleString()}</time><button type="button" onClick={approve}>Approve {pending.machine_name}</button></div>}
+    {message && <p role="status">{message}</p>}
+    {error && <p role="alert" className="inline-error">{error}</p>}
+  </section>
 }

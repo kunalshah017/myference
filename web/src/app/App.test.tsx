@@ -27,9 +27,11 @@ it('opens the machine approval workspace from the device verification link', asy
   window.history.pushState({}, '', '/devices')
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>)
 
-  expect(await screen.findByRole('heading', { name: /connect your application/i })).toBeVisible()
-  expect(screen.getByRole('button', { name: /api access/i })).toHaveAttribute('aria-current', 'page')
-  expect(screen.getByText(/connect a wallet to create api keys and approve provider devices/i)).toBeVisible()
+  expect(await screen.findByRole('heading', { name: /authorize a provider device/i })).toBeVisible()
+  expect(screen.getByRole('button', { name: /^devices$/i })).toHaveAttribute('aria-current', 'page')
+  expect(screen.getByText(/connect a wallet to review and approve this provider device/i)).toBeVisible()
+  expect(screen.queryByRole('heading', { name: /connect your application/i })).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: /api keys/i })).not.toBeInTheDocument()
 })
 
 it('serves complete public documentation for using and hosting inference', () => {

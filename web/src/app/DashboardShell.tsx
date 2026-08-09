@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity as ActivityIcon, Banknote, Bot, CircleDollarSign, Code2, Cpu, Home, KeyRound, PanelLeft, Server } from 'lucide-react'
+import { Activity as ActivityIcon, Banknote, Bot, CircleDollarSign, Code2, Cpu, Home, KeyRound, Laptop, PanelLeft, Server, ShieldCheck } from 'lucide-react'
 import { Activity } from '../features/activity/Activity'
 import { ProviderAnalytics } from '../features/analytics/ProviderAnalytics'
 import { UsageAnalytics } from '../features/analytics/UsageAnalytics'
@@ -17,20 +17,44 @@ import { OnboardingFlow, OnboardingReminder } from '../features/onboarding/Onboa
 import type { OnboardingRole } from '../features/onboarding/onboarding'
 import { DashboardOverview } from './DashboardOverview'
 
-type DashboardView = 'overview' | 'models' | 'playground' | 'funds' | 'api' | 'usage' | 'hosting' | 'earnings'
+type DashboardView = 'overview' | 'models' | 'playground' | 'funds' | 'api' | 'usage' | 'devices' | 'hosting' | 'earnings'
 
 const navigation: { view: DashboardView; label: string; group: 'use' | 'host' }[] = [
   { view: 'overview', label: 'Overview', group: 'use' },
   { view: 'models', label: 'Models', group: 'use' },
   { view: 'playground', label: 'Playground', group: 'use' },
   { view: 'funds', label: 'Funds', group: 'use' },
-  { view: 'api', label: 'API access', group: 'use' },
+  { view: 'api', label: 'API keys', group: 'use' },
   { view: 'usage', label: 'Usage', group: 'use' },
+	{ view: 'devices', label: 'Devices', group: 'host' },
 	{ view: 'hosting', label: 'Provider account', group: 'host' },
   { view: 'earnings', label: 'Earnings & stake', group: 'host' },
 ]
 
-const icons = { overview: Home, models: Cpu, playground: Bot, funds: CircleDollarSign, api: KeyRound, usage: ActivityIcon, hosting: Server, earnings: Banknote }
+const icons = { overview: Home, models: Cpu, playground: Bot, funds: CircleDollarSign, api: KeyRound, usage: ActivityIcon, devices: Laptop, hosting: Server, earnings: Banknote }
+
+function DeviceAuthorizationPage({ api, connected }: { api: AuthAPI; connected: boolean }) {
+  return <section className="device-workspace">
+    <p className="eyebrow">Provider access</p>
+    <h1>Authorize a provider device</h1>
+    <p className="dashboard-intro">Enter the short code shown by the Myference CLI, verify the machine details, then approve its signer with your wallet.</p>
+    <div className="device-authorization-grid">
+      <div className="device-authorization-task">
+        {connected ? <DeviceApproval api={api} /> : <div className="dashboard-empty"><strong>Wallet connection required</strong><p>Connect a wallet to review and approve this provider device.</p></div>}
+      </div>
+      <aside className="device-authorization-guide" aria-labelledby="device-guide-title">
+        <ShieldCheck size={24} aria-hidden="true" />
+        <p className="eyebrow">Secure pairing</p>
+        <h2 id="device-guide-title">How it works</h2>
+        <ol>
+          <li><span>01</span><p><strong>Start the CLI</strong>Run <code>myference</code> on the device you want to host from.</p></li>
+          <li><span>02</span><p><strong>Review the identity</strong>Match the machine name and signer shown here with the terminal.</p></li>
+          <li><span>03</span><p><strong>Approve with your wallet</strong>The device receives its own revocable credential. Your wallet key stays in the browser.</p></li>
+        </ol>
+      </aside>
+    </div>
+  </section>
+}
 
 function storedRole(): OnboardingRole | undefined {
   const value = localStorage.getItem('myference:onboarding-role')
@@ -83,13 +107,14 @@ export function DashboardShell({ initialView = 'overview', authAPI }: { initialV
     <div className="dashboard-main">
       <header className="dashboard-topbar"><div><PanelLeft size={17} aria-hidden="true" /><span className="state-mark" aria-hidden="true" />{session ? 'Monad testnet connected' : 'Network not connected'}</div><ConnectWallet api={api} session={session} analyticsSurface="dashboard" onConnected={setSession} onDisconnected={() => setSession(undefined)} /></header>
       <main className="dashboard-workspace">
-        {skipped && !completed && <OnboardingReminder role={role ?? 'consumer'} session={session} onContinue={resumeOnboarding} onSwitch={() => changeRole((role ?? 'consumer') === 'consumer' ? 'provider' : 'consumer')} onComplete={finishOnboarding} onSessionExpired={() => setSession(undefined)} />}
+        {view === 'overview' && skipped && !completed && <OnboardingReminder role={role ?? 'consumer'} session={session} onContinue={resumeOnboarding} onSwitch={() => changeRole((role ?? 'consumer') === 'consumer' ? 'provider' : 'consumer')} onComplete={finishOnboarding} onSessionExpired={() => setSession(undefined)} />}
         {view === 'overview' && (session ? <DashboardOverview onNavigate={navigate} /> : <section><p className="eyebrow">Account workspace</p><h1>Workspace overview</h1><p className="dashboard-intro">Use hosted models and offer inference from the same wallet-bound account.</p>{disconnected('Connect a wallet to load balances, sessions, machines, and earnings.')}</section>)}
         {view === 'models' && <section><p className="eyebrow">Public inference market</p><h1>Models and prices</h1><ModelList api={marketplace} /></section>}
         {view === 'playground' && <section><p className="eyebrow">Browser test client</p><h1>Model playground</h1><p className="dashboard-intro">Send a real request through the OpenAI-compatible endpoint.</p><ChatPlayground /></section>}
         {view === 'funds' && (session ? <Billing /> : disconnected('Connect a wallet to deposit MON and open bounded spending sessions.'))}
-        {view === 'api' && <><ApiAccessGuide />{session ? <><ApiKeys api={api} marketplaceApi={marketplace} /><DeviceApproval api={api} /></> : disconnected('Connect a wallet to create API keys and approve provider devices.')}</>}
+        {view === 'api' && <><ApiAccessGuide />{session ? <ApiKeys api={api} marketplaceApi={marketplace} /> : disconnected('Connect a wallet to create and revoke API keys.')}</>}
         {view === 'usage' && <section><p className="eyebrow">Requests and settlement</p><h1>Usage</h1>{session ? <><UsageAnalytics /><section className="embedded-activity"><p className="eyebrow">Realtime request state</p><h2>In-flight activity</h2><Activity api={marketplace} authApi={api} connected onState={setRouteState} /></section></> : disconnected('Connect a wallet to inspect confirmed tokens, cost, and request activity.')}{routeState && <p className="route-state">Latest route state: {routeState}</p>}</section>}
+		{view === 'devices' && <DeviceAuthorizationPage api={api} connected={Boolean(session)} />}
 		{view === 'hosting' && <section><p className="eyebrow">Provider account</p><h1>Collateral and offer pricing</h1><p className="dashboard-intro">Use the Myference terminal UI to discover models, create offers, and run hosting. This page manages collateral and reprices existing offers.</p>{session ? <><ProviderConsole /><section className="embedded-activity"><p className="eyebrow">Realtime provider traffic</p><h2>Inference requests</h2><Activity api={marketplace} authApi={api} connected onState={setRouteState} /></section></> : disconnected('Connect a wallet to manage provider collateral and existing offer prices.')}</section>}
         {view === 'earnings' && <section><p className="eyebrow">Provider settlement</p><h1>Earnings and stake</h1>{session ? <><ProviderAnalytics /><ProviderConsole /></> : disconnected('Connect a wallet to inspect earnings, collateral, slashing, and bond-exit state.')}</section>}
       </main>

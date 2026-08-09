@@ -3,11 +3,13 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/kunalshah017/myference/server/internal/store"
 )
 
@@ -57,6 +59,45 @@ func TestDeviceAuthorizationIsExpiringOneTimeAndRevocable(t *testing.T) {
 	service.now = func() time.Time { return time.Now().Add(2 * time.Minute) }
 	if _, err := service.PollDeviceAuthorization(ctx, expired.DeviceCode); !errors.Is(err, ErrAuthorizationExpired) {
 		t.Fatalf("expected expiry, got %v", err)
+	}
+}
+
+func TestDeviceAuthorizationReclaimsAccountMachineName(t *testing.T) {
+	ctx, service, accountID := newIntegrationService(t)
+	signerBase := time.Now().UnixNano()
+	firstSigner := fmt.Sprintf("0x%040x", signerBase)
+	secondSigner := fmt.Sprintf("0x%040x", signerBase+1)
+	exchange := func(signer string) (Machine, string, error) {
+		authorization, err := service.CreateDeviceAuthorization(ctx, "MacBook-Air.local", signer, 5*time.Minute)
+		if err != nil {
+			return Machine{}, "", err
+		}
+		if err := service.ApproveDeviceAuthorization(ctx, authorization.UserCode, accountID); err != nil {
+			return Machine{}, "", err
+		}
+		return service.ExchangeDeviceAuthorization(ctx, authorization.DeviceCode)
+	}
+
+	first, oldToken, err := exchange(firstSigner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, newToken, err := exchange(secondSigner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID || second.AccountID != accountID || second.Name != first.Name || second.SignerAddress != common.HexToAddress(secondSigner).Hex() || newToken == oldToken {
+		t.Fatalf("first=%+v second=%+v tokenRotated=%v", first, second, newToken != oldToken)
+	}
+	if principal, err := service.AuthenticateMachine(ctx, newToken); err != nil || principal.MachineID != first.ID {
+		t.Fatalf("new principal=%+v err=%v", principal, err)
+	}
+	if _, err := service.AuthenticateMachine(ctx, oldToken); !errors.Is(err, ErrInvalidCredential) {
+		t.Fatalf("old token error=%v", err)
+	}
+	var count int
+	if err := service.db.QueryRowContext(ctx, `SELECT count(*) FROM machines WHERE account_id=$1 AND name=$2`, accountID, first.Name).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("machine count=%d err=%v", count, err)
 	}
 }
 

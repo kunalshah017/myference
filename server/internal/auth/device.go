@@ -160,10 +160,13 @@ func (s *Service) ExchangeDeviceAuthorization(ctx context.Context, deviceCode st
 	if err != nil {
 		return Machine{}, "", err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO machines (id, account_id, name, signer_address) VALUES ($1, $2, $3, $4)`, machine.ID, machine.AccountID, machine.Name, machine.SignerAddress); err != nil {
+	if err = tx.QueryRowContext(ctx, `INSERT INTO machines (id, account_id, name, signer_address) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (account_id, name) DO UPDATE SET signer_address=EXCLUDED.signer_address, revoked_at=NULL
+		RETURNING id`, machine.ID, machine.AccountID, machine.Name, machine.SignerAddress).Scan(&machine.ID); err != nil {
 		return Machine{}, "", err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO machine_tokens (machine_id, token_hash) VALUES ($1, $2)`, machine.ID, digest(secret)); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO machine_tokens (machine_id, token_hash) VALUES ($1, $2)
+		ON CONFLICT (machine_id) DO UPDATE SET token_hash=EXCLUDED.token_hash, revoked_at=NULL, created_at=EXCLUDED.created_at`, machine.ID, digest(secret)); err != nil {
 		return Machine{}, "", err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE device_authorizations SET exchanged_at = $2 WHERE device_code_hash = $1`, digest(deviceCode), s.now()); err != nil {

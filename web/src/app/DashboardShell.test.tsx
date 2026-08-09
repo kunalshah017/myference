@@ -48,3 +48,17 @@ it('remembers the provider path when onboarding is skipped', async () => {
   expect(localStorage.getItem('myference:onboarding-role')).toBe('provider')
   expect(screen.getByText(/connect a machine, bond collateral, and publish a live offer/i)).toBeVisible()
 })
+
+it('keeps API keys and provider-device authorization in separate destinations', async () => {
+  localStorage.setItem('myference:onboarding-skipped', 'true')
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={new QueryClient()}><DashboardShell authAPI={authAPI} initialView="api" /></QueryClientProvider>)
+
+  expect(await screen.findByRole('button', { name: /api keys/i })).toHaveAttribute('aria-current', 'page')
+  expect(screen.getByRole('heading', { name: /connect your application/i })).toBeVisible()
+  expect(screen.queryByRole('heading', { name: /approve this exact machine/i })).not.toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: /^devices$/i }))
+  expect(screen.getByRole('heading', { name: /authorize a provider device/i })).toBeVisible()
+  expect(screen.queryByRole('heading', { name: /connect your application/i })).not.toBeInTheDocument()
+})
