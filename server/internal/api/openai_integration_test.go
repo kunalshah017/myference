@@ -26,8 +26,20 @@ func TestRandomRequestIDIsDirectBytes32(t *testing.T) {
 }
 
 func TestOpenAIReturnsPaymentRequiredWhenProviderExceedsBudget(t *testing.T) {
+	hub := relay.NewHub(func(context.Context, string) (string, error) { return "machine", nil }, relay.Options{HeartbeatTimeout: time.Second})
+	relayServer := httptest.NewTLSServer(hub)
+	defer relayServer.Close()
+	relayClient := relayServer.Client()
+	relayClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} // test certificate
+	provider, _, err := websocket.Dial(context.Background(), "wss"+strings.TrimPrefix(relayServer.URL, "https"), &websocket.DialOptions{HTTPClient: relayClient, HTTPHeader: http.Header{"Authorization": {"Bearer machine-token"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close(websocket.StatusNormalClosure, "")
+	requireRelayConnection(t, hub, "machine")
+
 	handler := NewOpenAI(Dependencies{
-		Hub: relay.NewHub(func(context.Context, string) (string, error) { return "", nil }, relay.Options{}),
+		Hub: hub,
 		Authorize: func(context.Context, string, string, string, uint64) (Principal, error) {
 			return Principal{AccountID: "account", SessionID: "session", SessionBalance: 100}, nil
 		},
@@ -70,6 +82,68 @@ func TestOpenAIReturnsUnavailableForInvalidProviderPricing(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "no eligible provider") {
 		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
+func TestOpenAIRoutesPastDisconnectedCandidate(t *testing.T) {
+	hub := relay.NewHub(func(context.Context, string) (string, error) { return "machine-live", nil }, relay.Options{HeartbeatTimeout: time.Second})
+	relayServer := httptest.NewTLSServer(hub)
+	defer relayServer.Close()
+	relayClient := relayServer.Client()
+	relayClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} // test certificate
+	provider, _, err := websocket.Dial(context.Background(), "wss"+strings.TrimPrefix(relayServer.URL, "https"), &websocket.DialOptions{HTTPClient: relayClient, HTTPHeader: http.Header{"Authorization": {"Bearer machine-token"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close(websocket.StatusNormalClosure, "")
+	requireRelayConnection(t, hub, "machine-live")
+
+	reserved := make(chan Reservation, 1)
+	handler := NewOpenAI(Dependencies{
+		Hub: hub,
+		Authorize: func(context.Context, string, string, string, uint64) (Principal, error) {
+			return Principal{AccountID: "account", SessionID: "session", SessionBalance: 1_000_000}, nil
+		},
+		Candidates: func(context.Context, string) ([]router.Candidate, error) {
+			candidate := router.Candidate{OfferID: "offer", Model: "qwen", Capabilities: []string{"text", "stream"}, ConfirmedBond: true, Healthy: true, Capacity: 1, PriceVersion: 1, InputPerMillion: "1", OutputPerMillion: "1", ComputePerSecond: "1"}
+			disconnected, connected := candidate, candidate
+			disconnected.MachineID = "machine-disconnected"
+			connected.MachineID = "machine-live"
+			return []router.Candidate{disconnected, connected}, nil
+		},
+		Reserve:    func(_ context.Context, reservation Reservation) error { reserved <- reservation; return nil },
+		Transition: func(context.Context, string, string) error { return nil },
+		Abort:      func(context.Context, string, string) error { return nil },
+		Persist:    func(context.Context, Proposal) error { return nil },
+	})
+
+	go func() {
+		_, payload, readErr := provider.Read(context.Background())
+		if readErr != nil {
+			return
+		}
+		var envelope v1.Envelope
+		if json.Unmarshal(payload, &envelope) != nil {
+			return
+		}
+		var offer v1.JobOffer
+		if envelope.DecodeBody(&offer) != nil {
+			return
+		}
+		writeProvider(t, provider, "accept-live", v1.MessageJobAccept, &v1.JobAccept{RequestID: offer.RequestID})
+		writeProvider(t, provider, "output-live", v1.MessageOutputChunk, &v1.OutputChunk{RequestID: offer.RequestID, Sequence: 1, Data: "live", Done: true, InputTokens: 1, OutputTokens: 1, ComputeMilliseconds: 1})
+	}()
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen","stream":true,"max_completion_tokens":1,"messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer api-token")
+	request.Header.Set("X-Myference-Max-Spend", "1000000")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"content":"live"`) {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+	if reservation := <-reserved; reservation.MachineID != "machine-live" {
+		t.Fatalf("reservation=%+v", reservation)
 	}
 }
 

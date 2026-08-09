@@ -132,6 +132,10 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	maximumInputTokens := uint64(len([]byte(prompt)))*4 + 256
 	const maximumComputeMilliseconds uint64 = 120_000
 	for index := range candidates {
+		if !h.dependencies.Hub.Connected(candidates[index].MachineID) {
+			candidates[index].Capacity = 0
+			continue
+		}
 		if !router.ValidRate(candidates[index].InputPerMillion) || !router.ValidRate(candidates[index].OutputPerMillion) || !router.ValidRate(candidates[index].ComputePerSecond) {
 			candidates[index].MaximumCost = 0
 			continue
