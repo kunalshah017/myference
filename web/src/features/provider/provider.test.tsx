@@ -2,8 +2,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, expect, it } from 'vitest'
-import type { AccountOperations, OperationBackend, OperationsAPI, ReferencePrice } from '../../lib/api'
+import { afterEach, expect, it, vi } from 'vitest'
+import type { AccountOperations, OperationBackend, OperationsAPI, ProviderActivation, ReferencePrice } from '../../lib/api'
 import type { MarketWriter, OfferInput, SubmittedTransaction } from '../../lib/marketContract'
 import { ProviderConsole } from './ProviderConsole'
 import { Offers } from './Offers'
@@ -68,6 +68,22 @@ it('does not activate an unconfirmed offer version', async () => {
   await userEvent.click(screen.getByRole('button', { name: /publish offer/i }))
   expect(screen.queryByText(/activate published version/i)).not.toBeInTheDocument()
   expect(screen.getByRole('alert')).toHaveTextContent(/could not be confirmed from monad/i)
+})
+
+it('completes a terminal activation after every draft offer is published', async () => {
+  const client = new QueryClient()
+  client.setQueryData<ReferencePrice>(['reference-price'], { symbol:'MON', usd_per_mon:'0.02', source:'CoinGecko', updated_at:new Date().toISOString() })
+  const activation:ProviderActivation={id:'draft-1',status:'pending',offers:[{offer_id:'local-qwen',model:'qwen',kind:'ollama'}],expires_at:new Date(Date.now()+60_000).toISOString()}
+  const complete=vi.fn(async()=>undefined)
+  const transaction:SubmittedTransaction={hash:'0x1',confirm:async()=>({offerVersion:5})}
+  render(<QueryClientProvider client={client}><Offers offers={[]} backends={[]} activation={activation} onActivationComplete={complete} writer={{publishOffer:async()=>transaction} as unknown as MarketWriter} submit={async(action)=>{const submitted=await action();return submitted.confirm()}}/></QueryClientProvider>)
+  expect(screen.getByText(/terminal setup in progress/i)).toBeVisible()
+  expect(screen.getByRole('combobox',{name:/backend and model/i})).toHaveTextContent(/qwen/)
+  await userEvent.type(screen.getByLabelText(/input tokens/i),'0.1')
+  await userEvent.type(screen.getByLabelText(/output tokens/i),'0.1')
+  await userEvent.type(screen.getByLabelText(/compute time/i),'0.1')
+  await userEvent.click(screen.getByRole('button',{name:/publish offer/i}))
+  expect(complete).toHaveBeenCalledWith({'local-qwen':5})
 })
 
 it('never converts wallet values with an expired USD quote', async () => {

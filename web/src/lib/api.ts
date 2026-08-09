@@ -21,6 +21,8 @@ export type UsageRecord = { request_id: string; model: string; input_tokens: num
 export type ProviderSettlement = { request_id: string; model: string; input_tokens: number; output_tokens: number; compute_milliseconds: number; revenue_wei: string; transaction_hash: string; completed_at: string }
 export type SlashRecord = { request_id: string; amount_wei: string; block_number: number; transaction_hash: string; indexed_at: string }
 export type AccountAnalytics = { customer: AnalyticsTotals; provider: AnalyticsTotals; daily: AnalyticsDay[]; usage: UsageRecord[]; settlements: ProviderSettlement[]; slashes: SlashRecord[] }
+export type ActivationOffer = { offer_id: string; model: string; kind: string; capabilities?: string[]; metering_mode?: 'tokens_and_compute' | 'compute_only' }
+export type ProviderActivation = { id: string; status: 'pending' | 'confirmed'; offers: ActivationOffer[]; versions?: Record<string, number>; expires_at: string }
 
 export class APIError extends Error {
   readonly status: number
@@ -107,6 +109,19 @@ export class OperationsAPI {
   private readonly baseURL: string
   constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
   operations() { return requestJSON<AccountOperations>(`${this.baseURL}/api/account/operations`) }
+}
+
+export class ProviderActivationAPI {
+  private readonly baseURL: string
+  constructor(baseURL = import.meta.env.VITE_MYFERENCE_API_URL ?? '') { this.baseURL = baseURL }
+  get(id: string) { return requestJSON<ProviderActivation>(`${this.baseURL}/api/provider/activations/${encodeURIComponent(id)}`) }
+  async complete(id: string, versions: Record<string, number>) {
+    const response = await fetch(`${this.baseURL}/api/provider/activations/${encodeURIComponent(id)}/complete`, {
+      method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versions }),
+    })
+    if (!response.ok) throw await responseError(response)
+    return response.json() as Promise<ProviderActivation>
+  }
 }
 
 export class InferenceAPI {

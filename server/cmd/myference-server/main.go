@@ -101,6 +101,15 @@ func run() error {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
 	}, 30*time.Second)
+	browserAccount := func(request *http.Request) (string, error) {
+		session, err := authService.AuthenticateBrowserRequest(request)
+		return session.AccountID, err
+	}
+	activations := api.NewProviderActivation(api.NewActivationStore(time.Now), func(request *http.Request) (string, string, error) {
+		token := strings.TrimSpace(strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "))
+		principal, err := authService.AuthenticateMachine(request.Context(), token)
+		return principal.MachineID, principal.AccountID, err
+	}, browserAccount)
 	operations := api.NewOperations(repository, func(request *http.Request) (string, error) {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
@@ -117,7 +126,7 @@ func run() error {
 		return err
 	}
 	defer events.Close()
-	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, referencePrice, events), webOrigin)
+	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, referencePrice, activations, events), webOrigin)
 	server := &http.Server{Addr: listenAddress(os.Getenv), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
@@ -147,7 +156,7 @@ func run() error {
 	}
 }
 
-func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, analyticsHandler, referencePriceHandler, eventsHandler http.Handler) http.Handler {
+func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, marketplaceHandler, operationsHandler, analyticsHandler, referencePriceHandler, activationHandler, eventsHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok\n") })
 	mux.Handle("/relay", relayHandler)
@@ -157,6 +166,8 @@ func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, 
 	mux.Handle("/api/account/operations", operationsHandler)
 	mux.Handle("/api/account/analytics", analyticsHandler)
 	mux.Handle("/api/reference-price", referencePriceHandler)
+	mux.Handle("/api/provider/activations", activationHandler)
+	mux.Handle("/api/provider/activations/", activationHandler)
 	mux.Handle("/api/", marketplaceHandler)
 	mux.Handle("/events", eventsHandler)
 	return mux

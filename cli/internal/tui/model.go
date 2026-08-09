@@ -35,6 +35,7 @@ const (
 type Dependencies struct {
 	ListModels func(context.Context, string, string) ([]string, error)
 	Configure  func(context.Context, []host.Selection) error
+	Activate   func(context.Context, []host.Selection) error
 	Start      func(context.Context) error
 	Stop       func()
 	Snapshot   func() (provider.StatusSnapshot, error)
@@ -222,6 +223,9 @@ func (model Model) ViewText() string {
 		if len(selected) == 0 {
 			output.WriteString("Select at least one provider before starting.\n")
 		}
+		if model.busy && model.status != "" {
+			output.WriteString("\n" + model.status + "\n")
+		}
 		output.WriteString("\nEnter configure & start • Esc back\n")
 	case ScreenStatus:
 		state := "Stopped"
@@ -332,7 +336,7 @@ func (model Model) HandleKey(key string) (Model, tea.Cmd) {
 		if key == "esc" {
 			model.screen, model.cursor = ScreenProviders, 0
 		} else if key == "enter" && len(model.selections()) > 0 && !model.busy {
-			model.busy, model.status, model.err = true, "Configuring providers…", nil
+			model.busy, model.status, model.err = true, "Configuring providers and opening wallet activation…", nil
 			return model, model.startCommand()
 		}
 	case ScreenStatus:
@@ -450,6 +454,11 @@ func (model Model) startCommand() tea.Cmd {
 	return func() tea.Msg {
 		if model.dependencies.Configure != nil {
 			if err := model.dependencies.Configure(context.Background(), selections); err != nil {
+				return startedMsg{err: err}
+			}
+		}
+		if model.dependencies.Activate != nil {
+			if err := model.dependencies.Activate(context.Background(), selections); err != nil {
 				return startedMsg{err: err}
 			}
 		}

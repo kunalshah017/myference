@@ -38,7 +38,7 @@ curl -fsSL https://myference.xyz/install.sh | sh
 
 The Windows installer supports AMD64, atomically installs the CLI, Linux container proxy sidecar, and lifecycle script, and updates the user PATH. The macOS installer detects Intel or Apple Silicon and installs into `/usr/local/bin`. Manual release artifacts and `SHA256SUMS` remain available on GitHub; releases are not yet code-signed or notarized.
 
-Run `myference` with no arguments for the recommended full-screen hosting interface. It opens browser sign-in when needed, discovers every installed Ollama model plus Codex and Claude on `PATH`, supports OpenAI and OpenAI-compatible model catalogs, lets you select several providers, and shows live foreground status. Existing commands remain available for automation and recovery:
+Run `myference` with no arguments for the recommended full-screen hosting interface. It opens browser sign-in when needed, discovers every installed Ollama model plus Codex and Claude on `PATH`, supports OpenAI and OpenAI-compatible model catalogs, lets you select several providers, and shows live foreground status. At activation, it opens one short-lived browser page for wallet-backed pricing and publication, then resumes in the terminal automatically. Existing commands remain available for automation and recovery:
 
 ```text
 myference login --server https://api.myference.xyz

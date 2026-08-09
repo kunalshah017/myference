@@ -103,6 +103,21 @@ func TestStartPassesAllSelectionsAndSecrets(t *testing.T) {
 	}
 }
 
+func TestStartConfiguresActivatesThenConnects(t *testing.T) {
+	candidate := host.Candidate{ID: "ollama||qwen", Kind: "ollama", Name: "Ollama", Model: "qwen", State: host.StateReady}
+	var calls []string
+	model := NewModel(Dependencies{
+		Configure: func(context.Context, []host.Selection) error { calls = append(calls, "configure"); return nil },
+		Activate:  func(context.Context, []host.Selection) error { calls = append(calls, "activate"); return nil },
+		Start:     func(context.Context) error { calls = append(calls, "start"); return nil },
+	}, []host.Candidate{candidate})
+	model.selected[candidate.ID] = true
+	message := model.startCommand()().(startedMsg)
+	if message.err != nil || strings.Join(calls, ",") != "configure,activate,start" {
+		t.Fatalf("calls=%v err=%v", calls, message.err)
+	}
+}
+
 func TestLiveStatusRendersOfferHealthAndRequestCount(t *testing.T) {
 	model := NewModel(Dependencies{}, nil)
 	model.screen, model.running = ScreenStatus, true

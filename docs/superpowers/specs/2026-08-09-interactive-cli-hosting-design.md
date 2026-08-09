@@ -44,7 +44,7 @@ The Home screen shows account state, provider discovery progress, configured mod
 
 Manage Providers presents a searchable checklist. Discovered entries and existing configuration appear in one list, with configured entries preselected. Users may select multiple Ollama models and installed CLI providers together. Add OpenAI and Add OpenAI-compatible open focused setup forms. The interface never silently selects a new provider or begins serving without review.
 
-Review & Start shows each selected provider, model, evidence type, metering capability, activation state, and pricing profile. A compatible price profile may be applied to several models and then overridden individually. The user confirms the final set before configuration is committed or hosting starts.
+Review & Start shows each selected provider, model, evidence type, metering capability, and activation state. The user confirms the final set before configuration is committed or hosting starts. Pricing is entered in the short browser activation because those exact values become part of the wallet-signed publication transaction.
 
 Live Status shows connection state and one row per offer with provider, model, health, active and completed request counts, and latest actionable error. The user may enable, disable, or retry an entry independently. A failed backend does not stop healthy backends.
 
@@ -88,7 +88,7 @@ Removing a selection from the review does not delete an existing backend; it dis
 
 If no machine account exists, the TUI starts the existing device authorization flow, opens the verification page, displays the fallback URL and code, and waits for completion. After browser sign-in succeeds, control returns to the same TUI step.
 
-The TUI collects pricing profiles and sends an activation draft containing offer identity, model and capability hashes, metering dimensions, and integer-safe rates. Private wallet keys never enter the CLI. The browser is opened only to review and sign account, bond, signer-authorization, and immutable offer-publication actions. The TUI polls an authenticated activation-status endpoint and resumes automatically when the required actions are confirmed. Browser-open failure leaves a copyable URL and does not discard the draft.
+The TUI sends a short-lived activation draft containing offer identity, model, capabilities, and metering dimensions. Private wallet keys never enter the CLI. The browser is opened to enter integer-safe pricing and review and sign account, bond, signer-authorization, and immutable offer-publication actions. The TUI polls an authenticated activation-status endpoint and resumes automatically when the required actions are confirmed. Browser-open failure leaves a copyable URL and does not discard the draft.
 
 Ollama and OpenAI-compatible backends use token and compute rates when their usage response supports them. Command CLI backends default to compute-only pricing unless reliable token usage is available. The review screen disables unsupported price dimensions rather than accepting rates that cannot be measured.
 

@@ -148,6 +148,9 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer) erro
 			}, func(updated config.Config) error { return config.Save(path, updated) })
 			return err
 		},
+		Activate: func(parent context.Context, _ []hostservice.Selection) error {
+			return activateProviders(parent, path, environmentOr("MYFERENCE_WEB_URL", defaultWebURL), openBrowser, credential.Load)
+		},
 		Start: func(parent context.Context) error {
 			if serveCancel != nil {
 				return nil
@@ -186,6 +189,117 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer) erro
 		},
 	}
 	return hostingtui.Run(input, output, dependencies, candidates)
+}
+
+func activateProviders(ctx context.Context, path, webURL string, open func(string) error, loadCredential func(string, string) (string, error)) error {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	token, err := loadCredential(machineCredentialService, cfg.MachineID)
+	if err != nil {
+		return fmt.Errorf("load machine credential: %w", err)
+	}
+	client, err := account.NewClient(cfg.ServerURL, nil)
+	if err != nil {
+		return err
+	}
+	offers := activationOffers(cfg.Backends)
+	if len(offers) == 0 {
+		return errors.New("select at least one provider")
+	}
+	draft, err := client.CreateProviderActivation(ctx, token, offers)
+	if err != nil {
+		return fmt.Errorf("create provider activation: %w", err)
+	}
+	activationURL, err := providerActivationURL(webURL, draft.ID)
+	if err != nil {
+		return err
+	}
+	if open == nil || open(activationURL) != nil {
+		return fmt.Errorf("open this URL to publish the selected offers: %s", activationURL)
+	}
+	deadline := draft.Expires
+	if deadline.IsZero() {
+		deadline = time.Now().Add(15 * time.Minute)
+	}
+	pollContext, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		confirmed, pollErr := client.ProviderActivation(pollContext, token, draft.ID)
+		if pollErr == nil && confirmed.Status == account.ActivationConfirmed {
+			latest, loadErr := config.Load(path)
+			if loadErr != nil {
+				return loadErr
+			}
+			if err := applyActivationVersions(&latest, confirmed.Versions); err != nil {
+				return err
+			}
+			return config.Save(path, latest)
+		}
+		select {
+		case <-pollContext.Done():
+			return fmt.Errorf("provider activation was not completed: %w", pollContext.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func activationOffers(backends []config.Backend) []account.ActivationOffer {
+	offers := make([]account.ActivationOffer, 0, len(backends))
+	for _, item := range backends {
+		if item.Enabled {
+			commandAgent := item.Kind == "kimi" || ((item.Kind == "codex" || item.Kind == "claude") && item.Image != "")
+			capabilities := []string{"stream", "text"}
+			meteringMode := "tokens_and_compute"
+			if commandAgent {
+				capabilities = append(capabilities, "workspace")
+				meteringMode = "compute_only"
+			}
+			offers = append(offers, account.ActivationOffer{OfferID: item.Name, Model: item.Model, Kind: item.Kind, Capabilities: capabilities, MeteringMode: meteringMode})
+		}
+	}
+	return offers
+}
+
+func applyActivationVersions(cfg *config.Config, versions map[string]int) error {
+	for index := range cfg.Backends {
+		if !cfg.Backends[index].Enabled {
+			continue
+		}
+		version := versions[cfg.Backends[index].Name]
+		if version <= 0 {
+			return fmt.Errorf("activation did not publish offer %q", cfg.Backends[index].Name)
+		}
+		cfg.Backends[index].PriceVersion = uint64(version)
+	}
+	return nil
+}
+
+func providerActivationURL(webURL, activationID string) (string, error) {
+	parsed, err := url.Parse(webURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !isLoopbackWebURL(parsed)) {
+		return "", errors.New("web URL must use HTTPS except on loopback")
+	}
+	parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/host"
+	query := parsed.Query()
+	query.Set("activation", activationID)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func isLoopbackWebURL(parsed *url.URL) bool {
+	host := parsed.Hostname()
+	return parsed.Scheme == "http" && (host == "127.0.0.1" || host == "localhost" || host == "::1")
+}
+
+func environmentOr(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func mergeConfiguredCandidates(discovered []hostservice.Candidate, backends []config.Backend) []hostservice.Candidate {
