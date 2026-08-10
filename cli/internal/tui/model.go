@@ -250,6 +250,31 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return model, model.accountCommand()
 		}
 		return model, nil
+	case tea.PasteMsg:
+		var command tea.Cmd
+		switch model.screen {
+		case ScreenAPI:
+			switch model.apiStep {
+			case apiStepURL:
+				model.apiURL, command = model.apiURL.Update(message)
+			case apiStepKey:
+				model.apiKey, command = model.apiKey.Update(message)
+			case apiStepModel:
+				model.apiModel, command = model.apiModel.Update(message)
+			}
+		case ScreenPricing:
+			switch model.priceStep {
+			case priceStepInput:
+				model.priceInput, command = model.priceInput.Update(message)
+			case priceStepOutput:
+				model.priceOutput, command = model.priceOutput.Update(message)
+			case priceStepCompute:
+				model.priceCompute, command = model.priceCompute.Update(message)
+			}
+		case ScreenCollateralDeposit:
+			model.depositAmount, command = model.depositAmount.Update(message)
+		}
+		return model, command
 	case tea.KeyPressMsg:
 		key := message.String()
 		if model.screen == ScreenAPI && key != "enter" && key != "esc" && key != "ctrl+c" {

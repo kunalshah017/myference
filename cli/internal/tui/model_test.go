@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/kunalshah017/myference/cli/internal/account"
 	"github.com/kunalshah017/myference/cli/internal/config"
 	"github.com/kunalshah017/myference/cli/internal/host"
@@ -278,6 +279,21 @@ func TestAPISecretIsMaskedAndNeverRendered(t *testing.T) {
 	model.clearAPIForm()
 	if model.apiKey.Value() != "" {
 		t.Fatal("secret remains after clearing form")
+	}
+}
+
+func TestAPISecretAcceptsBracketedPasteWithoutRenderingIt(t *testing.T) {
+	model := NewModel(Dependencies{}, nil)
+	model.openAPIForm(false)
+
+	updated, _ := model.Update(tea.PasteMsg{Content: "sk-pasted-secret"})
+	model = updated.(Model)
+
+	if model.apiKey.Value() != "sk-pasted-secret" {
+		t.Fatalf("pasted API key was not accepted: %q", model.apiKey.Value())
+	}
+	if view := model.ViewText(); strings.Contains(view, "sk-pasted-secret") {
+		t.Fatalf("view rendered pasted API key: %q", view)
 	}
 }
 
