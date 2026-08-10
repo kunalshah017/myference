@@ -275,6 +275,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.depositAmount, command = model.depositAmount.Update(message)
 		}
 		return model, command
+	case tea.MouseWheelMsg:
+		switch message.Button {
+		case tea.MouseWheelUp:
+			return model.HandleKey("up")
+		case tea.MouseWheelDown:
+			return model.HandleKey("down")
+		}
+		return model, nil
 	case tea.KeyPressMsg:
 		key := message.String()
 		if model.screen == ScreenAPI && key != "enter" && key != "esc" && key != "ctrl+c" {
@@ -315,6 +323,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (model Model) View() tea.View {
 	view := tea.NewView(model.ViewText())
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	return view
 }
 

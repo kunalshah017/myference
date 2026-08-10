@@ -372,6 +372,29 @@ func TestProviderListScrollsWithCursor(t *testing.T) {
 	}
 }
 
+func TestViewEnablesMouseWheelEvents(t *testing.T) {
+	if mode := NewModel(Dependencies{}, nil).View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode=%v", mode)
+	}
+}
+
+func TestProviderListNavigatesWithMouseWheel(t *testing.T) {
+	model := NewModel(Dependencies{}, []host.Candidate{{ID: "first", Model: "first"}, {ID: "second", Model: "second"}})
+	model.screen = ScreenProviders
+
+	updated, _ := model.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	model = updated.(Model)
+	if model.cursor != 1 {
+		t.Fatalf("cursor after wheel down=%d", model.cursor)
+	}
+
+	updated, _ = model.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	model = updated.(Model)
+	if model.cursor != 0 {
+		t.Fatalf("cursor after wheel up=%d", model.cursor)
+	}
+}
+
 func TestStartPassesAllSelectionsAndSecrets(t *testing.T) {
 	candidate := host.Candidate{ID: "openai|https://api.openai.com|gpt", Kind: "openai", Name: "OpenAI", URL: "https://api.openai.com", Model: "gpt", State: host.StateReady}
 	var got []host.Selection
