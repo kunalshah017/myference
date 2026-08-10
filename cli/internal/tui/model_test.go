@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -335,6 +336,39 @@ func TestWindowSizeIsRemembered(t *testing.T) {
 	model = model.Resize(120, 40)
 	if model.width != 120 || model.height != 40 {
 		t.Fatalf("size=%dx%d", model.width, model.height)
+	}
+}
+
+func TestProviderListFitsTerminalHeight(t *testing.T) {
+	candidates := make([]host.Candidate, 20)
+	for index := range candidates {
+		candidates[index] = host.Candidate{ID: fmt.Sprintf("openai||model-%02d", index), Name: "OpenAI", Model: fmt.Sprintf("model-%02d", index)}
+	}
+	model := NewModel(Dependencies{}, candidates).Resize(80, 12)
+	model.screen = ScreenProviders
+
+	if lines := strings.Count(model.ViewText(), "\n"); lines > 12 {
+		t.Fatalf("provider screen uses %d lines at height 12", lines)
+	}
+}
+
+func TestProviderListScrollsWithCursor(t *testing.T) {
+	candidates := make([]host.Candidate, 20)
+	for index := range candidates {
+		candidates[index] = host.Candidate{ID: fmt.Sprintf("openai||model-%02d", index), Name: "OpenAI", Model: fmt.Sprintf("model-%02d", index)}
+	}
+	model := NewModel(Dependencies{}, candidates).Resize(80, 12)
+	model.screen = ScreenProviders
+	for range 8 {
+		model, _ = model.HandleKey("down")
+	}
+
+	view := model.ViewText()
+	if !strings.Contains(view, "model-08") || strings.Contains(view, "model-00") {
+		t.Fatalf("provider viewport did not follow cursor: %q", view)
+	}
+	if !strings.Contains(view, "9/22") {
+		t.Fatalf("provider viewport omitted position: %q", view)
 	}
 }
 

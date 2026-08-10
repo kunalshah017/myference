@@ -332,7 +332,25 @@ func (model Model) ViewText() string {
 		output.WriteString("\n↑/↓ navigate • Enter select • q quit\n")
 	case ScreenProviders:
 		output.WriteString("Discovered providers\n\n")
-		for index, candidate := range model.candidates {
+		total := len(model.candidates) + 2
+		first, last := 0, total
+		if model.height > 0 {
+			limit := max(1, model.height-7)
+			if total > limit {
+				first = min(max(0, model.cursor-limit+1), total-limit)
+				last = first + limit
+			}
+		}
+		for index := first; index < last; index++ {
+			if index == len(model.candidates) {
+				output.WriteString(menuRow(index == model.cursor, "+ Add OpenAI"))
+				continue
+			}
+			if index == len(model.candidates)+1 {
+				output.WriteString(menuRow(index == model.cursor, "+ Add OpenAI-compatible"))
+				continue
+			}
+			candidate := model.candidates[index]
 			checked := " "
 			if model.selected[candidate.ID] {
 				checked = "x"
@@ -343,9 +361,7 @@ func (model Model) ViewText() string {
 			}
 			output.WriteString(menuRow(index == model.cursor, label))
 		}
-		output.WriteString(menuRow(model.cursor == len(model.candidates), "+ Add OpenAI"))
-		output.WriteString(menuRow(model.cursor == len(model.candidates)+1, "+ Add OpenAI-compatible"))
-		output.WriteString("\nSpace toggle • Enter configure • r review • Esc back\n")
+		fmt.Fprintf(&output, "\n↑/↓ scroll • Space toggle • Enter configure • r review • Esc back • %d/%d\n", model.cursor+1, total)
 	case ScreenAPI:
 		if model.apiCompatible {
 			output.WriteString("Add OpenAI-compatible provider\n\n")
