@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -22,10 +22,18 @@ type chainConfig struct {
 }
 
 func loadChainConfig(getenv func(string) string) (chainConfig, error) {
-	config := chainConfig{RPCURL: strings.TrimSpace(getenv("MYFERENCE_RPC_URL")), ContractAddress: strings.TrimSpace(getenv("MYFERENCE_CONTRACT_ADDRESS")), SettlementPrivateKey: strings.TrimSpace(getenv("MYFERENCE_SETTLEMENT_PRIVATE_KEY"))}
+	settlementKey := strings.TrimSpace(getenv("MYFERENCE_SETTLEMENT_PRIVATE_KEY"))
+	if settlementKey == "" {
+		if path := strings.TrimSpace(getenv("MYFERENCE_SETTLEMENT_PRIVATE_KEY_FILE")); path != "" {
+			if raw, readErr := os.ReadFile(path); readErr == nil {
+				settlementKey = strings.TrimSpace(string(raw))
+			}
+		}
+	}
+	config := chainConfig{RPCURL: strings.TrimSpace(getenv("MYFERENCE_RPC_URL")), ContractAddress: strings.TrimSpace(getenv("MYFERENCE_CONTRACT_ADDRESS")), SettlementPrivateKey: settlementKey}
 	start, err := strconv.ParseUint(strings.TrimSpace(getenv("MYFERENCE_CHAIN_START_BLOCK")), 10, 64)
 	if config.RPCURL == "" || !common.IsHexAddress(config.ContractAddress) || common.HexToAddress(config.ContractAddress) == (common.Address{}) || config.SettlementPrivateKey == "" || err != nil {
-		return chainConfig{}, errors.New("MYFERENCE_RPC_URL, MYFERENCE_CONTRACT_ADDRESS, MYFERENCE_SETTLEMENT_PRIVATE_KEY, and MYFERENCE_CHAIN_START_BLOCK are required")
+		return chainConfig{}, errors.New("MYFERENCE_RPC_URL, MYFERENCE_CONTRACT_ADDRESS, MYFERENCE_SETTLEMENT_PRIVATE_KEY (or MYFERENCE_SETTLEMENT_PRIVATE_KEY_FILE), and MYFERENCE_CHAIN_START_BLOCK are required")
 	}
 	config.StartBlock = start
 	return config, nil
@@ -88,7 +96,7 @@ func (r *chainRuntime) Run(ctx context.Context) {
 				return
 			case <-ticker.C:
 				if err := r.indexer.Sync(ctx); err != nil && ctx.Err() == nil {
-					log.Printf("chain index retry: %v", err)
+					slog.Error("chain index retry", "error", err)
 				}
 			}
 		}
@@ -105,7 +113,7 @@ func (r *chainRuntime) Run(ctx context.Context) {
 				// unrelated providers' payouts in the same EVM transaction.
 				_, err := r.queue.SettleBatch(ctx, r.client, 1)
 				if err != nil && !errors.Is(err, chain.ErrNoSignedReceipts) && ctx.Err() == nil {
-					log.Printf("settlement batch retry: %v", err)
+					slog.Error("settlement batch retry", "error", err)
 				}
 			}
 		}

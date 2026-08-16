@@ -287,7 +287,7 @@ func waitFor(ctx context.Context, duration time.Duration) error {
 }
 
 func offerShape(item config.Backend) ([]string, string) {
-	commandAgent := item.Kind == "kimi" || ((item.Kind == "codex" || item.Kind == "claude") && item.Image != "")
+	commandAgent := item.Kind == "kimi" || item.Kind == "codex" || item.Kind == "claude"
 	if commandAgent {
 		return []string{"stream", "text", "workspace"}, "compute_only"
 	}

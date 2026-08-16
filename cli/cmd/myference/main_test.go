@@ -95,31 +95,14 @@ func TestCodexCommandArgumentsAreEphemeralReadOnlyAndNonInteractive(t *testing.T
 	}
 }
 
-func TestBackendAddReplacesOpenAIWithNativeCodex(t *testing.T) {
+func TestBackendAddRejectsCodexWithoutImage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	initial := config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1", Backends: []config.Backend{{Name: "codex-cli-terra", Kind: "openai", URL: "https://api.openai.com", Model: "gpt-5.6-terra", PriceVersion: 1, Enabled: true}}}
-	if err := config.Save(path, initial); err != nil {
+	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1"}); err != nil {
 		t.Fatal(err)
 	}
-	deleted := ""
-	dependencies := backendCommandDependencies{
-		SaveCredential:   func(string, string, string) error { t.Fatal("native Codex stored a credential"); return nil },
-		DeleteCredential: func(service, account string) error { deleted = service + ":" + account; return nil },
-		NewNativeCodex:   func(string, time.Duration) (backend.Backend, error) { return staticBackend{}, nil },
-	}
-	args := []string{"add", "--replace", "--config", path, "--name", "codex-cli-terra", "--kind", "codex", "--model", "gpt-5.6-terra", "--price-version", "1"}
-	if err := runBackendWithDependencies(args, &bytes.Buffer{}, dependencies); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(loaded.Backends) != 1 || loaded.Backends[0].Kind != "codex" || loaded.Backends[0].Image != "" || loaded.Backends[0].URL != "" || loaded.Backends[0].PriceVersion != 1 {
-		t.Fatalf("backends=%+v", loaded.Backends)
-	}
-	if deleted != "myference.backend:mach-1/codex-cli-terra" {
-		t.Fatalf("deleted=%q", deleted)
+	err := runBackendWithDependencies([]string{"add", "--config", path, "--name", "codex-cli-terra", "--kind", "codex", "--model", "gpt-5.6-terra"}, &bytes.Buffer{}, backendCommandDependencies{})
+	if err == nil || !strings.Contains(err.Error(), "pinned --image") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -151,13 +134,12 @@ func TestBackendReplacePreservesAttachmentOnlyForSameOfferShape(t *testing.T) {
 	}
 }
 
-func TestBackendAddNativeCodexRequiresReplaceForDuplicate(t *testing.T) {
+func TestBackendAddCodexRequiresReplaceForDuplicate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1", Backends: []config.Backend{{Name: "code", Kind: "openai", Model: "code", Enabled: true}}}); err != nil {
 		t.Fatal(err)
 	}
-	dependencies := backendCommandDependencies{NewNativeCodex: func(string, time.Duration) (backend.Backend, error) { return staticBackend{}, nil }}
-	err := runBackendWithDependencies([]string{"add", "--config", path, "--name", "code", "--kind", "codex", "--model", "code"}, &bytes.Buffer{}, dependencies)
+	err := runBackendWithDependencies([]string{"add", "--config", path, "--name", "code", "--kind", "codex", "--model", "code", "--image", "registry.example/codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--secret", "secret"}, &bytes.Buffer{}, backendCommandDependencies{})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("error=%v", err)
 	}
@@ -192,27 +174,6 @@ func TestBackendRemoveDeletesBackendAndCredential(t *testing.T) {
 	}
 }
 
-func TestBackendRemoveNativeCodexDoesNotDeleteCredential(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1", Backends: []config.Backend{{Name: "code", Kind: "codex", Model: "gpt-5.6-terra"}}}); err != nil {
-		t.Fatal(err)
-	}
-	dependencies := backendCommandDependencies{DeleteCredential: func(string, string) error {
-		t.Fatal("native Codex removal deleted a credential")
-		return nil
-	}}
-	if err := runBackendWithDependencies([]string{"remove", "--config", path, "--name", "code"}, &bytes.Buffer{}, dependencies); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(loaded.Backends) != 0 {
-		t.Fatalf("backends=%+v", loaded.Backends)
-	}
-}
-
 func TestBackendRemoveRequiresExistingName(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1"}); err != nil {
@@ -224,72 +185,23 @@ func TestBackendRemoveRequiresExistingName(t *testing.T) {
 	}
 }
 
-func TestConfiguredBackendSelectsNativeCodexWithoutCredential(t *testing.T) {
-	called := false
-	result, err := configuredBackendWithNative(config.Backend{Name: "code", Kind: "codex", Model: "gpt-5.6-terra"}, "machine", func(string, string) (string, error) {
-		t.Fatal("native Codex loaded a backend credential")
+func TestConfiguredBackendRejectsNativeCodexWithoutImage(t *testing.T) {
+	_, err := configuredBackend(config.Backend{Name: "code", Kind: "codex", Model: "gpt-5.6-terra"}, "machine", func(string, string) (string, error) {
+		t.Fatal("codex without an image must not load a credential")
 		return "", nil
-	}, func(model string, _ time.Duration) (backend.Backend, error) {
-		called = model == "gpt-5.6-terra"
-		return staticBackend{}, nil
 	})
-	if err != nil || result == nil || !called {
-		t.Fatalf("result=%v called=%v err=%v", result, called, err)
+	if err == nil || !strings.Contains(err.Error(), "pinned --image") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
-func TestConfiguredBackendSelectsNativeClaudeWithoutCredential(t *testing.T) {
-	called := false
-	result, err := configuredBackendWithNatives(config.Backend{Name: "claude", Kind: "claude", Model: "sonnet"}, "machine", func(string, string) (string, error) {
-		t.Fatal("native Claude loaded a backend credential")
+func TestConfiguredBackendRejectsNativeClaudeWithoutImage(t *testing.T) {
+	_, err := configuredBackend(config.Backend{Name: "claude", Kind: "claude", Model: "sonnet"}, "machine", func(string, string) (string, error) {
+		t.Fatal("claude without an image must not load a credential")
 		return "", nil
-	}, func(string, time.Duration) (backend.Backend, error) {
-		return staticBackend{}, nil
-	}, func(model string, _ time.Duration) (backend.Backend, error) {
-		called = model == "sonnet"
-		return staticBackend{}, nil
 	})
-	if err != nil || result == nil || !called {
-		t.Fatalf("result=%v called=%v err=%v", result, called, err)
-	}
-}
-
-func TestBackendAddNativeClaudeUsesExistingLogin(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := config.Save(path, config.Config{ServerURL: "https://api.myference.network", AccountID: "acct-1", MachineID: "mach-1"}); err != nil {
-		t.Fatal(err)
-	}
-	dependencies := backendCommandDependencies{
-		SaveCredential: func(string, string, string) error { t.Fatal("native Claude stored a credential"); return nil },
-		NewNativeClaude: func(model string, _ time.Duration) (backend.Backend, error) {
-			if model != "sonnet" {
-				t.Fatalf("model=%q", model)
-			}
-			return staticBackend{}, nil
-		},
-	}
-	if err := runBackendWithDependencies([]string{"add", "--config", path, "--name", "claude", "--kind", "claude", "--model", "sonnet"}, &bytes.Buffer{}, dependencies); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := config.Load(path)
-	if err != nil || len(loaded.Backends) != 1 || loaded.Backends[0].Image != "" || loaded.Backends[0].Kind != "claude" {
-		t.Fatalf("backends=%+v err=%v", loaded.Backends, err)
-	}
-}
-
-func TestCodexDenyToolCreatesMarkerWithoutEchoingInput(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "tool-attempted")
-	t.Setenv("MYFERENCE_CODEX_TOOL_MARKER", marker)
-	var output bytes.Buffer
-	secretInput := `{"tool_name":"Bash","tool_input":{"command":"echo secret-value"}}`
-	if err := runCodexDenyTool(strings.NewReader(secretInput), &output); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(output.String(), "secret-value") || !strings.Contains(output.String(), `"permissionDecision":"deny"`) {
-		t.Fatalf("output=%q", output.String())
+	if err == nil || !strings.Contains(err.Error(), "pinned --image") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -581,17 +493,6 @@ func TestOfferCapacityCarriesDeterministicMonadProofKeys(t *testing.T) {
 	}
 	if offer.EvidenceKind != "ollama_digest" || offer.EvidenceDigest != "sha256:runtime" || offer.MeteringMode != "tokens_and_compute" {
 		t.Fatalf("ollama runtime evidence missing: %+v", offer)
-	}
-	nativeCodex := offerCapacity(config.Backend{Name: "native-code", Kind: "codex", Model: "gpt-5.6-terra", PriceVersion: 1, Enabled: true}, backend.Model{Name: "gpt-5.6-terra"})
-	if !slices.Equal(nativeCodex.Capabilities, []string{"stream", "text"}) || nativeCodex.EvidenceKind != "upstream_model" || nativeCodex.EvidenceDigest != "gpt-5.6-terra" || nativeCodex.MeteringMode != "tokens_and_compute" {
-		t.Fatalf("native Codex evidence is invalid: %+v", nativeCodex)
-	}
-	if err := nativeCodex.Validate(); err != nil {
-		t.Fatalf("native Codex offer is invalid: %v", err)
-	}
-	nativeClaude := offerCapacity(config.Backend{Name: "native-claude", Kind: "claude", Model: "sonnet", PriceVersion: 1, Enabled: true}, backend.Model{Name: "sonnet"})
-	if !slices.Equal(nativeClaude.Capabilities, []string{"stream", "text"}) || nativeClaude.EvidenceKind != "upstream_model" || nativeClaude.MeteringMode != "tokens_and_compute" {
-		t.Fatalf("native Claude evidence is invalid: %+v", nativeClaude)
 	}
 	agent := offerCapacity(config.Backend{Name: "agent", Kind: "codex", Model: "codex", Image: "codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", PriceVersion: 1, Enabled: true}, backend.Model{Name: "codex"})
 	if !slices.Equal(agent.Capabilities, []string{"stream", "text", "workspace"}) {

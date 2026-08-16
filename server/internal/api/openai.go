@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,12 +16,14 @@ import (
 	"time"
 
 	v1 "github.com/kunalshah017/myference/protocol/v1"
+	"github.com/kunalshah017/myference/server/internal/ratelimit"
 	"github.com/kunalshah017/myference/server/internal/relay"
 	"github.com/kunalshah017/myference/server/internal/router"
 )
 
 type Principal struct {
 	AccountID      string
+	KeyID          string
 	SessionID      string
 	SessionBalance uint64
 }
@@ -41,14 +44,17 @@ type Reservation struct {
 }
 
 type Dependencies struct {
-	Hub        *relay.Hub
-	Authorize  func(context.Context, string, string, string, uint64) (Principal, error)
-	Candidates func(context.Context, string) ([]router.Candidate, error)
-	Reserve    func(context.Context, Reservation) error
-	Transition func(context.Context, string, string) error
-	Abort      func(context.Context, string, string) error
-	Persist    func(context.Context, Proposal) error
-	Now        func() time.Time
+	Hub         *relay.Hub
+	Authorize   func(context.Context, string, string, string, uint64) (Principal, error)
+	Candidates  func(context.Context, string) ([]router.Candidate, error)
+	Reserve     func(context.Context, Reservation) error
+	Transition  func(context.Context, string, string) error
+	Abort       func(context.Context, string, string) error
+	Persist     func(context.Context, Proposal) error
+	Now         func() time.Time
+	Logger      *slog.Logger
+	RateLimiter *ratelimit.Limiter     // per-key request throttle; nil disables it
+	Concurrency *ratelimit.Concurrency // per-key concurrent stream cap; nil disables it
 }
 
 type OpenAI struct {
@@ -59,6 +65,9 @@ type OpenAI struct {
 func NewOpenAI(dependencies Dependencies) http.Handler {
 	if dependencies.Now == nil {
 		dependencies.Now = time.Now
+	}
+	if dependencies.Logger == nil {
+		dependencies.Logger = slog.Default()
 	}
 	handler := &OpenAI{dependencies: dependencies, broker: newEventBroker(dependencies.Hub)}
 	return handler
@@ -87,14 +96,47 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 		http.Error(response, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	started := time.Now()
+	endpoint := authorizedEndpoint(request.Context(), request.URL.Path)
+	requestID, requestErr := randomID()
+	if requestErr != nil {
+		http.Error(response, "request creation failed", http.StatusInternalServerError)
+		return
+	}
+	response.Header().Set("X-Request-ID", requestID)
+	var (
+		status                                                                     = "error"
+		accessAccountID, accessKeyID, accessMachineID, accessOfferID, accessModel  string
+		accessMaximumSpend, accessInputTokens, accessOutputTokens, accessComputeMS uint64
+	)
+	defer func() {
+		h.dependencies.Logger.Info("inference",
+			"request_id", requestID,
+			"endpoint", endpoint,
+			"account_id", accessAccountID,
+			"key_id", accessKeyID,
+			"model", accessModel,
+			"machine_id", accessMachineID,
+			"offer_id", accessOfferID,
+			"max_spend_wei", accessMaximumSpend,
+			"input_tokens", accessInputTokens,
+			"output_tokens", accessOutputTokens,
+			"compute_ms", accessComputeMS,
+			"status", status,
+			"duration_ms", time.Since(started).Milliseconds(),
+			"user_agent", request.UserAgent(),
+		)
+	}()
 	request.Body = http.MaxBytesReader(response, request.Body, 1<<20)
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	var input chatRequest
 	if err := decoder.Decode(&input); err != nil || !input.Stream || strings.TrimSpace(input.Model) == "" || len(input.Messages) == 0 {
+		status = "bad_request"
 		http.Error(response, "invalid streaming chat request", http.StatusBadRequest)
 		return
 	}
+	accessModel = input.Model
 	maximumOutputTokens := input.MaxCompletionTokens
 	if maximumOutputTokens == 0 {
 		maximumOutputTokens = input.MaxTokens
@@ -103,22 +145,41 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 		maximumOutputTokens = 4096
 	}
 	if maximumOutputTokens > 1_000_000 || (input.MaxTokens != 0 && input.MaxCompletionTokens != 0) {
+		status = "bad_request"
 		http.Error(response, "invalid output token limit", http.StatusBadRequest)
 		return
 	}
 	maximumSpend, err := strconv.ParseUint(request.Header.Get("X-Myference-Max-Spend"), 10, 64)
 	if err != nil || maximumSpend == 0 {
+		status = "bad_request"
 		http.Error(response, "valid X-Myference-Max-Spend is required", http.StatusBadRequest)
 		return
 	}
+	accessMaximumSpend = maximumSpend
 	token := strings.TrimSpace(strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "))
-	principal, err := h.dependencies.Authorize(request.Context(), token, input.Model, authorizedEndpoint(request.Context(), request.URL.Path), maximumSpend)
+	principal, err := h.dependencies.Authorize(request.Context(), token, input.Model, endpoint, maximumSpend)
 	if err != nil {
+		status = "unauthorized"
 		http.Error(response, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	accessAccountID, accessKeyID = principal.AccountID, principal.KeyID
+	if h.dependencies.RateLimiter != nil && !h.dependencies.RateLimiter.Allow(principal.KeyID) {
+		status = "rate_limited"
+		http.Error(response, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+	if h.dependencies.Concurrency != nil {
+		if !h.dependencies.Concurrency.Acquire(principal.KeyID) {
+			status = "rate_limited"
+			http.Error(response, "too many concurrent requests", http.StatusTooManyRequests)
+			return
+		}
+		defer h.dependencies.Concurrency.Release(principal.KeyID)
+	}
 	candidates, err := h.dependencies.Candidates(request.Context(), input.Model)
 	if err != nil {
+		status = "unavailable"
 		http.Error(response, "routing unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -153,38 +214,40 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	selected, err := router.Select(router.Request{Model: input.Model, Capabilities: requiredCapabilities, MaximumSpend: maximumSpend, SessionBalance: principal.SessionBalance, PinMachineID: request.Header.Get("X-Myference-Machine")}, candidates)
 	if errors.Is(err, router.ErrInsufficientBudget) {
+		status = "budget"
 		http.Error(response, "request or session budget is below the required reservation", http.StatusPaymentRequired)
 		return
 	}
 	if err != nil || !h.dependencies.Hub.Connected(selected.MachineID) {
+		status = "no_provider"
 		http.Error(response, "no eligible provider", http.StatusServiceUnavailable)
 		return
 	}
-	requestID, err := randomID()
-	if err != nil {
-		http.Error(response, "request creation failed", http.StatusInternalServerError)
-		return
-	}
+	accessMachineID, accessOfferID = selected.MachineID, selected.OfferID
 	events := h.broker.register(requestID)
 	defer h.broker.unregister(requestID)
 	reservation := Reservation{RequestID: requestID, SessionID: principal.SessionID, AccountID: principal.AccountID, MachineID: selected.MachineID, OfferID: selected.OfferID, PriceVersion: selected.PriceVersion, MaximumSpend: selected.MaximumCost, MaximumInputTokens: maximumInputTokens, MaximumOutputTokens: maximumOutputTokens, MaximumComputeMilliseconds: maximumComputeMilliseconds}
 	if err := h.dependencies.Reserve(request.Context(), reservation); err != nil {
+		status = "budget"
 		http.Error(response, "reservation unavailable", http.StatusPaymentRequired)
 		return
 	}
 	envelope, err := v1.NewEnvelope("offer-"+requestID, v1.MessageJobOffer, &v1.JobOffer{RequestID: requestID, Model: input.Model, OfferID: selected.OfferID, Prompt: prompt, PriceVersion: selected.PriceVersion, MaximumSpend: selected.MaximumCost, MaximumOutputTokens: maximumOutputTokens, LeaseExpiresAt: h.dependencies.Now().Add(time.Duration(maximumComputeMilliseconds) * time.Millisecond), Workspace: input.Workspace})
 	if err != nil || h.dependencies.Hub.Send(selected.MachineID, envelope) != nil {
+		status = "provider_unavailable"
 		_ = h.dependencies.Abort(request.Context(), requestID, "failed")
 		http.Error(response, "provider unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if err := waitAccepted(request.Context(), events); err != nil {
+		status = "accept_timeout"
 		h.cancel(selected.MachineID, requestID)
 		_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 		http.Error(response, "provider did not accept", http.StatusGatewayTimeout)
 		return
 	}
 	if err := h.dependencies.Transition(request.Context(), requestID, "accepted"); err != nil {
+		status = "failed"
 		h.cancel(selected.MachineID, requestID)
 		_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 		http.Error(response, "reservation transition failed", http.StatusInternalServerError)
@@ -192,6 +255,7 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	flusher, ok := response.(http.Flusher)
 	if !ok {
+		status = "failed"
 		h.cancel(selected.MachineID, requestID)
 		_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 		http.Error(response, "streaming unavailable", http.StatusInternalServerError)
@@ -199,7 +263,6 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	response.Header().Set("Content-Type", "text/event-stream")
 	response.Header().Set("Cache-Control", "no-cache")
-	response.Header().Set("X-Request-ID", requestID)
 	response.WriteHeader(http.StatusOK)
 	flusher.Flush()
 	var output strings.Builder
@@ -209,14 +272,17 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 	for {
 		select {
 		case <-generationTimer.C:
+			status = "timeout"
 			h.cancel(selected.MachineID, requestID)
 			_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 			return
 		case <-request.Context().Done():
+			status = "cancelled"
 			h.cancel(selected.MachineID, requestID)
 			_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "cancelled")
 			return
 		case <-events.overflow:
+			status = "failed"
 			h.cancel(selected.MachineID, requestID)
 			_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 			return
@@ -226,6 +292,7 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 			}
 			var chunk v1.OutputChunk
 			if event.Envelope.DecodeBody(&chunk) != nil {
+				status = "failed"
 				h.cancel(selected.MachineID, requestID)
 				_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 				return
@@ -233,6 +300,7 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 			if chunk.Data != "" {
 				if !streaming {
 					if h.dependencies.Transition(request.Context(), requestID, "streaming") != nil {
+						status = "failed"
 						h.cancel(selected.MachineID, requestID)
 						_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 						return
@@ -241,6 +309,7 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 				}
 				output.WriteString(chunk.Data)
 				if writeSSE(response, map[string]any{"id": requestID, "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]string{"content": chunk.Data}}}}) != nil {
+					status = "failed"
 					h.cancel(selected.MachineID, requestID)
 					_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 					return
@@ -248,6 +317,7 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 				flusher.Flush()
 			}
 			if chunk.ErrorCode != "" {
+				status = "provider_error"
 				_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 				_ = writeSSE(response, map[string]any{"error": map[string]string{"type": "provider_error", "code": chunk.ErrorCode, "message": "provider execution failed"}})
 				fmt.Fprint(response, "data: [DONE]\n\n")
@@ -257,12 +327,14 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 			if chunk.Done {
 				if !streaming {
 					if h.dependencies.Transition(request.Context(), requestID, "streaming") != nil {
+						status = "failed"
 						_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 						return
 					}
 					streaming = true
 				}
 				if chunk.InputTokens > maximumInputTokens || chunk.OutputTokens > maximumOutputTokens || chunk.ComputeMilliseconds > maximumComputeMilliseconds {
+					status = "usage_limit"
 					h.cancel(selected.MachineID, requestID)
 					_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 					_ = writeSSE(response, map[string]any{"error": map[string]string{"type": "provider_error", "code": "usage_limit_exceeded", "message": "provider usage exceeded reserved limits"}})
@@ -270,11 +342,14 @@ func (h *OpenAI) ServeHTTP(response http.ResponseWriter, request *http.Request) 
 					flusher.Flush()
 					return
 				}
+				accessInputTokens, accessOutputTokens, accessComputeMS = chunk.InputTokens, chunk.OutputTokens, chunk.ComputeMilliseconds
 				proposal := Proposal{RequestID: requestID, SessionID: principal.SessionID, MachineID: selected.MachineID, OfferID: selected.OfferID, Model: input.Model, PriceVersion: selected.PriceVersion, InputTokens: chunk.InputTokens, OutputTokens: chunk.OutputTokens, ComputeMilliseconds: chunk.ComputeMilliseconds, InputHash: saltedHash(prompt), OutputHash: saltedHash(output.String()), CompletedAt: h.dependencies.Now()}
 				if h.dependencies.Persist(request.Context(), proposal) != nil {
+					status = "failed"
 					_ = h.dependencies.Abort(context.WithoutCancel(request.Context()), requestID, "failed")
 					return
 				}
+				status = "ok"
 				_ = writeSSE(response, map[string]any{"id": requestID, "object": "chat.completion.chunk", "model": input.Model, "choices": []any{map[string]any{"index": 0, "delta": map[string]string{}, "finish_reason": "stop"}}, "usage": map[string]uint64{"prompt_tokens": chunk.InputTokens, "completion_tokens": chunk.OutputTokens, "total_tokens": chunk.InputTokens + chunk.OutputTokens}})
 				fmt.Fprint(response, "data: [DONE]\n\n")
 				flusher.Flush()

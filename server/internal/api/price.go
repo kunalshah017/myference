@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"strings"
@@ -75,7 +75,7 @@ func (h *referencePriceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			h.cached = fetched
 			h.mu.Unlock()
 		} else {
-			log.Printf("reference price refresh failed: %v", err)
+			slog.Error("reference price refresh failed", "error", err)
 		}
 		h.mu.Lock()
 		h.fetchedAt, h.refreshing = now, false

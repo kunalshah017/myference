@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	v1 "github.com/kunalshah017/myference/protocol/v1"
 	"github.com/kunalshah017/myference/server/internal/api"
 	"github.com/kunalshah017/myference/server/internal/auth"
+	"github.com/kunalshah017/myference/server/internal/ratelimit"
 	"github.com/kunalshah017/myference/server/internal/realtime"
 	"github.com/kunalshah017/myference/server/internal/relay"
 	"github.com/kunalshah017/myference/server/internal/router"
@@ -22,8 +24,10 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("server exited", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -72,7 +76,7 @@ func run() error {
 				return api.Principal{}, err
 			}
 			sessionID, balance, err := repository.OpenSession(ctx, principal.AccountID)
-			return api.Principal{AccountID: principal.AccountID, SessionID: sessionID, SessionBalance: balance}, err
+			return api.Principal{AccountID: principal.AccountID, KeyID: principal.KeyID, SessionID: sessionID, SessionBalance: balance}, err
 		},
 		Candidates: func(ctx context.Context, model string) ([]router.Candidate, error) {
 			return repository.RoutingCandidates(ctx, model)
@@ -85,6 +89,8 @@ func run() error {
 		Persist: func(ctx context.Context, proposal api.Proposal) error {
 			return chainState.coordinator.Complete(ctx, store.ReceiptProposal{RequestID: proposal.RequestID, SessionID: proposal.SessionID, MachineID: proposal.MachineID, OfferID: proposal.OfferID, Model: proposal.Model, PriceVersion: proposal.PriceVersion, InputTokens: proposal.InputTokens, OutputTokens: proposal.OutputTokens, ComputeMilliseconds: proposal.ComputeMilliseconds, InputHash: proposal.InputHash, OutputHash: proposal.OutputHash, CompletedAt: proposal.CompletedAt})
 		},
+		RateLimiter: ratelimit.New(3, 10),
+		Concurrency: ratelimit.NewConcurrency(4),
 	})
 	anthropic := api.NewAnthropic(openAI)
 	webOrigin := envOr("MYFERENCE_WEB_ORIGIN", "http://127.0.0.1:5173")
@@ -97,6 +103,7 @@ func run() error {
 		VerificationURL: strings.TrimSuffix(webOrigin, "/") + "/devices",
 		ContractAddress: chainConfiguration.ContractAddress,
 	})
+	authHTTP = rateLimitByIP(authHTTP, ratelimit.New(1, 60))
 	marketplace := api.NewMarketplace(repository, func(request *http.Request) (string, error) {
 		session, err := authService.AuthenticateBrowserRequest(request)
 		return session.AccountID, err
@@ -144,7 +151,7 @@ func run() error {
 		return err
 	}
 	defer events.Close()
-	handler := allowWebOrigin(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, referencePrice, providerAccount, providerActions, events), webOrigin)
+	handler := allowWebOrigin(rateLimitByIP(newRootHandler(hub, openAI, anthropic, authHTTP, marketplace, operations, analytics, referencePrice, providerAccount, providerActions, events), ratelimit.New(20, 200)), webOrigin)
 	server := &http.Server{Addr: listenAddress(os.Getenv), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	certificate, key := os.Getenv("MYFERENCE_TLS_CERT"), os.Getenv("MYFERENCE_TLS_KEY")
@@ -191,6 +198,26 @@ func newRootHandler(relayHandler, openAIHandler, anthropicHandler, authHandler, 
 	mux.Handle("/api/", marketplaceHandler)
 	mux.Handle("/events", eventsHandler)
 	return mux
+}
+
+func rateLimitByIP(next http.Handler, limiter *ratelimit.Limiter) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !limiter.Allow(clientIP(r)) {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func clientIP(r *http.Request) string {
+	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); forwarded != "" {
+		return forwarded
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func allowWebOrigin(next http.Handler, origin string) http.Handler {

@@ -1147,7 +1147,7 @@ func visibleRequests(requests []provider.RequestStatus, limit int) []provider.Re
 }
 
 func backendComputeOnly(item config.Backend) bool {
-	return item.Kind == "kimi" || ((item.Kind == "codex" || item.Kind == "claude") && item.Image != "")
+	return item.Kind == "kimi" || item.Kind == "codex" || item.Kind == "claude"
 }
 
 func formatWei(value string) string {

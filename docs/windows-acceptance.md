@@ -11,7 +11,7 @@ Run this checklist on the exact release commit and a physical Windows 11 AMD64 l
 
 ## Shared CLI hosting flow
 
-- [ ] Running `myference` opens the provider terminal UI and discovers installed Ollama models plus available native Codex and Claude CLIs.
+- [ ] Running `myference` opens the provider terminal UI and discovers installed Ollama models.
 - [ ] OpenAI and OpenAI-compatible providers can be configured through the TUI without exposing their credentials in configuration, status, or logs.
 - [ ] Collateral deposit and exit actions open the exact browser wallet approval, and the terminal resumes only after indexed chain confirmation.
 - [ ] A new offer can be priced, published, synchronized, and made routable entirely from the CLI.
@@ -24,14 +24,6 @@ Run this checklist on the exact release commit and a physical Windows 11 AMD64 l
 - [ ] `backend remove --name <one>` permanently deletes only that configured offer and removes its vault credential when applicable.
 - [ ] A failed model preload or invalid live config preserves the last good advertised capacity.
 - [ ] Relay interruption reconnects without losing accumulated local status counters.
-
-## Native Codex model-only provider
-
-- [ ] With `codex` installed and logged in, `backend add --kind codex --name codex-cli-terra --model gpt-5.6-terra` succeeds without Docker, `--image`, `--secret`, or an OpenAI API key.
-- [ ] A real native Codex request returns only final model text and reports nonzero input, output, and compute usage.
-- [ ] A prompt demanding shell, file, MCP, web, app, plugin, skill, or agent use fails locally and returns no tool output to the client.
-- [ ] The native Codex process uses the private provider home and an empty disposable job directory; normal user projects, global skills, plugins, MCP servers, apps, and rules are not loaded.
-- [ ] Replacing an existing offer with `backend add --replace --kind codex` preserves its name and price version and removes only that offer's obsolete backend credential.
 
 ## Automatic Windows host preparation and recovery
 

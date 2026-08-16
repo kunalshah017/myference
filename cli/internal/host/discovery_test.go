@@ -22,7 +22,7 @@ func TestDiscoverKeepsIndependentResults(t *testing.T) {
 			return Result{Source: "ollama", Candidates: []Candidate{{Kind: "ollama", Model: "qwen"}}}
 		}),
 		detectorFunc(func(context.Context) Result {
-			return Result{Source: "claude", Err: errors.New("login required")}
+			return Result{Source: "openai", Err: errors.New("catalog unavailable")}
 		}),
 	})
 	var got []Result
@@ -33,39 +33,8 @@ func TestDiscoverKeepsIndependentResults(t *testing.T) {
 		t.Fatalf("results=%+v", got)
 	}
 	slices.SortFunc(got, func(a, b Result) int { return strings.Compare(a.Source, b.Source) })
-	if got[0].Source != "claude" || got[0].Err == nil || len(got[1].Candidates) != 1 {
+	if got[0].Source != "ollama" || got[1].Err == nil || len(got[0].Candidates) != 1 {
 		t.Fatalf("results=%+v", got)
-	}
-}
-
-func TestCLIDetectorOffersPresetsWhenExecutableExists(t *testing.T) {
-	detector := CLIDetector{
-		Kind:       "claude",
-		Executable: "claude",
-		Presets:    []string{"sonnet", "opus"},
-		LookPath: func(name string) (string, error) {
-			if name != "claude" {
-				t.Fatalf("name=%q", name)
-			}
-			return "/bin/claude", nil
-		},
-	}
-	result := detector.Detect(context.Background())
-	if result.Err != nil || len(result.Candidates) != 2 || result.Candidates[0].State != StateReady {
-		t.Fatalf("result=%+v", result)
-	}
-	if result.Candidates[0].ID == result.Candidates[1].ID || result.Candidates[0].Kind != "claude" {
-		t.Fatalf("candidates=%+v", result.Candidates)
-	}
-}
-
-func TestCLIDetectorReportsMissingExecutable(t *testing.T) {
-	detector := CLIDetector{Kind: "codex", Executable: "codex", LookPath: func(string) (string, error) {
-		return "", errors.New("missing")
-	}}
-	result := detector.Detect(context.Background())
-	if result.Err == nil || result.Source != "codex" || !strings.Contains(result.Err.Error(), "not installed") {
-		t.Fatalf("result=%+v", result)
 	}
 }
 

@@ -13,8 +13,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/kunalshah017/myference/server/internal/chain/bindings"
+	"github.com/kunalshah017/myference/server/internal/pg"
 )
 
 type IndexerConfig struct {
@@ -52,14 +52,9 @@ func OpenIndexer(ctx context.Context, config IndexerConfig) (*Indexer, error) {
 		eth.Close()
 		return nil, err
 	}
-	db, err := sql.Open("pgx", config.DatabaseURL)
+	db, err := pg.Open(ctx, config.DatabaseURL)
 	if err != nil {
 		eth.Close()
-		return nil, err
-	}
-	if err := db.PingContext(ctx); err != nil {
-		eth.Close()
-		db.Close()
 		return nil, err
 	}
 	binding, err := bindings.NewMyferenceMarket(config.Contract, eth)

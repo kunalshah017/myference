@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -113,34 +112,9 @@ func (detector OllamaDetector) Detect(parent context.Context) Result {
 	return Result{Source: "ollama", Candidates: candidates}
 }
 
-type CLIDetector struct {
-	Kind, Executable string
-	Presets          []string
-	LookPath         func(string) (string, error)
-}
-
-func (detector CLIDetector) Detect(context.Context) Result {
-	lookup := detector.LookPath
-	if lookup == nil {
-		lookup = exec.LookPath
-	}
-	if _, err := lookup(detector.Executable); err != nil {
-		return Result{Source: detector.Kind, Err: fmt.Errorf("%s CLI is not installed or not available on PATH", title(detector.Kind))}
-	}
-	candidates := make([]Candidate, 0, len(detector.Presets))
-	for _, model := range detector.Presets {
-		candidate := Candidate{Kind: detector.Kind, Name: title(detector.Kind), Model: model, State: StateReady, Hint: "Uses the existing CLI login"}
-		candidate.ID = StableID(candidate)
-		candidates = append(candidates, candidate)
-	}
-	return Result{Source: detector.Kind, Candidates: candidates}
-}
-
 func DefaultDetectors(endpoint string, client *http.Client) []Detector {
 	return []Detector{
 		OllamaDetector{Endpoint: endpoint, Client: client},
-		CLIDetector{Kind: "codex", Executable: "codex", Presets: []string{"gpt-5.6-terra", "gpt-5.6-sol"}},
-		CLIDetector{Kind: "claude", Executable: "claude", Presets: []string{"sonnet", "opus", "haiku"}},
 	}
 }
 
@@ -171,11 +145,4 @@ func ListAPIModels(ctx context.Context, baseURL, secret string, client *http.Cli
 
 func StableID(candidate Candidate) string {
 	return strings.Join([]string{strings.ToLower(strings.TrimSpace(candidate.Kind)), strings.TrimRight(strings.ToLower(strings.TrimSpace(candidate.URL)), "/"), strings.TrimSpace(candidate.Model)}, "|")
-}
-
-func title(value string) string {
-	if value == "" {
-		return ""
-	}
-	return strings.ToUpper(value[:1]) + value[1:]
 }

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/kunalshah017/myference/server/internal/pg"
 )
 
 var (
@@ -57,12 +57,8 @@ type APIKeyPrincipal struct {
 }
 
 func Open(ctx context.Context, databaseURL string) (*Service, error) {
-	db, err := sql.Open("pgx", databaseURL)
+	db, err := pg.Open(ctx, databaseURL)
 	if err != nil {
-		return nil, err
-	}
-	if err := db.PingContext(ctx); err != nil {
-		db.Close()
 		return nil, err
 	}
 	return &Service{db: db, now: time.Now}, nil

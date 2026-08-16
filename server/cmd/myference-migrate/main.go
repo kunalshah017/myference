@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,8 +13,10 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("migration failed", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -42,7 +44,7 @@ func run() error {
 		if err := repository.ApplyMigration(ctx, path); err != nil {
 			return fmt.Errorf("apply %s: %w", filepath.Base(path), err)
 		}
-		log.Printf("applied %s", filepath.Base(path))
+		slog.Info("applied migration", "file", filepath.Base(path))
 	}
 	return nil
 }
